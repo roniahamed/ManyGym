@@ -1,0 +1,131 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: manygym_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-manygym_db}
+      POSTGRES_USER: ${POSTGRES_USER:-manygym_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-manygym_dev_pass_123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-manygym_user} -d ${POSTGRES_DB:-manygym_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - manygym_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: manygym_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT_HOST:-6385}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - manygym_network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manygym_web
+    restart: unless-stopped
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+      - static_volume:/app/static_collected
+      - media_volume:/app/media
+    ports:
+      - "${WEB_PORT:-8002}:8000"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - manygym_network
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manygym_celery_worker
+    restart: unless-stopped
+    command: celery -A config worker --loglevel=info
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - manygym_network
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manygym_celery_beat
+    restart: unless-stopped
+    command: celery -A config beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - manygym_network
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: manygym_nginx
+    restart: unless-stopped
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_volume:/app/static_collected:ro
+      - media_volume:/app/media:ro
+    ports:
+      - "${NGINX_PORT:-8090}:80"
+    depends_on:
+      web:
+        condition: service_started
+    networks:
+      - manygym_network
+
+volumes:
+  postgres_data:
+    name: manygym_postgres_data
+  redis_data:
+    name: manygym_redis_data
+  static_volume:
+    name: manygym_static_volume
+  media_volume:
+    name: manygym_media_volume
+
+networks:
+  manygym_network:
+    name: manygym_network
+    driver: bridge

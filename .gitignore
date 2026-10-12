@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.env/
+.venv/
+env/
+venv/
+ENV/
+
+# Environment Variables
+.env
+!.env.example
+!.env.dev
+!.env.prod
+
+# Database / SQLite
+*.sqlite3
+*.db
+
+# Media & Static
+media/
+static_collected/
+
+# Celery Beat
+celerybeat-schedule*
+
+# Pytest / Coverage
+.cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

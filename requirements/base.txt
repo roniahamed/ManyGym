@@ -1,0 +1,24 @@
+# Django & Core
+Django>=5.1.2,<5.2
+djangorestframework>=3.15.2
+drf-spectacular>=0.28.0
+django-environ>=0.11.2
+django-cors-headers>=4.6.0
+djangorestframework-simplejwt>=5.3.1
+
+# Database
+psycopg[binary]>=3.2.3
+
+# Redis & Cache
+redis>=5.2.0
+
+# Celery & Asynchronous Tasks
+celery[redis]>=5.4.0
+django-celery-beat>=2.7.0
+
+# Media & File Processing
+Pillow>=11.0.0
+python-magic>=0.4.27
+
+# Production Server
+gunicorn>=23.0.0

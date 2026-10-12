@@ -1,0 +1,19 @@
+services:
+  web:
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 120
+    env_file:
+      - .env.prod
+
+  celery_worker:
+    command: celery -A config worker --loglevel=info --concurrency=4
+    env_file:
+      - .env.prod
+
+  celery_beat:
+    env_file:
+      - .env.prod
+
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"

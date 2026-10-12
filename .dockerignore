@@ -1,0 +1,22 @@
+.git
+.gitignore
+.dockerignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+media/
+static_collected/
+celerybeat-schedule*
+.idea/
+.vscode/
+*.md
+System docs/
+system requirement docs/

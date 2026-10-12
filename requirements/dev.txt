@@ -1,0 +1,9 @@
+-r base.txt
+
+# Testing & Quality
+pytest>=8.3.3
+pytest-django>=4.9.0
+pytest-cov>=6.0.0
+flake8>=7.1.1
+black>=24.10.0
+ipython>=8.29.0
