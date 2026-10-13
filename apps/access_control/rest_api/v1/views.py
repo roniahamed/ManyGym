@@ -39,12 +39,14 @@ from common.pagination import StandardResultsSetPagination
 
 def resolve_request_gym(request) -> Gym:
     """Helper to determine the target gym from active context or query param."""
-    gym_id = getattr(request, "gym_id", None) or request.query_params.get("gym_id")
+    gym_id = request.query_params.get("gym_id") or getattr(request, "gym_id", None)
     if not gym_id:
         raise DomainValidationError("An active Gym context token or 'gym_id' parameter is required for this operation.")
     try:
+        import uuid
+        uuid.UUID(str(gym_id))
         gym = Gym.objects.select_related("owner_user").get(id=gym_id)
-    except (Gym.DoesNotExist, ValueError):
+    except Exception:
         raise ResourceNotFoundError("Gym not found.")
     return gym
 
@@ -272,7 +274,7 @@ Updates custom role metadata (name, description) and re-assigns selected permiss
 
         if role.gym:
             if role.gym.owner_user_id != request.user.id and not request.user.is_superuser:
-                if "people_roles:manage" not in getattr(request, "scopes", []):
+                if str(getattr(request, "gym_id", "")) != str(role.gym.id) or "people_roles:manage" not in getattr(request, "scopes", []):
                     raise PermissionDeniedError("Permission denied.")
 
         serializer = UpdateCustomRoleSerializer(data=request.data)
@@ -312,7 +314,7 @@ Deletes an unused custom role from the gym.
 
         if role.gym:
             if role.gym.owner_user_id != request.user.id and not request.user.is_superuser:
-                if "people_roles:manage" not in getattr(request, "scopes", []):
+                if str(getattr(request, "gym_id", "")) != str(role.gym.id) or "people_roles:manage" not in getattr(request, "scopes", []):
                     raise PermissionDeniedError("Permission denied.")
 
         delete_custom_role(role)
@@ -365,6 +367,11 @@ Retrieves paginated directory of all staff members assigned to the active gym wi
     )
     def get(self, request):
         gym = resolve_request_gym(request)
+        if gym.owner_user_id != request.user.id and not request.user.is_superuser:
+            is_staff = GymStaffAssignment.objects.filter(user=request.user, gym=gym, status="active").exists()
+            if not is_staff and str(getattr(request, "gym_id", "")) != str(gym.id):
+                raise PermissionDeniedError("You do not have access to view staff for this gym.")
+
         staff = list_gym_staff(gym_id=str(gym.id))
 
         if request.query_params.get("all") == "true" or request.query_params.get("paginate") == "false":
@@ -468,7 +475,7 @@ When `inactive`, the staff member can no longer switch context to this gym or ex
             raise ResourceNotFoundError("Staff assignment not found.")
 
         if assignment.gym.owner_user_id != request.user.id and not request.user.is_superuser:
-            if "people_roles:manage" not in getattr(request, "scopes", []):
+            if str(getattr(request, "gym_id", "")) != str(assignment.gym.id) or "people_roles:manage" not in getattr(request, "scopes", []):
                 raise PermissionDeniedError("Permission denied.")
 
         serializer = UpdateStaffStatusSerializer(data=request.data)
@@ -504,7 +511,7 @@ Permanently removes a staff member assignment from the gym.
             raise ResourceNotFoundError("Staff assignment not found.")
 
         if assignment.gym.owner_user_id != request.user.id and not request.user.is_superuser:
-            if "people_roles:manage" not in getattr(request, "scopes", []):
+            if str(getattr(request, "gym_id", "")) != str(assignment.gym.id) or "people_roles:manage" not in getattr(request, "scopes", []):
                 raise PermissionDeniedError("Permission denied.")
 
         remove_staff_assignment(assignment)

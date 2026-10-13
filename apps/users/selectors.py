@@ -9,7 +9,12 @@ def get_user_by_email(email: str) -> Optional[User]:
 
 def get_user_by_id(user_id) -> Optional[User]:
     """Retrieve user with profile by UUID using select_related."""
-    return User.objects.select_related("profile").filter(id=user_id).first()
+    try:
+        import uuid
+        uuid.UUID(str(user_id))
+        return User.objects.select_related("profile").filter(id=user_id).first()
+    except Exception:
+        return None
 
 
 def get_user_profile(user: User) -> UserProfile:

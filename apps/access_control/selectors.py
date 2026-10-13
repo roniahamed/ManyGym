@@ -35,7 +35,12 @@ def list_permissions_by_topic() -> Dict[str, List[Dict[str, Any]]]:
 
 def models_q_gym(gym_id: str):
     from django.db.models import Q
-    return Q(gym__isnull=True) | Q(gym_id=gym_id)
+    import uuid
+    try:
+        uuid_obj = uuid.UUID(str(gym_id))
+        return Q(gym__isnull=True) | Q(gym_id=uuid_obj)
+    except (ValueError, TypeError, AttributeError):
+        return Q(gym__isnull=True)
 
 
 def list_gym_roles(gym_id: str = None):

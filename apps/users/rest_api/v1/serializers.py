@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from apps.users.models import User, UserProfile
+from common.serializers import StrictCharField
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -40,15 +41,15 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserRegistrationSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
-    password = serializers.CharField(write_only=True, required=True, min_length=8)
-    first_name = serializers.CharField(required=True, max_length=100)
-    last_name = serializers.CharField(required=True, max_length=100)
-    phone = serializers.CharField(required=False, allow_blank=True, max_length=50)
+    password = StrictCharField(write_only=True, required=True, min_length=8)
+    first_name = StrictCharField(required=True, max_length=100)
+    last_name = StrictCharField(required=True, max_length=100)
+    phone = StrictCharField(required=False, allow_blank=True, max_length=50)
 
 
 class VerifySignupOTPSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
-    otp_code = serializers.CharField(required=True, min_length=6, max_length=6)
+    otp_code = StrictCharField(required=True, min_length=6, max_length=6)
 
 
 class ResendOTPSerializer(serializers.Serializer):
@@ -61,31 +62,32 @@ class ForgotPasswordSerializer(serializers.Serializer):
 
 class VerifyResetOTPSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
-    otp_code = serializers.CharField(required=True, min_length=6, max_length=6)
+    otp_code = StrictCharField(required=True, min_length=6, max_length=6)
 
 
 class ResetPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
-    otp_code = serializers.CharField(required=True, min_length=6, max_length=6)
-    new_password = serializers.CharField(required=True, min_length=8)
+    otp_code = StrictCharField(required=True, min_length=6, max_length=6)
+    new_password = StrictCharField(required=True, min_length=8)
 
 
 class ChangePasswordSerializer(serializers.Serializer):
-    current_password = serializers.CharField(required=True)
-    new_password = serializers.CharField(required=True, min_length=8)
+    current_password = StrictCharField(required=True)
+    new_password = StrictCharField(required=True, min_length=8)
 
 
 class UpdateProfileSerializer(serializers.Serializer):
-    first_name = serializers.CharField(required=False, max_length=100)
-    last_name = serializers.CharField(required=False, max_length=100)
-    phone = serializers.CharField(required=False, allow_blank=True, max_length=50)
-    avatar_url = serializers.CharField(required=False, allow_blank=True, max_length=1000)
-    address = serializers.CharField(required=False, allow_blank=True, max_length=500)
-    city = serializers.CharField(required=False, allow_blank=True, max_length=100)
-    country = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    first_name = StrictCharField(required=False, max_length=100)
+    last_name = StrictCharField(required=False, max_length=100)
+    phone = StrictCharField(required=False, allow_blank=True, max_length=50)
+    avatar_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
+    address = StrictCharField(required=False, allow_blank=True, max_length=500)
+    city = StrictCharField(required=False, allow_blank=True, max_length=100)
+    country = StrictCharField(required=False, allow_blank=True, max_length=100)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
-    sex = serializers.CharField(required=False, allow_blank=True, max_length=20)
-    nationality = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    sex = StrictCharField(required=False, allow_blank=True, max_length=20)
+    nationality = StrictCharField(required=False, allow_blank=True, max_length=100)
+
 
 
 class RegisterResponseSerializer(serializers.Serializer):

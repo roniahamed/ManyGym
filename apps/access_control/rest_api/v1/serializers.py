@@ -2,6 +2,7 @@ from rest_framework import serializers
 from apps.access_control.models import Permission, Role, GymStaffAssignment
 from apps.users.rest_api.v1.serializers import UserSerializer
 from common.enums import StaffStatus
+from common.serializers import StrictCharField, StrictUUIDField
 
 
 class PermissionSerializer(serializers.ModelSerializer):
@@ -29,20 +30,20 @@ class RoleSerializer(serializers.ModelSerializer):
 
 
 class CreateCustomRoleSerializer(serializers.Serializer):
-    name = serializers.CharField(required=True, max_length=100)
-    description = serializers.CharField(required=False, allow_blank=True)
+    name = StrictCharField(required=True, max_length=100)
+    description = StrictCharField(required=False, allow_blank=True)
     permission_ids = serializers.ListField(
-        child=serializers.UUIDField(),
+        child=StrictUUIDField(),
         required=False,
         default=list,
     )
 
 
 class UpdateCustomRoleSerializer(serializers.Serializer):
-    name = serializers.CharField(required=False, max_length=100)
-    description = serializers.CharField(required=False, allow_blank=True)
+    name = StrictCharField(required=False, max_length=100)
+    description = StrictCharField(required=False, allow_blank=True)
     permission_ids = serializers.ListField(
-        child=serializers.UUIDField(),
+        child=StrictUUIDField(),
         required=False,
     )
 
@@ -67,8 +68,9 @@ class StaffAssignmentSerializer(serializers.ModelSerializer):
 
 class InviteStaffSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
-    role_id = serializers.UUIDField(required=True)
+    role_id = StrictUUIDField(required=True)
 
 
 class UpdateStaffStatusSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=StaffStatus.choices, required=True)
+

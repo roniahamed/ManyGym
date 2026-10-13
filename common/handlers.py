@@ -40,6 +40,23 @@ def custom_exception_handler(exc, context):
             status=http_status,
         )
 
+    # Handle Django core ValidationError if not caught
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    if isinstance(exc, DjangoValidationError):
+        details = (
+            exc.message_dict
+            if hasattr(exc, "message_dict")
+            else {"non_field_errors": exc.messages if hasattr(exc, "messages") else [str(exc)]}
+        )
+        return Response(
+            {
+                "code": "VALIDATION_ERROR",
+                "message": "Validation failed for the submitted data.",
+                "details": details,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     # Call REST framework's default exception handler to get the standard error response
     response = exception_handler(exc, context)
 
@@ -66,7 +83,12 @@ def custom_exception_handler(exc, context):
             details = response.data
         elif response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED:
             code = "METHOD_NOT_ALLOWED"
-            message = f"Method {context['request'].method} not allowed for this endpoint."
+            method = context['request'].method if 'request' in context else "HTTP"
+            message = f"Method {method} not allowed for this endpoint."
+            details = response.data
+        elif response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE:
+            code = "UNSUPPORTED_MEDIA_TYPE"
+            message = "Unsupported media type in request."
             details = response.data
         elif response.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
             code = "THROTTLED"

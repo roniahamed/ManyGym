@@ -1,11 +1,12 @@
 from rest_framework import serializers
 from common.enums import TokenContextType
+from common.serializers import StrictCharField, StrictUUIDField
 from apps.users.rest_api.v1.serializers import UserSerializer, TokenResponseSerializer
 
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
-    password = serializers.CharField(required=True, write_only=True)
+    password = StrictCharField(required=True, write_only=True)
 
 
 class SwitchContextSerializer(serializers.Serializer):
@@ -14,7 +15,7 @@ class SwitchContextSerializer(serializers.Serializer):
         required=True,
         help_text="Target context type: 'personal' or 'gym'",
     )
-    gym_id = serializers.UUIDField(
+    gym_id = StrictUUIDField(
         required=False,
         allow_null=True,
         help_text="Required if context_type is 'gym'",
@@ -27,7 +28,7 @@ class SwitchContextSerializer(serializers.Serializer):
 
 
 class LogoutSerializer(serializers.Serializer):
-    refresh = serializers.CharField(required=False, allow_blank=True)
+    refresh = StrictCharField(required=False, allow_blank=True)
 
 
 class LoginResponseSerializer(serializers.Serializer):

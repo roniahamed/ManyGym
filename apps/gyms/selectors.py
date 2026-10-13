@@ -70,5 +70,10 @@ def get_accessible_gyms_for_user(user) -> List[Dict[str, Any]]:
 
 def get_gym_by_id(gym_id: str) -> Optional[Gym]:
     """Retrieve gym by UUID or None with owner user selected."""
-    return Gym.objects.select_related("owner_user").filter(id=gym_id).first()
+    try:
+        import uuid
+        uuid.UUID(str(gym_id))
+        return Gym.objects.select_related("owner_user").filter(id=gym_id).first()
+    except Exception:
+        return None
 

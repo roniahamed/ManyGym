@@ -107,8 +107,10 @@ def switch_gym_context(user: User, gym_id: str) -> dict:
     Switches session context to a specific gym after validating user access.
     """
     try:
+        import uuid
+        uuid.UUID(str(gym_id))
         gym = Gym.objects.select_related("owner_user").get(id=gym_id)
-    except (Gym.DoesNotExist, ValueError):
+    except Exception:
         raise ResourceNotFoundError("Gym not found.")
 
     # Check if user is the gym owner
