@@ -56,35 +56,69 @@ class GymOpeningHoursBulkUpdateSerializer(serializers.Serializer):
 
 
 class GymGalleryItemSerializer(serializers.ModelSerializer):
+    resolved_media_url = serializers.CharField(read_only=True)
+    resolved_thumbnail_url = serializers.CharField(read_only=True)
+
     class Meta:
         model = GymGallery
         fields = [
             "id",
             "media_url",
+            "original_url",
+            "optimized_url",
+            "thumbnail_url",
+            "resolved_media_url",
+            "resolved_thumbnail_url",
             "media_type",
             "category",
             "caption",
             "order_index",
+            "processing_status",
+            "width",
+            "height",
+            "size_bytes",
+            "optimized_size_bytes",
             "created_at",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = [
+            "id",
+            "original_url",
+            "optimized_url",
+            "thumbnail_url",
+            "resolved_media_url",
+            "resolved_thumbnail_url",
+            "processing_status",
+            "width",
+            "height",
+            "size_bytes",
+            "optimized_size_bytes",
+            "created_at",
+        ]
 
 
 class GymGalleryCreateSerializer(serializers.Serializer):
-    media_url = serializers.CharField(max_length=1000, required=True)
+    file = serializers.FileField(required=False, help_text="Direct file upload (picture or video)")
+    media_url = serializers.CharField(max_length=1000, required=False, help_text="Media URL or local path")
     media_type = serializers.ChoiceField(
         choices=MediaTypeEnum.choices,
         default=MediaTypeEnum.PICTURE,
+        required=False,
     )
     category = serializers.ChoiceField(
         choices=GalleryCategoryEnum.choices,
         default=GalleryCategoryEnum.GENERAL,
+        required=False,
     )
     caption = serializers.CharField(
         max_length=200,
         required=False,
         allow_blank=True,
     )
+
+    def validate(self, attrs):
+        if not attrs.get("file") and not attrs.get("media_url"):
+            raise serializers.ValidationError("Either 'file' or 'media_url' must be provided.")
+        return attrs
 
 
 class GymGalleryReorderItemSerializer(serializers.Serializer):
@@ -180,11 +214,21 @@ class GymDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_location(self, obj):
-        primary_loc = obj.locations.filter(is_primary=True).first()
+        prefetched = getattr(obj, "prefetched_primary_locations", None)
+        if prefetched is not None:
+            primary_loc = prefetched[0] if prefetched else None
+        else:
+            primary_loc = obj.locations.filter(is_primary=True).first()
         return GymLocationSerializer(primary_loc).data if primary_loc else None
 
     def get_opening_hours_count(self, obj):
+        count = getattr(obj, "annotated_opening_hours_count", None)
+        if count is not None:
+            return count
         return obj.opening_hours.count()
 
     def get_gallery_count(self, obj):
+        count = getattr(obj, "annotated_gallery_count", None)
+        if count is not None:
+            return count
         return obj.gallery_items.count()

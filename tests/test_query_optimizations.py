@@ -214,9 +214,238 @@ def test_login_and_me_select_related_profile(django_assert_num_queries):
     # Accessing profile does not execute query because it is pre-cached
     assert auth_user.profile.city == "Chittagong"
 
-    # 2. GET /me/ endpoint
+    # 2. GET /me/ endpoint with FastJWTAuthentication
+    # Expected queries:
+    # 1. FastJWT: User select_related profile
+    # 2. stream_accessible_gyms: owned gyms
+    # 3. stream_accessible_gyms: staff assignments
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
-    res = client.get(reverse("me"))
-    assert res.status_code == 200
-    assert res.json()["user"]["profile"]["city"] == "Chittagong"
+    with django_assert_num_queries(3):
+        res = client.get(reverse("me"))
+        assert res.status_code == 200
+        assert res.json()["user"]["profile"]["city"] == "Chittagong"
+
+
+@pytest.mark.django_db
+def test_gym_overview_query_optimization(django_assert_num_queries):
+    """
+    Verify get_gym_overview and GymDetailSerializer use select_related,
+    prefetch_related, and Count annotations to eliminate N+1 queries.
+    """
+    from apps.gyms.services import create_gym, add_gallery_item
+    from apps.gyms.selectors import get_gym_overview
+    from apps.gyms.rest_api.v1.serializers import GymDetailSerializer
+
+    owner = User.objects.create_user(
+        email="gym.owner.opt@manygym.com",
+        password="Password123!",
+        first_name="Opt",
+        last_name="Owner",
+        is_verified=True,
+    )
+    gym = create_gym(owner_user=owner, name="Optimized Gym", city="Austin")
+    add_gallery_item(gym, media_url="https://cdn.example.com/img1.jpg")
+    add_gallery_item(gym, media_url="https://cdn.example.com/img2.jpg")
+
+    # Fetching overview with annotations & prefetched primary location
+    # Expect: 1 query for Gym + owner + Count annotations, 1 query for prefetched locations
+    with django_assert_num_queries(2):
+        gym_loaded = get_gym_overview(str(gym.id))
+        data = GymDetailSerializer(gym_loaded).data
+        assert data["opening_hours_count"] == 7
+        assert data["gallery_count"] == 2
+        assert data["location"]["city"] is not None
+
+
+@pytest.mark.django_db
+def test_amenities_stream_and_aggregations():
+    """
+    Verify get_gym_configured_amenities uses generator streaming, select_related,
+    and single SQL count aggregation.
+    """
+    from apps.amenities.models import AmenityCatalog, GymAmenity
+    from apps.amenities.services import seed_amenity_catalog, sync_gym_amenities
+    from apps.amenities.selectors import get_gym_configured_amenities, stream_gym_configured_amenities
+    from apps.gyms.services import create_gym
+
+    seed_amenity_catalog()
+    owner = User.objects.create_user(
+        email="amenity.opt@manygym.com",
+        password="Password123!",
+        first_name="Amenity",
+        last_name="Opt",
+        is_verified=True,
+    )
+    gym = create_gym(owner_user=owner, name="Amenity Fast Gym")
+
+    items = list(AmenityCatalog.objects.all()[:4])
+    sync_gym_amenities(
+        gym=gym,
+        free_amenity_ids=[str(items[0].id), str(items[1].id)],
+        paid_amenities=[
+            {"amenity_id": str(items[2].id), "default_price": "10.00"},
+            {"amenity_id": str(items[3].id), "default_price": "20.00"},
+        ],
+    )
+
+    # 1. Verify stream generator
+    stream_gen = stream_gym_configured_amenities(str(gym.id))
+    assert isinstance(stream_gen, types.GeneratorType)
+    streamed_items = list(stream_gen)
+    assert len(streamed_items) == 4
+
+    # 2. Verify aggregated result
+    configured = get_gym_configured_amenities(str(gym.id))
+    assert configured["total_count"] == 4
+    assert len(configured["free_amenities"]) == 2
+    assert len(configured["paid_amenities"]) == 2
+
+
+@pytest.mark.django_db
+def test_user_gym_scopes_single_query(django_assert_num_queries):
+    """
+    Verify get_user_gym_scopes executes in exactly ONE SQL query across staff assignments,
+    roles, and permissions using joins instead of iterating in Python.
+    """
+    owner = User.objects.create_user(
+        email="scope.owner@manygym.com",
+        password="Password123!",
+        first_name="Scope",
+        last_name="Owner",
+        is_verified=True,
+    )
+    gym = Gym.objects.create(owner_user=owner, name="Scope Gym")
+
+    staff_user = User.objects.create_user(
+        email="staff.user@manygym.com",
+        password="Password123!",
+        first_name="Staff",
+        last_name="Member",
+        is_verified=True,
+    )
+
+    trainer_role = Role.objects.get(slug="trainer")
+    GymStaffAssignment.objects.create(
+        user=staff_user,
+        gym=gym,
+        role=trainer_role,
+        status=StaffStatus.ACTIVE,
+    )
+
+    # Must execute exactly 1 query with DISTINCT values_list join
+    with django_assert_num_queries(1):
+        scopes = get_user_gym_scopes(staff_user, gym)
+        assert isinstance(scopes, list)
+        assert len(scopes) > 0
+        assert "members:read" in scopes
+
+
+@pytest.mark.django_db
+def test_gym_selectors_field_projections(django_assert_num_queries):
+    """
+    Verify get_gym_location, get_opening_hours, and list_gallery_items execute
+    targeted queries with field projections (.only).
+    """
+    from apps.gyms.services import create_gym, add_gallery_item
+    from apps.gyms.selectors import get_gym_location, get_opening_hours, list_gallery_items
+    from common.enums import GalleryCategoryEnum
+
+    owner = User.objects.create_user(
+        email="projections@manygym.com",
+        password="Password123!",
+        first_name="Proj",
+        last_name="User",
+        is_verified=True,
+    )
+    gym = create_gym(owner_user=owner, name="Projection Gym", city="Dhaka")
+    add_gallery_item(gym, media_url="https://cdn.example.com/pic1.jpg", category=GalleryCategoryEnum.EQUIPMENT)
+    add_gallery_item(gym, media_url="https://cdn.example.com/pic2.jpg", category=GalleryCategoryEnum.WORKOUT_AREAS)
+
+    # 1. get_gym_location executes exactly 1 query
+    with django_assert_num_queries(1):
+        loc = get_gym_location(str(gym.id))
+        assert loc is not None
+        assert loc.city == "Dhaka"
+        assert loc.is_primary is True
+
+    # 2. get_opening_hours executes exactly 1 query
+    with django_assert_num_queries(1):
+        hours = list(get_opening_hours(str(gym.id)))
+        assert len(hours) == 7
+
+    # 3. list_gallery_items executes exactly 1 query
+    with django_assert_num_queries(1):
+        items = list(list_gallery_items(str(gym.id)))
+        assert len(items) == 2
+
+    # 4. list_gallery_items with category executes exactly 1 query
+    with django_assert_num_queries(1):
+        filtered_items = list(list_gallery_items(str(gym.id), category=GalleryCategoryEnum.EQUIPMENT))
+        assert len(filtered_items) == 1
+        assert filtered_items[0].category == GalleryCategoryEnum.EQUIPMENT
+
+
+@pytest.mark.django_db
+def test_permissions_list_endpoint_query_count(django_assert_num_queries):
+    """
+    Verify GET /api/v1/access-control/permissions/ executes in exactly 2 queries:
+    1. FastJWT auth (user + profile)
+    2. Single streaming permission fetch
+    """
+    user = User.objects.create_user(
+        email="perm.tester@manygym.com",
+        password="Password123!",
+        first_name="Perm",
+        last_name="Tester",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=user)
+    tokens = issue_context_token(user)
+
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(2):
+        res = client.get(reverse("permissions-list"))
+        assert res.status_code == 200
+        data = res.json()
+        assert isinstance(data, dict)
+        assert len(data) > 0
+
+
+@pytest.mark.django_db
+def test_switch_context_query_efficiency(django_assert_num_queries):
+    """
+    Verify POST /api/v1/auth/switch-context/ executes with optimal query count:
+    1. FastJWT user lookup
+    2. Gym lookup (select_related owner)
+    3. Distinct scopes values_list query
+    4. AuthToken insert
+    (Skips redundant staff assignment search since user is owner).
+    """
+    owner = User.objects.create_user(
+        email="ctx.owner@manygym.com",
+        password="Password123!",
+        first_name="Ctx",
+        last_name="Owner",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = Gym.objects.create(owner_user=owner, name="Context Gym")
+
+    base_tokens = issue_context_token(owner)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {base_tokens['access']}")
+
+    with django_assert_num_queries(4):
+        res = client.post(
+            reverse("switch-context"),
+            {"context_type": TokenContextType.GYM, "gym_id": str(gym.id)},
+        )
+        assert res.status_code == 200
+        assert res.json()["tokens"]["context_type"] == TokenContextType.GYM
+        assert res.json()["tokens"]["gym_id"] == str(gym.id)
+
+
+

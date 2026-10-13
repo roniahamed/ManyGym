@@ -116,12 +116,14 @@ def switch_gym_context(user: User, gym_id: str) -> dict:
     # Check if user is the gym owner
     is_owner = (gym.owner_user_id == user.id) or user.is_superuser
 
-    # Check if user has active staff assignment
-    is_staff = GymStaffAssignment.objects.filter(
-        user=user,
-        gym=gym,
-        status="active",
-    ).exists()
+    # Check if user has active staff assignment only if not owner
+    is_staff = False
+    if not is_owner:
+        is_staff = GymStaffAssignment.objects.filter(
+            user=user,
+            gym=gym,
+            status="active",
+        ).exists()
 
     if not (is_owner or is_staff):
         raise UnauthorizedContextError(f"You do not have access rights to gym '{gym.name}'.")

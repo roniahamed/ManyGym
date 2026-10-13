@@ -6,7 +6,9 @@ from common.enums import (
     GymGenderRequired,
     GalleryCategoryEnum,
     MediaTypeEnum,
+    ProcessingStatus,
 )
+from common.models import OptimizedMediaMixin
 
 
 class Gym(models.Model):
@@ -71,6 +73,9 @@ class GymLocation(models.Model):
         db_table = "gym_locations"
         verbose_name = "Gym Location"
         verbose_name_plural = "Gym Locations"
+        indexes = [
+            models.Index(fields=["gym", "is_primary"]),
+        ]
 
     def __str__(self):
         return f"Location of {self.gym.name}: {self.address}"
@@ -112,7 +117,7 @@ class GymOpeningHours(models.Model):
         return f"{self.gym.name} - {day_name}: {self.start_time} - {self.end_time}"
 
 
-class GymGallery(models.Model):
+class GymGallery(OptimizedMediaMixin, models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     gym = models.ForeignKey(
         Gym,
@@ -133,12 +138,17 @@ class GymGallery(models.Model):
     caption = models.CharField(max_length=200, blank=True, null=True)
     order_index = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "gym_gallery"
         verbose_name = "Gym Gallery Item"
         verbose_name_plural = "Gym Gallery Items"
         ordering = ["order_index", "-created_at"]
+        indexes = [
+            models.Index(fields=["gym", "order_index"]),
+            models.Index(fields=["gym", "category"]),
+        ]
 
     def __str__(self):
-        return f"{self.gym.name} Gallery ({self.category}) - #{self.order_index}"
+        return f"{self.gym.name} Gallery ({self.category}) - #{self.order_index} [{self.processing_status}]"

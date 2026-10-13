@@ -98,24 +98,47 @@ def sync_gym_amenities(
     if missing:
         raise DomainValidationError(f"Invalid amenity catalog IDs provided: {list(missing)}.")
 
+    # Fetch existing configurations in 1 query
+    existing_map = {str(ga.amenity_id): ga for ga in GymAmenity.objects.filter(gym=gym)}
+
     # Remove any amenities not in the new selection
-    GymAmenity.objects.filter(gym=gym).exclude(amenity_id__in=all_selected_ids).delete()
+    to_delete_ids = set(existing_map.keys()) - all_selected_ids
+    if to_delete_ids:
+        GymAmenity.objects.filter(gym=gym, amenity_id__in=to_delete_ids).delete()
+
+    to_create = []
+    to_update = []
 
     # Sync Free Amenities
     for fid in free_set:
-        GymAmenity.objects.update_or_create(
-            gym=gym,
-            amenity_id=fid,
-            defaults={"is_paid": False, "default_price": Decimal("0.00")},
-        )
+        if fid in existing_map:
+            inst = existing_map[fid]
+            if inst.is_paid or inst.default_price != Decimal("0.00"):
+                inst.is_paid = False
+                inst.default_price = Decimal("0.00")
+                to_update.append(inst)
+        else:
+            to_create.append(
+                GymAmenity(gym=gym, amenity_id=fid, is_paid=False, default_price=Decimal("0.00"))
+            )
 
     # Sync Paid Amenities
     for pid, price in paid_map.items():
-        GymAmenity.objects.update_or_create(
-            gym=gym,
-            amenity_id=pid,
-            defaults={"is_paid": True, "default_price": price},
-        )
+        if pid in existing_map:
+            inst = existing_map[pid]
+            if not inst.is_paid or inst.default_price != price:
+                inst.is_paid = True
+                inst.default_price = price
+                to_update.append(inst)
+        else:
+            to_create.append(
+                GymAmenity(gym=gym, amenity_id=pid, is_paid=True, default_price=price)
+            )
+
+    if to_create:
+        GymAmenity.objects.bulk_create(to_create)
+    if to_update:
+        GymAmenity.objects.bulk_update(to_update, ["is_paid", "default_price"])
 
     return {
         "free_count": len(free_set),

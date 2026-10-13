@@ -368,9 +368,10 @@ Retrieves paginated directory of all staff members assigned to the active gym wi
     def get(self, request):
         gym = resolve_request_gym(request)
         if gym.owner_user_id != request.user.id and not request.user.is_superuser:
-            is_staff = GymStaffAssignment.objects.filter(user=request.user, gym=gym, status="active").exists()
-            if not is_staff and str(getattr(request, "gym_id", "")) != str(gym.id):
-                raise PermissionDeniedError("You do not have access to view staff for this gym.")
+            if str(getattr(request, "gym_id", "")) != str(gym.id):
+                is_staff = GymStaffAssignment.objects.filter(user=request.user, gym=gym, status="active").exists()
+                if not is_staff:
+                    raise PermissionDeniedError("You do not have access to view staff for this gym.")
 
         staff = list_gym_staff(gym_id=str(gym.id))
 

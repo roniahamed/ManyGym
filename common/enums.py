@@ -186,3 +186,10 @@ class PostPrivacyEnum(models.TextChoices):
 class MediaTypeEnum(models.TextChoices):
     PICTURE = "picture", "Picture"
     VIDEO = "video", "Video"
+
+
+class ProcessingStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    PROCESSING = "processing", "Processing"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"

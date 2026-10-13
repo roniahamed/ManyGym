@@ -71,31 +71,21 @@ def list_gym_staff(gym_id: str):
 def get_user_gym_scopes(user, gym: Gym) -> List[str]:
     """
     Calculates active permission scope codes for a user in the given gym context.
-    - If user is the Gym Owner: returns ALL system scopes via generator expression.
-    - If user has staff assignment: returns union of scopes for their assigned active roles.
-    Uses select_related and prefetch_related with generator comprehension.
+    - If user is the Gym Owner: returns ALL system scopes via single values_list.
+    - If user has staff assignment: returns distinct scopes via a single optimized SQL join.
     """
     if gym.owner_user_id == user.id or user.is_superuser:
-        return list(
-            scope for scope in Permission.objects.values_list("scope_code", flat=True).iterator()
-        )
+        return list(Permission.objects.values_list("scope_code", flat=True))
 
-    assignments = (
-        GymStaffAssignment.objects.filter(
-            user=user,
-            gym=gym,
-            status="active",
+    scopes = (
+        Permission.objects.filter(
+            roles__staff_assignments__user=user,
+            roles__staff_assignments__gym=gym,
+            roles__staff_assignments__status="active",
         )
-        .select_related("role")
-        .prefetch_related("role__permissions")
+        .distinct()
+        .values_list("scope_code", flat=True)
     )
-
-    # Use generator expression to collect scopes lazily
-    scopes = {
-        perm.scope_code
-        for assignment in assignments.iterator(chunk_size=100)
-        for perm in assignment.role.permissions.all()
-    }
 
     return list(scopes)
 

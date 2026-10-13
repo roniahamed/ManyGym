@@ -52,9 +52,24 @@ Adheres strictly to the **Layered Architectural Pattern**:
 | Method | Endpoint | Description | Auth Required |
 |---|---|---|---|
 | `GET` | `/api/v1/gyms/gallery/` | List gallery assets (supports filter: `?category=equipment`) | Bearer JWT |
-| `POST` | `/api/v1/gyms/gallery/` | Add photo/video with category and caption | Bearer JWT (Owner/Staff) |
+| `POST` | `/api/v1/gyms/gallery/` | Add photo/video (`multipart/form-data` file upload or `application/json` URL) | Bearer JWT (Owner/Staff) |
 | `PATCH` | `/api/v1/gyms/gallery/reorder/` | Reorder gallery display sequence | Bearer JWT (Owner/Staff) |
 | `DELETE` | `/api/v1/gyms/gallery/<uuid:item_id>/` | Delete a gallery media asset | Bearer JWT (Owner/Staff) |
+
+#### Background Media Optimization Pipeline (BoiMix Architecture)
+- **Local First**: File is saved locally immediately to `/media/gyms/gallery/original/` and returned in `original_url` with `processing_status="pending"`.
+- **Asynchronous Optimization**: Celery background task `optimize_gallery_media_task` is dispatched upon transaction commit.
+- **Image Optimization (Pillow)**:
+  - EXIF orientation correction (`ImageOps.exif_transpose`).
+  - Preserves alpha transparency or converts to RGB.
+  - High-res WebP variant (max 1920x1080, `quality=82`, `method=6`) saved to `/media/gyms/gallery/optimized/` and referenced by `optimized_url`.
+  - Thumbnail WebP variant (max 400x300, `quality=78`, `method=6`) saved to `/media/gyms/gallery/thumbnails/` and referenced by `thumbnail_url`.
+  - Records image `width`, `height`, `size_bytes`, and `optimized_size_bytes`.
+  - Retains original file in `original_url` ("ager ta reke, new optimisation ta thakbo").
+- **Video Optimization (FFmpeg)**:
+  - Extracts video poster thumbnail at 1s mark into `/media/gyms/gallery/thumbnails/`.
+  - Transcodes/compresses video via `ffmpeg -vcodec libx264 -crf 26` if larger than threshold.
+- **Status Tracking**: Updates `processing_status` from `pending` -> `processing` -> `completed` / `failed`.
 
 ### 5. Amenities Management
 | Method | Endpoint | Description | Auth Required |

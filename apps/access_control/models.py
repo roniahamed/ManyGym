@@ -103,6 +103,10 @@ class GymStaffAssignment(models.Model):
         db_table = "gym_staff_assignments"
         unique_together = (("user", "gym", "role"),)
         ordering = ["-invited_at"]
+        indexes = [
+            models.Index(fields=["gym", "status"]),
+            models.Index(fields=["user", "gym", "status"]),
+        ]
 
     def __str__(self):
         return f"{self.user.email} as {self.role.name} at {self.gym.name} ({self.status})"

@@ -447,7 +447,9 @@ Retrieves personal profile data, current active token context, and the full list
         },
     )
     def get(self, request):
-        user = get_user_by_id(request.user.id) or request.user
+        user = request.user
+        if not hasattr(user, "_profile_cache") and not hasattr(user, "profile"):
+            user = get_user_by_id(request.user.id) or request.user
         accessible_gyms = get_accessible_gyms_for_user(user)
         return Response(
             {
