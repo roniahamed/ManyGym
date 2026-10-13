@@ -46,6 +46,12 @@ def stream_gym_configured_amenities(gym_id: str) -> Iterator[Dict[str, Any]]:
     """
     Generator streaming gym configured amenities lazily with field projection and select_related.
     """
+    import uuid
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return
+
     amenities = (
         GymAmenity.objects.filter(gym_id=gym_id)
         .select_related("amenity")
@@ -78,6 +84,16 @@ def get_gym_configured_amenities(gym_id: str) -> Dict[str, Any]:
     Returns a gym's configured amenities separated into free and paid lists,
     utilizing lazy streaming and SQL Count aggregations.
     """
+    import uuid
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return {
+            "free_amenities": [],
+            "paid_amenities": [],
+            "total_count": 0,
+        }
+
     # SQL Count Aggregation
     stats = GymAmenity.objects.filter(gym_id=gym_id).aggregate(
         total_count=Count("id"),

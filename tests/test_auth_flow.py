@@ -147,3 +147,53 @@ def test_forgot_password_and_reset_flow():
         "password": "BrandNewPassword2026!",
     })
     assert login_res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_otp_is_hashed_in_database(client):
+    """
+    Verifies that OTP verification codes are cryptographically hashed before being stored in PostgreSQL,
+    and no plaintext OTP is persisted in database columns.
+    """
+    from django.db import connection
+    from common.security import hash_otp
+
+    reg_payload = {
+        "email": "hashed.otp.user@manygym.com",
+        "password": "SecurePassword123!",
+        "first_name": "Crypto",
+        "last_name": "Tester",
+    }
+    res = client.post(reverse("register"), reg_payload)
+    assert res.status_code == 201
+
+    # Raw SQL query to directly inspect the database row in PostgreSQL
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT otp_code FROM otp_verifications WHERE email = %s AND is_used = false",
+            ["hashed.otp.user@manygym.com"],
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        db_stored_otp = row[0]
+
+    # Verify that what is in the DB is a 64-character hex hash, NOT a 6-digit plain OTP
+    assert len(db_stored_otp) == 64
+    assert not db_stored_otp.isdigit()
+    assert all(c in "0123456789abcdef" for c in db_stored_otp.lower())
+
+    # Verify descriptor provides the raw code in memory and matches hash
+    otp_record = OTPVerification.objects.filter(email="hashed.otp.user@manygym.com").first()
+    raw_code = otp_record.otp_code
+    assert len(raw_code) == 6
+    assert raw_code.isdigit()
+    assert hash_otp("hashed.otp.user@manygym.com", raw_code) == db_stored_otp
+    assert otp_record.check_otp(raw_code) is True
+    assert otp_record.check_otp("000000") is False
+
+    # Verify verify_signup_otp succeeds with the raw code
+    verify_res = client.post(reverse("verify-signup-otp"), {
+        "email": "hashed.otp.user@manygym.com",
+        "otp_code": raw_code,
+    })
+    assert verify_res.status_code == 200

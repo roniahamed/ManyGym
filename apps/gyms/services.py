@@ -331,6 +331,12 @@ def delete_gallery_item(gym: Gym, item_id: str) -> None:
     """
     Deletes a gallery asset belonging to the gym.
     """
+    import uuid
+    try:
+        uuid.UUID(str(item_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ResourceNotFoundError("Gallery item not found.")
+
     item = GymGallery.objects.filter(gym=gym, id=item_id).first()
     if not item:
         raise ResourceNotFoundError("Gallery item not found.")

@@ -1,9 +1,11 @@
-import random
+import secrets
 from datetime import timedelta
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from apps.users.models import User, UserProfile, OTPVerification
 from apps.users.tasks import send_email_task
+from common.security import hash_otp
 from common.exceptions import (
     DomainValidationError,
     ResourceConflictError,
@@ -13,8 +15,8 @@ from common.enums import UserStatus
 
 
 def generate_numeric_otp(length=6) -> str:
-    """Generate a random 6-digit OTP code."""
-    return "".join(random.choices("0123456789", k=length))
+    """Generate a cryptographically secure random 6-digit OTP code."""
+    return "".join(secrets.choice("0123456789") for _ in range(length))
 
 
 @transaction.atomic
@@ -95,13 +97,17 @@ def verify_signup_otp(email: str, otp_code: str) -> User:
     if user.is_verified:
         raise DomainValidationError("This account is already verified. Please proceed to login.")
 
-    otp_record = OTPVerification.objects.filter(
-
-        email=email_clean,
-        otp_code=otp_code.strip(),
-        purpose=OTPVerification.Purpose.SIGNUP_VERIFICATION,
-        is_used=False,
-    ).order_by("-created_at").first()
+    hashed_otp = hash_otp(email_clean, otp_code.strip())
+    otp_record = (
+        OTPVerification.objects.filter(
+            Q(otp_code=hashed_otp) | Q(otp_code=otp_code.strip()),
+            email=email_clean,
+            purpose=OTPVerification.Purpose.SIGNUP_VERIFICATION,
+            is_used=False,
+        )
+        .order_by("-created_at")
+        .first()
+    )
 
     if not otp_record or not otp_record.is_valid():
         raise DomainValidationError("Invalid or expired verification OTP.")
@@ -206,12 +212,17 @@ def verify_password_reset_otp(email: str, otp_code: str) -> bool:
     Verifies that the password reset OTP is currently valid.
     """
     email_clean = email.lower().strip()
-    otp_record = OTPVerification.objects.filter(
-        email=email_clean,
-        otp_code=otp_code.strip(),
-        purpose=OTPVerification.Purpose.PASSWORD_RESET,
-        is_used=False,
-    ).order_by("-created_at").first()
+    hashed_otp = hash_otp(email_clean, otp_code.strip())
+    otp_record = (
+        OTPVerification.objects.filter(
+            Q(otp_code=hashed_otp) | Q(otp_code=otp_code.strip()),
+            email=email_clean,
+            purpose=OTPVerification.Purpose.PASSWORD_RESET,
+            is_used=False,
+        )
+        .order_by("-created_at")
+        .first()
+    )
 
     if not otp_record or not otp_record.is_valid():
         raise DomainValidationError("Invalid or expired password reset code.")
@@ -229,12 +240,17 @@ def reset_password(email: str, otp_code: str, new_password: str) -> User:
     except User.DoesNotExist:
         raise ResourceNotFoundError("User not found.")
 
-    otp_record = OTPVerification.objects.filter(
-        email=email_clean,
-        otp_code=otp_code.strip(),
-        purpose=OTPVerification.Purpose.PASSWORD_RESET,
-        is_used=False,
-    ).order_by("-created_at").first()
+    hashed_otp = hash_otp(email_clean, otp_code.strip())
+    otp_record = (
+        OTPVerification.objects.filter(
+            Q(otp_code=hashed_otp) | Q(otp_code=otp_code.strip()),
+            email=email_clean,
+            purpose=OTPVerification.Purpose.PASSWORD_RESET,
+            is_used=False,
+        )
+        .order_by("-created_at")
+        .first()
+    )
 
     if not otp_record or not otp_record.is_valid():
         raise DomainValidationError("Invalid or expired password reset code.")

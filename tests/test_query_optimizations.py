@@ -448,4 +448,176 @@ def test_switch_context_query_efficiency(django_assert_num_queries):
         assert res.json()["tokens"]["gym_id"] == str(gym.id)
 
 
+@pytest.mark.django_db
+def test_phase2_gym_profile_overview_endpoint_query_count(django_assert_num_queries):
+    """
+    Verify GET /api/v1/gyms/profile/ executes in exactly 3 queries:
+    1. FastJWT auth
+    2. get_gym_overview (Gym + owner_user + SQL Count annotations)
+    3. GymLocation (prefetched primary location)
+    Eliminates redundant Gym lookups!
+    """
+    from apps.gyms.services import create_gym, add_gallery_item
+
+    owner = User.objects.create_user(
+        email="p2.owner@manygym.com",
+        password="Password123!",
+        first_name="P2",
+        last_name="Owner",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Phase 2 Gym", city="Dhaka")
+    add_gallery_item(gym, media_url="https://cdn.example.com/p2.jpg")
+
+    tokens = issue_context_token(owner)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(3):
+        res = client.get(f"{reverse('gyms_v1:gym-profile-overview')}?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["name"] == "Phase 2 Gym"
+        assert data["opening_hours_count"] == 7
+        assert data["gallery_count"] == 1
+
+
+@pytest.mark.django_db
+def test_phase2_gym_location_endpoint_query_count(django_assert_num_queries):
+    """
+    Verify GET /api/v1/gyms/profile/location/ executes in exactly 3 queries:
+    1. FastJWT auth
+    2. resolve_gym_context (.only)
+    3. get_gym_location (.only with is_primary index)
+    """
+    from apps.gyms.services import create_gym
+
+    owner = User.objects.create_user(
+        email="p2.loc@manygym.com",
+        password="Password123!",
+        first_name="P2",
+        last_name="Loc",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Location Gym", city="Sylhet")
+
+    tokens = issue_context_token(owner)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(3):
+        res = client.get(f"{reverse('gyms_v1:gym-profile-location')}?gym_id={gym.id}")
+        assert res.status_code == 200
+        assert res.json()["city"] == "Sylhet"
+
+
+@pytest.mark.django_db
+def test_phase2_gym_opening_hours_endpoint_query_count(django_assert_num_queries):
+    """
+    Verify GET /api/v1/gyms/opening-hours/ executes in exactly 3 queries:
+    1. FastJWT auth
+    2. resolve_gym_context (.only)
+    3. get_opening_hours (.only)
+    """
+    from apps.gyms.services import create_gym
+
+    owner = User.objects.create_user(
+        email="p2.hours@manygym.com",
+        password="Password123!",
+        first_name="P2",
+        last_name="Hours",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Hours Gym")
+
+    tokens = issue_context_token(owner)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(3):
+        res = client.get(f"{reverse('gyms_v1:gym-opening-hours')}?gym_id={gym.id}")
+        assert res.status_code == 200
+        assert len(res.json()) == 7
+
+
+@pytest.mark.django_db
+def test_phase2_gym_gallery_endpoint_query_count(django_assert_num_queries):
+    """
+    Verify GET /api/v1/gyms/gallery/ executes in exactly 3 queries:
+    1. FastJWT auth
+    2. resolve_gym_context (.only)
+    3. list_gallery_items (.only with composite index)
+    """
+    from apps.gyms.services import create_gym, add_gallery_item
+    from common.enums import GalleryCategoryEnum
+
+    owner = User.objects.create_user(
+        email="p2.gal@manygym.com",
+        password="Password123!",
+        first_name="P2",
+        last_name="Gal",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Gal Gym")
+    add_gallery_item(gym, media_url="https://cdn.example.com/g1.jpg", category=GalleryCategoryEnum.EQUIPMENT)
+
+    tokens = issue_context_token(owner)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(3):
+        res = client.get(f"{reverse('gyms_v1:gym-gallery-list')}?gym_id={gym.id}&category=equipment")
+        assert res.status_code == 200
+        assert len(res.json()) == 1
+
+
+@pytest.mark.django_db
+def test_phase2_amenities_endpoints_query_count(django_assert_num_queries):
+    """
+    Verify Phase 2 amenities endpoints execute with optimal queries:
+    - Master Catalog: 2 queries (auth + streaming catalog)
+    - Gym Configured: 4 queries (auth + gym + count aggregation + select_related stream)
+    """
+    from apps.gyms.services import create_gym
+    from apps.amenities.models import AmenityCatalog
+    from apps.amenities.services import seed_amenity_catalog, sync_gym_amenities
+
+    seed_amenity_catalog()
+    owner = User.objects.create_user(
+        email="p2.amenities@manygym.com",
+        password="Password123!",
+        first_name="P2",
+        last_name="Amenity",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Amenity P2 Gym")
+
+    first_item = AmenityCatalog.objects.first()
+    sync_gym_amenities(gym=gym, free_amenity_ids=[str(first_item.id)], paid_amenities=[])
+
+    tokens = issue_context_token(owner)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # 1. Master catalog (2 queries)
+    with django_assert_num_queries(2):
+        res_cat = client.get(reverse("amenities_v1:amenity-catalog"))
+        assert res_cat.status_code == 200
+        assert "Changing & Storage" in res_cat.json()
+
+    # 2. Configured amenities (4 queries)
+    with django_assert_num_queries(4):
+        res_cfg = client.get(f"{reverse('amenities_v1:gym-amenities-configured')}?gym_id={gym.id}")
+        assert res_cfg.status_code == 200
+        data = res_cfg.json()
+        assert data["total_count"] == 1
+        assert len(data["free_amenities"]) == 1
+
+
+
 

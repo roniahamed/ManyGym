@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from apps.gyms.models import Gym, GymLocation, GymOpeningHours, GymGallery
+from common.serializers import StrictCharField, StrictBooleanField
 from common.enums import (
     GymTypeEnum,
     GymGenderRequired,
@@ -43,9 +44,9 @@ class GymOpeningHoursItemSerializer(serializers.ModelSerializer):
 
 class GymOpeningHoursBulkItemSerializer(serializers.Serializer):
     day_of_week = serializers.IntegerField(min_value=0, max_value=6)
-    start_time = serializers.TimeField(required=False, allow_null=True)
-    end_time = serializers.TimeField(required=False, allow_null=True)
-    is_closed = serializers.BooleanField(default=False)
+    start_time = serializers.TimeField(required=False, allow_null=True, input_formats=["%H:%M:%S", "%H:%M"])
+    end_time = serializers.TimeField(required=False, allow_null=True, input_formats=["%H:%M:%S", "%H:%M"])
+    is_closed = StrictBooleanField(default=False)
 
 
 class GymOpeningHoursBulkUpdateSerializer(serializers.Serializer):
@@ -98,7 +99,7 @@ class GymGalleryItemSerializer(serializers.ModelSerializer):
 
 class GymGalleryCreateSerializer(serializers.Serializer):
     file = serializers.FileField(required=False, help_text="Direct file upload (picture or video)")
-    media_url = serializers.CharField(max_length=1000, required=False, help_text="Media URL or local path")
+    media_url = StrictCharField(max_length=1000, required=False, help_text="Media URL or local path")
     media_type = serializers.ChoiceField(
         choices=MediaTypeEnum.choices,
         default=MediaTypeEnum.PICTURE,
@@ -109,7 +110,7 @@ class GymGalleryCreateSerializer(serializers.Serializer):
         default=GalleryCategoryEnum.GENERAL,
         required=False,
     )
-    caption = serializers.CharField(
+    caption = StrictCharField(
         max_length=200,
         required=False,
         allow_blank=True,
@@ -134,7 +135,7 @@ class GymGalleryReorderSerializer(serializers.Serializer):
 
 
 class GymCreateSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=255, required=True)
+    name = StrictCharField(max_length=255, required=True)
     primary_type = serializers.ChoiceField(
         choices=GymTypeEnum.choices,
         default=GymTypeEnum.GENERAL_FITNESS,
@@ -144,46 +145,46 @@ class GymCreateSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
-    short_description = serializers.CharField(
+    short_description = StrictCharField(
         required=False,
         allow_blank=True,
         min_length=120,
     )
-    profile_picture_url = serializers.CharField(required=False, allow_blank=True, max_length=1000)
-    cover_photo_url = serializers.CharField(required=False, allow_blank=True, max_length=1000)
+    profile_picture_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
+    cover_photo_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
     gender_required = serializers.ChoiceField(
         choices=GymGenderRequired.choices,
         default=GymGenderRequired.EVERYONE,
     )
     min_age = serializers.IntegerField(default=1, min_value=1, max_value=99)
-    timezone = serializers.CharField(default="UTC", max_length=100)
-    address = serializers.CharField(required=False, default="Unspecified Location")
+    timezone = StrictCharField(default="UTC", max_length=100)
+    address = StrictCharField(required=False, default="Unspecified Location")
     latitude = serializers.DecimalField(max_digits=10, decimal_places=8, default=0.0)
     longitude = serializers.DecimalField(max_digits=11, decimal_places=8, default=0.0)
-    city = serializers.CharField(required=False, allow_blank=True, max_length=100)
-    country = serializers.CharField(required=False, allow_blank=True, max_length=100)
-    postal_code = serializers.CharField(required=False, allow_blank=True, max_length=30)
+    city = StrictCharField(required=False, allow_blank=True, max_length=100)
+    country = StrictCharField(required=False, allow_blank=True, max_length=100)
+    postal_code = StrictCharField(required=False, allow_blank=True, max_length=30)
 
 
 class GymOverviewUpdateSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=255, required=False)
+    name = StrictCharField(max_length=255, required=False)
     primary_type = serializers.ChoiceField(choices=GymTypeEnum.choices, required=False)
     secondary_type = serializers.ChoiceField(choices=GymTypeEnum.choices, required=False, allow_null=True)
-    short_description = serializers.CharField(required=False, min_length=120)
-    profile_picture_url = serializers.CharField(required=False, allow_blank=True, max_length=1000)
-    cover_photo_url = serializers.CharField(required=False, allow_blank=True, max_length=1000)
+    short_description = StrictCharField(required=False, min_length=120)
+    profile_picture_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
+    cover_photo_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
     gender_required = serializers.ChoiceField(choices=GymGenderRequired.choices, required=False)
     min_age = serializers.IntegerField(required=False, min_value=1, max_value=99)
-    timezone = serializers.CharField(required=False, max_length=100)
+    timezone = StrictCharField(required=False, max_length=100)
 
 
 class GymLocationUpdateSerializer(serializers.Serializer):
-    address = serializers.CharField(required=True)
+    address = StrictCharField(required=True)
     latitude = serializers.DecimalField(max_digits=10, decimal_places=8, required=True)
     longitude = serializers.DecimalField(max_digits=11, decimal_places=8, required=True)
-    city = serializers.CharField(required=False, allow_blank=True, max_length=100)
-    country = serializers.CharField(required=False, allow_blank=True, max_length=100)
-    postal_code = serializers.CharField(required=False, allow_blank=True, max_length=30)
+    city = StrictCharField(required=False, allow_blank=True, max_length=100)
+    country = StrictCharField(required=False, allow_blank=True, max_length=100)
+    postal_code = StrictCharField(required=False, allow_blank=True, max_length=30)
 
 
 class GymDetailSerializer(serializers.ModelSerializer):

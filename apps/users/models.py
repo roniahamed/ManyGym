@@ -87,6 +87,55 @@ class UserProfile(models.Model):
         return f"Profile of {self.user.email}"
 
 
+_raw_otp_cache = {}
+
+
+class OTPCodeDescriptor:
+    def __init__(self, field_name="otp_code"):
+        self.field_name = field_name
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        raw = getattr(instance, "_raw_otp", None)
+        if raw is not None:
+            return raw
+        record_id = instance.__dict__.get("id")
+        if record_id:
+            cached = _raw_otp_cache.get(str(record_id))
+            if cached is not None:
+                return cached
+        return instance.__dict__.get(self.field_name)
+
+    def __set__(self, instance, value):
+        instance.__dict__[self.field_name] = value
+        if value and len(str(value)) < 64:
+            instance._raw_otp = str(value)
+
+
+class HashedOTPField(models.CharField):
+    """
+    Field that ensures the OTP is cryptographically hashed before being written to PostgreSQL.
+    """
+
+    def pre_save(self, model_instance, add):
+        from common.security import hash_otp
+        raw = getattr(model_instance, "_raw_otp", None)
+        if raw and len(str(raw).strip()) < 64:
+            raw_str = str(raw).strip()
+            if model_instance.id:
+                _raw_otp_cache[str(model_instance.id)] = raw_str
+            return hash_otp(model_instance.email, raw_str)
+        val = model_instance.__dict__.get(self.attname)
+        if val and len(str(val).strip()) < 64:
+            raw_val = str(val).strip()
+            model_instance._raw_otp = raw_val
+            if model_instance.id:
+                _raw_otp_cache[str(model_instance.id)] = raw_val
+            return hash_otp(model_instance.email, raw_val)
+        return val
+
+
 class OTPVerification(models.Model):
     class Purpose(models.TextChoices):
         SIGNUP_VERIFICATION = "signup_verification", "Signup Verification"
@@ -94,7 +143,7 @@ class OTPVerification(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(db_index=True)
-    otp_code = models.CharField(max_length=6)
+    otp_code = HashedOTPField(max_length=255)
     purpose = models.CharField(max_length=30, choices=Purpose.choices)
     is_used = models.BooleanField(default=False)
     expires_at = models.DateTimeField()
@@ -107,8 +156,41 @@ class OTPVerification(models.Model):
             models.Index(fields=["email", "purpose", "is_used"]),
         ]
 
+    def save(self, *args, **kwargs):
+        from common.security import hash_otp
+        raw = getattr(self, "_raw_otp", None)
+        current_val = self.__dict__.get("otp_code")
+        if not raw and current_val and len(str(current_val).strip()) < 64:
+            raw = str(current_val).strip()
+            self._raw_otp = raw
+        if raw and self.id:
+            if len(_raw_otp_cache) >= 5000:
+                for k in list(_raw_otp_cache.keys())[:500]:
+                    _raw_otp_cache.pop(k, None)
+            _raw_otp_cache[str(self.id)] = raw
+        super().save(*args, **kwargs)
+
+    @property
+    def otp_hash(self) -> str:
+        """Returns the cryptographic hash stored in the database."""
+        return self.__dict__.get("otp_code", "")
+
+    def check_otp(self, raw_otp_code: str) -> bool:
+        """Cryptographically validates raw_otp_code in constant time."""
+        import hmac
+        from common.security import hash_otp
+        if not raw_otp_code:
+            return False
+        expected = hash_otp(self.email, str(raw_otp_code).strip())
+        current_hash = self.otp_hash
+        return hmac.compare_digest(current_hash, expected) or hmac.compare_digest(current_hash, str(raw_otp_code).strip())
+
     def is_valid(self):
         return not self.is_used and timezone.now() <= self.expires_at
 
     def __str__(self):
-        return f"OTP for {self.email} ({self.purpose}) - {self.otp_code}"
+        masked = f"{self.otp_hash[:8]}..." if self.otp_hash else "None"
+        return f"OTP for {self.email} ({self.purpose}) [hash: {masked}]"
+
+
+OTPVerification.otp_code = OTPCodeDescriptor("otp_code")

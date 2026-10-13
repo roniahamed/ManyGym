@@ -83,8 +83,14 @@ def get_gym_overview(gym_id: str) -> Optional[Gym]:
     Retrieves complete gym profile overview with primary location preloaded
     and count aggregations for opening hours and gallery assets to prevent N+1 queries.
     """
+    import uuid
     from django.db.models import Count, Prefetch
     from apps.gyms.models import GymLocation
+
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return None
 
     return (
         Gym.objects.select_related("owner_user")
@@ -106,17 +112,31 @@ def get_gym_overview(gym_id: str) -> Optional[Gym]:
 
 def get_gym_location(gym_id: str):
     """Retrieves the primary map location of the gym with field projections."""
+    import uuid
     from apps.gyms.models import GymLocation
+
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
     return (
         GymLocation.objects.filter(gym_id=gym_id, is_primary=True)
-        .only("id", "address", "latitude", "longitude", "city", "country", "postal_code", "is_primary", "gym_id")
+        .only("id", "address", "latitude", "longitude", "city", "country", "postal_code", "is_primary", "updated_at", "gym_id")
         .first()
     )
 
 
 def get_opening_hours(gym_id: str):
     """Retrieves full 7-day operating schedule ordered by day_of_week with field projection."""
+    import uuid
     from apps.gyms.models import GymOpeningHours
+
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return GymOpeningHours.objects.none()
+
     return (
         GymOpeningHours.objects.filter(gym_id=gym_id)
         .only("id", "day_of_week", "start_time", "end_time", "is_closed", "gym_id")
@@ -126,7 +146,14 @@ def get_opening_hours(gym_id: str):
 
 def list_gallery_items(gym_id: str, category: str = None):
     """Retrieves gallery assets filtered by category with field projections."""
+    import uuid
     from apps.gyms.models import GymGallery
+
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return GymGallery.objects.none()
+
     queryset = (
         GymGallery.objects.filter(gym_id=gym_id)
         .only(

@@ -42,14 +42,21 @@ from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
 
 
 def resolve_gym_context(request) -> Gym:
-    """Helper to determine the target gym from active token context or query param."""
+    """Helper to determine the target gym from active token context or query param, with request-level caching."""
+    cached = getattr(request, "_resolved_gym", None)
+    if cached is not None:
+        return cached
+
     gym_id = getattr(request, "gym_id", None) or request.query_params.get("gym_id")
     if not gym_id:
         raise DomainValidationError("An active Gym context token or 'gym_id' query parameter is required.")
     try:
-        gym = Gym.objects.get(id=gym_id)
-    except (Gym.DoesNotExist, ValueError):
+        import uuid
+        uuid.UUID(str(gym_id))
+        gym = Gym.objects.only("id", "owner_user_id", "name", "timezone").get(id=gym_id)
+    except (Gym.DoesNotExist, ValueError, AttributeError):
         raise ResourceNotFoundError("Gym not found.")
+    request._resolved_gym = gym
     return gym
 
 
@@ -136,9 +143,14 @@ Retrieves complete gym profile overview including physical location, operating h
         },
     )
     def get(self, request):
-        gym = resolve_gym_context(request)
-        check_gym_permission(request, gym, required_scope="gym_profile:read")
-        gym_overview = get_gym_overview(str(gym.id))
+        gym_id = getattr(request, "gym_id", None) or request.query_params.get("gym_id")
+        if not gym_id:
+            raise DomainValidationError("An active Gym context token or 'gym_id' query parameter is required.")
+        gym_overview = get_gym_overview(str(gym_id))
+        if not gym_overview:
+            raise ResourceNotFoundError("Gym not found.")
+        check_gym_permission(request, gym_overview, required_scope="gym_profile:read")
+        request._resolved_gym = gym_overview
         return Response(GymDetailSerializer(gym_overview).data, status=status.HTTP_200_OK)
 
     @extend_schema(

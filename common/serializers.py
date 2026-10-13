@@ -18,6 +18,14 @@ class StrictUUIDField(serializers.UUIDField):
         return super().to_internal_value(data)
 
 
+class StrictBooleanField(serializers.BooleanField):
+    """BooleanField that strictly requires actual boolean types (True/False), rejecting strings like 'yes', 'true', etc."""
+    def to_internal_value(self, data):
+        if not isinstance(data, bool):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
 class ErrorDetailSerializer(serializers.Serializer):
     code = serializers.CharField(help_text="Machine-readable error code", default="VALIDATION_ERROR")
     message = serializers.CharField(help_text="Human-readable explanation of the error")
