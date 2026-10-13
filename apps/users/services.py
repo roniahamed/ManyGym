@@ -23,10 +23,14 @@ def register_user(email: str, password: str, first_name: str, last_name: str, ph
     Registers a new user, creates empty UserProfile, and sends an email OTP verification code.
     """
     email_clean = email.lower().strip()
-    if User.objects.filter(email=email_clean).exists():
-        raise ResourceConflictError("An account with this email address already exists.")
+    existing_user = User.objects.filter(email=email_clean).first()
+    if existing_user:
+        if existing_user.is_verified:
+            raise ResourceConflictError("This account is already registered and verified. Please proceed to login.")
+        raise ResourceConflictError("An account with this email already exists but is unverified. Please verify your OTP or request a new code.")
 
     user = User.objects.create_user(
+
         email=email_clean,
         password=password,
         first_name=first_name.strip(),
@@ -36,7 +40,8 @@ def register_user(email: str, password: str, first_name: str, last_name: str, ph
         status=UserStatus.ACTIVE,
     )
 
-    UserProfile.objects.create(user=user)
+    profile = UserProfile.objects.create(user=user)
+    user.profile = profile
 
     # Invalidate any prior unused OTPs for this email
     OTPVerification.objects.filter(
@@ -83,11 +88,15 @@ def verify_signup_otp(email: str, otp_code: str) -> User:
     """
     email_clean = email.lower().strip()
     try:
-        user = User.objects.get(email=email_clean)
+        user = User.objects.select_related("profile").get(email=email_clean)
     except User.DoesNotExist:
         raise ResourceNotFoundError("User with this email was not found.")
 
+    if user.is_verified:
+        raise DomainValidationError("This account is already verified. Please proceed to login.")
+
     otp_record = OTPVerification.objects.filter(
+
         email=email_clean,
         otp_code=otp_code.strip(),
         purpose=OTPVerification.Purpose.SIGNUP_VERIFICATION,
@@ -268,6 +277,7 @@ def update_user_profile(user: User, **profile_data) -> User:
             setattr(profile, field, profile_data[field])
     profile.save()
 
+    user.profile = profile
     return user
 
 

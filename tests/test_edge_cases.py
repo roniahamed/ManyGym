@@ -155,6 +155,14 @@ def test_otp_lifecycle_and_invalidation_edge_cases():
     })
     assert res_new.status_code == 200
 
+    # Edge Case: Attempting to verify OTP again when already verified
+    res_verify_again = client.post(reverse("verify-signup-otp"), {
+        "email": user.email,
+        "otp_code": new_code,
+    })
+    assert res_verify_again.status_code == 400
+    assert "already verified" in res_verify_again.data["message"]
+
     # Edge Case: Attempting to resend OTP after account is already verified
     res_resend_verified = client.post(reverse("resend-otp"), {"email": user.email})
     assert res_resend_verified.status_code == 400
@@ -163,6 +171,7 @@ def test_otp_lifecycle_and_invalidation_edge_cases():
     # Edge Case: Resend OTP for non-existent email
     res_resend_404 = client.post(reverse("resend-otp"), {"email": "nobody@nowhere.com"})
     assert res_resend_404.status_code == 404
+
 
 
 # =====================================================================

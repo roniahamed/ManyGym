@@ -34,6 +34,7 @@ from common.exceptions import (
     PermissionDeniedError,
 )
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
+from common.pagination import StandardResultsSetPagination
 
 
 def resolve_request_gym(request) -> Gym:
@@ -42,7 +43,7 @@ def resolve_request_gym(request) -> Gym:
     if not gym_id:
         raise DomainValidationError("An active Gym context token or 'gym_id' parameter is required for this operation.")
     try:
-        gym = Gym.objects.get(id=gym_id)
+        gym = Gym.objects.select_related("owner_user").get(id=gym_id)
     except (Gym.DoesNotExist, ValueError):
         raise ResourceNotFoundError("Gym not found.")
     return gym
@@ -114,16 +115,19 @@ Retrieves all system permission scopes organized across the 9 core topics:
 
 class RoleListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
 
     @extend_schema(
         tags=["Access Control & RBAC"],
         summary="List Available Roles",
         description="""
 ### Summary
-Returns global system standard roles (`Administrator`, `Staff`, `Trainer`) along with gym-specific custom roles.
+Returns global system standard roles (`Administrator`, `Staff`, `Trainer`) along with gym-specific custom roles. Supports optional pagination.
 
 ### Parameters
-- `gym_id`: (Optional query param if not using a gym context token).
+- `gym_id`: Optional Gym UUID to include gym custom roles when using personal token.
+- `page`: Page number (optional).
+- `page_size`: Results per page (optional).
         """,
         parameters=[
             OpenApiParameter(
@@ -131,7 +135,19 @@ Returns global system standard roles (`Administrator`, `Staff`, `Trainer`) along
                 description="Optional Gym UUID to include gym custom roles when using personal token",
                 required=False,
                 type=str,
-            )
+            ),
+            OpenApiParameter(
+                name="page",
+                description="Page number",
+                required=False,
+                type=int,
+            ),
+            OpenApiParameter(
+                name="page_size",
+                description="Results per page (max 100)",
+                required=False,
+                type=int,
+            ),
         ],
         responses={
             200: OpenApiResponse(
@@ -144,6 +160,14 @@ Returns global system standard roles (`Administrator`, `Staff`, `Trainer`) along
     def get(self, request):
         gym_id = getattr(request, "gym_id", None) or request.query_params.get("gym_id")
         roles = list_gym_roles(gym_id=gym_id)
+
+        if "page" in request.query_params or "page_size" in request.query_params:
+            paginator = self.pagination_class()
+            page = paginator.paginate_queryset(roles, request, view=self)
+            if page is not None:
+                serializer = RoleSerializer(page, many=True)
+                return paginator.get_paginated_response(serializer.data)
+
         return Response(RoleSerializer(roles, many=True).data, status=status.HTTP_200_OK)
 
     @extend_schema(
@@ -198,6 +222,7 @@ Creates a new custom role scoped to the current gym and binds selected permissio
             description=serializer.validated_data.get("description"),
             permission_ids=serializer.validated_data.get("permission_ids"),
         )
+        role = Role.objects.select_related("gym").prefetch_related("permissions").get(id=role.id)
         return Response(RoleSerializer(role).data, status=status.HTTP_201_CREATED)
 
 
@@ -215,7 +240,7 @@ class RoleDetailView(APIView):
     )
     def get(self, request, role_id):
         try:
-            role = Role.objects.prefetch_related("permissions").get(id=role_id)
+            role = Role.objects.select_related("gym").prefetch_related("permissions").get(id=role_id)
         except (Role.DoesNotExist, ValueError):
             raise ResourceNotFoundError("Role not found.")
         return Response(RoleSerializer(role).data, status=status.HTTP_200_OK)
@@ -241,7 +266,7 @@ Updates custom role metadata (name, description) and re-assigns selected permiss
     )
     def patch(self, request, role_id):
         try:
-            role = Role.objects.get(id=role_id)
+            role = Role.objects.select_related("gym").prefetch_related("permissions").get(id=role_id)
         except (Role.DoesNotExist, ValueError):
             raise ResourceNotFoundError("Role not found.")
 
@@ -258,6 +283,7 @@ Updates custom role metadata (name, description) and re-assigns selected permiss
             description=serializer.validated_data.get("description"),
             permission_ids=serializer.validated_data.get("permission_ids"),
         )
+        updated_role = Role.objects.select_related("gym").prefetch_related("permissions").get(id=updated_role.id)
         return Response(RoleSerializer(updated_role).data, status=status.HTTP_200_OK)
 
     @extend_schema(
@@ -280,7 +306,7 @@ Deletes an unused custom role from the gym.
     )
     def delete(self, request, role_id):
         try:
-            role = Role.objects.get(id=role_id)
+            role = Role.objects.select_related("gym").get(id=role_id)
         except (Role.DoesNotExist, ValueError):
             raise ResourceNotFoundError("Role not found.")
 
@@ -295,25 +321,61 @@ Deletes an unused custom role from the gym.
 
 class StaffListInviteView(APIView):
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
 
     @extend_schema(
         tags=["Access Control & RBAC"],
         summary="List Gym Staff Members",
         description="""
 ### Summary
-Retrieves all staff members assigned to the active gym with their role, invitation date, and assignment status.
+Retrieves paginated directory of all staff members assigned to the active gym with their role, invitation date, and assignment status.
+
+### Parameters
+- `page`: Page number (default: 1).
+- `page_size`: Results per page (default: 20, max: 100).
+- `all`: If `true`, returns unpaginated full list.
 
 ### Authorization
 - Requires active Gym context or Gym Ownership.
         """,
+        parameters=[
+            OpenApiParameter(
+                name="page",
+                description="Page number",
+                required=False,
+                type=int,
+            ),
+            OpenApiParameter(
+                name="page_size",
+                description="Results per page (max 100)",
+                required=False,
+                type=int,
+            ),
+            OpenApiParameter(
+                name="all",
+                description="Set to 'true' to retrieve all staff members unpaginated",
+                required=False,
+                type=bool,
+            ),
+        ],
         responses={
-            200: OpenApiResponse(response=StaffAssignmentSerializer(many=True), description="Staff directory."),
+            200: StaffAssignmentSerializer(many=True),
             401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
         },
     )
     def get(self, request):
         gym = resolve_request_gym(request)
         staff = list_gym_staff(gym_id=str(gym.id))
+
+        if request.query_params.get("all") == "true" or request.query_params.get("paginate") == "false":
+            return Response(StaffAssignmentSerializer(staff, many=True).data, status=status.HTTP_200_OK)
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(staff, request, view=self)
+        if page is not None:
+            serializer = StaffAssignmentSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
         return Response(StaffAssignmentSerializer(staff, many=True).data, status=status.HTTP_200_OK)
 
     @extend_schema(
@@ -359,6 +421,11 @@ Invites an existing registered user to join the gym with a designated role (e.g.
             user_email=serializer.validated_data["email"],
             role_id=str(serializer.validated_data["role_id"]),
         )
+        assignment = (
+            GymStaffAssignment.objects.select_related("user__profile", "role__gym", "gym")
+            .prefetch_related("role__permissions")
+            .get(id=assignment.id)
+        )
         return Response(StaffAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
 
 
@@ -392,7 +459,11 @@ When `inactive`, the staff member can no longer switch context to this gym or ex
     )
     def patch(self, request, assignment_id):
         try:
-            assignment = GymStaffAssignment.objects.select_related("gym").get(id=assignment_id)
+            assignment = (
+                GymStaffAssignment.objects.select_related("gym", "user__profile", "role__gym")
+                .prefetch_related("role__permissions")
+                .get(id=assignment_id)
+            )
         except (GymStaffAssignment.DoesNotExist, ValueError):
             raise ResourceNotFoundError("Staff assignment not found.")
 
@@ -403,6 +474,11 @@ When `inactive`, the staff member can no longer switch context to this gym or ex
         serializer = UpdateStaffStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         updated = update_staff_status(assignment, serializer.validated_data["status"])
+        updated = (
+            GymStaffAssignment.objects.select_related("gym", "user__profile", "role__gym")
+            .prefetch_related("role__permissions")
+            .get(id=updated.id)
+        )
         return Response(StaffAssignmentSerializer(updated).data, status=status.HTTP_200_OK)
 
     @extend_schema(

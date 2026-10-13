@@ -85,7 +85,7 @@ def authenticate_user(email: str, password: str) -> tuple[User, dict]:
     """
     email_clean = email.lower().strip()
     try:
-        user = User.objects.get(email=email_clean)
+        user = User.objects.select_related("profile").get(email=email_clean)
     except User.DoesNotExist:
         raise DomainValidationError("Invalid email or password.")
 
@@ -107,7 +107,7 @@ def switch_gym_context(user: User, gym_id: str) -> dict:
     Switches session context to a specific gym after validating user access.
     """
     try:
-        gym = Gym.objects.get(id=gym_id)
+        gym = Gym.objects.select_related("owner_user").get(id=gym_id)
     except (Gym.DoesNotExist, ValueError):
         raise ResourceNotFoundError("Gym not found.")
 

@@ -28,6 +28,7 @@ from apps.users.services import (
     update_user_profile,
     change_password,
 )
+from apps.users.selectors import get_user_by_id
 from apps.authentication.services import issue_context_token
 from apps.gyms.selectors import get_accessible_gyms_for_user
 from common.enums import TokenContextType
@@ -446,7 +447,7 @@ Retrieves personal profile data, current active token context, and the full list
         },
     )
     def get(self, request):
-        user = request.user
+        user = get_user_by_id(request.user.id) or request.user
         accessible_gyms = get_accessible_gyms_for_user(user)
         return Response(
             {
