@@ -77,3 +77,35 @@ def get_gym_by_id(gym_id: str) -> Optional[Gym]:
     except Exception:
         return None
 
+
+def get_gym_overview(gym_id: str) -> Optional[Gym]:
+    """Retrieves complete gym profile overview with primary location preloaded."""
+    return (
+        Gym.objects.select_related("owner_user")
+        .prefetch_related("locations")
+        .filter(id=gym_id)
+        .first()
+    )
+
+
+def get_gym_location(gym_id: str):
+    """Retrieves the primary map location of the gym."""
+    from apps.gyms.models import GymLocation
+    return GymLocation.objects.filter(gym_id=gym_id, is_primary=True).first()
+
+
+def get_opening_hours(gym_id: str):
+    """Retrieves full 7-day operating schedule ordered by day_of_week."""
+    from apps.gyms.models import GymOpeningHours
+    return GymOpeningHours.objects.filter(gym_id=gym_id).order_by("day_of_week")
+
+
+def list_gallery_items(gym_id: str, category: str = None):
+    """Retrieves gallery assets filtered by category and ordered by order_index."""
+    from apps.gyms.models import GymGallery
+    queryset = GymGallery.objects.filter(gym_id=gym_id)
+    if category:
+        queryset = queryset.filter(category=category)
+    return queryset.order_by("order_index", "-created_at")
+
+

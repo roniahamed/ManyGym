@@ -46,7 +46,9 @@ LOCAL_APPS = [
     "apps.gyms",
     "apps.access_control",
     "apps.authentication",
+    "apps.amenities",
 ]
+
 
 AUTH_USER_MODEL = "users.User"
 

@@ -18,6 +18,9 @@ urlpatterns = [
     path("api/v1/users/", include("apps.users.rest_api.v1.urls")),
     # Dynamic Roles & Topic-Based RBAC Endpoints
     path("api/v1/access-control/", include("apps.access_control.rest_api.v1.urls")),
+    # Phase 2: Gym Profile & Amenities Endpoints
+    path("api/v1/gyms/", include("apps.gyms.rest_api.v1.urls")),
+    path("api/v1/amenities/", include("apps.amenities.rest_api.v1.urls")),
     # OpenAPI Schema & API Documentation
 
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),
