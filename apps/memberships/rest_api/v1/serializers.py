@@ -9,7 +9,12 @@ from common.enums import (
     DurationUnitEnum,
     PaymentScheduleEnum,
 )
-from common.serializers import StrictCharField, StrictUUIDField
+from common.serializers import (
+    StrictCharField,
+    StrictUUIDField,
+    StrictIntegerField,
+    StrictDecimalField,
+)
 
 
 class PlanIncludedAmenitySerializer(serializers.ModelSerializer):
@@ -145,18 +150,18 @@ class MembershipPlanCreateSerializer(serializers.Serializer):
         choices=PlanTypeEnum.choices,
         required=True,
     )
-    price = serializers.DecimalField(
+    price = StrictDecimalField(
         max_digits=10,
         decimal_places=2,
         min_value=Decimal("0.00"),
         required=True,
     )
-    duration_value = serializers.IntegerField(min_value=1, required=True)
+    duration_value = StrictIntegerField(min_value=1, required=True)
     duration_unit = serializers.ChoiceField(
         choices=DurationUnitEnum.choices,
         required=True,
     )
-    joining_fee = serializers.DecimalField(
+    joining_fee = StrictDecimalField(
         max_digits=10,
         decimal_places=2,
         min_value=Decimal("0.00"),
@@ -228,18 +233,18 @@ class MembershipPlanUpdateSerializer(serializers.Serializer):
         choices=PlanTypeEnum.choices,
         required=False,
     )
-    price = serializers.DecimalField(
+    price = StrictDecimalField(
         max_digits=10,
         decimal_places=2,
         min_value=Decimal("0.00"),
         required=False,
     )
-    duration_value = serializers.IntegerField(min_value=1, required=False)
+    duration_value = StrictIntegerField(min_value=1, required=False)
     duration_unit = serializers.ChoiceField(
         choices=DurationUnitEnum.choices,
         required=False,
     )
-    joining_fee = serializers.DecimalField(
+    joining_fee = StrictDecimalField(
         max_digits=10,
         decimal_places=2,
         min_value=Decimal("0.00"),
@@ -267,6 +272,24 @@ class MembershipPlanUpdateSerializer(serializers.Serializer):
                 raise serializers.ValidationError("Description must be at least 50 characters long when provided.")
             return stripped
         return value
+
+    def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
+        plan_type = attrs.get("plan_type")
+        duration_unit = attrs.get("duration_unit")
+
+        if plan_type and duration_unit:
+            if plan_type == PlanTypeEnum.TIME_BASED:
+                valid_units = [DurationUnitEnum.DAY, DurationUnitEnum.WEEK, DurationUnitEnum.MONTH]
+                if duration_unit not in valid_units:
+                    raise serializers.ValidationError({
+                        "duration_unit": f"For time-based plans, duration unit must be one of: {', '.join(valid_units)}."
+                    })
+            elif plan_type == PlanTypeEnum.SESSION_BASED:
+                if duration_unit != DurationUnitEnum.SESSION:
+                    raise serializers.ValidationError({
+                        "duration_unit": "For session-based plans, duration unit must be 'session'."
+                    })
+        return attrs
 
 
 class PlanStatusTransitionSerializer(serializers.Serializer):

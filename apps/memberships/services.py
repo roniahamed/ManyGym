@@ -258,8 +258,10 @@ def sync_plan_amenities(
 
     # Add missing links
     to_create = []
+    seen = set()
     for aid in amenity_ids:
-        if aid not in current_links:
+        if aid not in current_links and aid not in seen:
+            seen.add(aid)
             to_create.append(
                 PlanIncludedAmenities(
                     plan=plan,

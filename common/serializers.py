@@ -26,6 +26,22 @@ class StrictBooleanField(serializers.BooleanField):
         return super().to_internal_value(data)
 
 
+class StrictIntegerField(serializers.IntegerField):
+    """IntegerField that strictly rejects boolean types."""
+    def to_internal_value(self, data):
+        if isinstance(data, bool):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
+class StrictDecimalField(serializers.DecimalField):
+    """DecimalField that strictly rejects boolean types."""
+    def to_internal_value(self, data):
+        if isinstance(data, bool):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
 class ErrorDetailSerializer(serializers.Serializer):
     code = serializers.CharField(help_text="Machine-readable error code", default="VALIDATION_ERROR")
     message = serializers.CharField(help_text="Human-readable explanation of the error")

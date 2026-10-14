@@ -42,8 +42,8 @@ def resolve_plan_gym(request) -> Gym:
         return cached
 
     gym_id = (
-        getattr(request, "gym_id", None)
-        or request.query_params.get("gym_id")
+        request.query_params.get("gym_id")
+        or getattr(request, "gym_id", None)
         or (request.data.get("gym_id") if isinstance(request.data, dict) else None)
     )
     if not gym_id:

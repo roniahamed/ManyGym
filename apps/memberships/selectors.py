@@ -58,17 +58,22 @@ def list_gym_plans(
         .order_by("-created_at")
     )
 
-    if plan_status:
-        qs = qs.filter(plan_status=plan_status.lower().strip())
+    if plan_status is not None:
+        status_val = str(plan_status).lower().strip()
+        if status_val:
+            qs = qs.filter(plan_status=status_val)
 
-    if plan_type:
-        qs = qs.filter(plan_type=plan_type.lower().strip())
+    if plan_type is not None:
+        type_val = str(plan_type).lower().strip()
+        if type_val:
+            qs = qs.filter(plan_type=type_val)
 
-    if search:
-        search_term = search.strip()
-        qs = qs.filter(
-            Q(name__icontains=search_term) | Q(description__icontains=search_term)
-        )
+    if search is not None:
+        search_term = str(search).strip()
+        if search_term:
+            qs = qs.filter(
+                Q(name__icontains=search_term) | Q(description__icontains=search_term)
+            )
 
     return qs
 
