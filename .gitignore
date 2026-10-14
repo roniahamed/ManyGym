@@ -56,3 +56,8 @@ htmlcov/
 *.swp
 *~
 .DS_Store
+
+# AI Agent Rules & Configs
+AGENTS.md
+GEMINI.md
+.agents/

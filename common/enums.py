@@ -61,30 +61,26 @@ class AmenityGroupEnum(models.TextChoices):
 
 
 class PlanStatusEnum(models.TextChoices):
+    DRAFT = "draft", "Draft"
     ACTIVE = "active", "Active"
     ARCHIVED = "archived", "Archived"
-    DRAFT = "draft", "Draft"
 
 
 class PlanTypeEnum(models.TextChoices):
-    RECURRING = "recurring", "Recurring"
-    FIXED_DURATION = "fixed_duration", "Fixed Duration"
+    TIME_BASED = "time_based", "Time Based"
+    SESSION_BASED = "session_based", "Session Based"
 
 
 class DurationUnitEnum(models.TextChoices):
-    DAYS = "days", "Days"
-    WEEKS = "weeks", "Weeks"
-    MONTHS = "months", "Months"
-    YEARS = "years", "Years"
+    DAY = "day", "Day"
+    WEEK = "week", "Week"
+    MONTH = "month", "Month"
+    SESSION = "session", "Session"
 
 
 class PaymentScheduleEnum(models.TextChoices):
-    UPFRONT = "upfront", "Upfront"
-    WEEKLY = "weekly", "Weekly"
-    MONTHLY = "monthly", "Monthly"
-    QUARTERLY = "quarterly", "Quarterly"
-    SEMI_ANNUALLY = "semi_annually", "Semi Annually"
-    ANNUALLY = "annually", "Annually"
+    FULL_PAYMENT = "full_payment", "Full Payment"
+    INSTALMENTS = "instalments", "Instalments"
 
 
 class MemberJoiningStatus(models.TextChoices):

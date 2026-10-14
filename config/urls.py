@@ -21,6 +21,8 @@ urlpatterns = [
     # Phase 2: Gym Profile & Amenities Endpoints
     path("api/v1/gyms/", include("apps.gyms.rest_api.v1.urls")),
     path("api/v1/amenities/", include("apps.amenities.rest_api.v1.urls")),
+    # Phase 3: Membership Plans & Dynamic Pricing Engine
+    path("api/v1/plans/", include("apps.memberships.rest_api.v1.urls")),
     # OpenAPI Schema & API Documentation
 
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),

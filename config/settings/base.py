@@ -47,6 +47,7 @@ LOCAL_APPS = [
     "apps.access_control",
     "apps.authentication",
     "apps.amenities",
+    "apps.memberships",
 ]
 
 
