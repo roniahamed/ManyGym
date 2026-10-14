@@ -84,35 +84,31 @@ class PaymentScheduleEnum(models.TextChoices):
 
 
 class MemberJoiningStatus(models.TextChoices):
-    PROSPECT = "prospect", "Prospect"
-    ONBOARDING = "onboarding", "Onboarding"
-    ACTIVE = "active", "Active"
-    FROZEN = "frozen", "Frozen"
-    CANCELLED = "cancelled", "Cancelled"
-    EXPIRED = "expired", "Expired"
+    SENT_INVITATION = "sent_invitation", "Sent Invitation"
+    JOINED = "joined", "Joined"
 
 
 class MembershipStatusEnum(models.TextChoices):
+    SCHEDULED = "scheduled", "Scheduled"
     ACTIVE = "active", "Active"
-    PENDING = "pending", "Pending"
     PAUSED = "paused", "Paused"
-    CANCELLED = "cancelled", "Cancelled"
     EXPIRED = "expired", "Expired"
+    CANCELLED = "cancelled", "Cancelled"
 
 
 class PaymentStatusEnum(models.TextChoices):
-    PENDING = "pending", "Pending"
-    PAID = "paid", "Paid"
-    FAILED = "failed", "Failed"
-    REFUNDED = "refunded", "Refunded"
+    FULLY_PAID = "fully_paid", "Fully Paid"
+    PARTIALLY_PAID = "partially_paid", "Partially Paid"
+    UNPAID = "unpaid", "Unpaid"
 
 
 class PaymentMethodEnum(models.TextChoices):
-    CARD = "card", "Credit/Debit Card"
     CASH = "cash", "Cash"
+    CREDIT_CARD = "credit_card", "Credit Card"
+    DEBIT_CARD = "debit_card", "Debit Card"
     BANK_TRANSFER = "bank_transfer", "Bank Transfer"
-    POS = "pos", "POS Machine"
-    ONLINE_GATEWAY = "online_gateway", "Online Payment Gateway"
+    MOBILE_PAY = "mobile_pay", "Mobile Pay"
+    OTHER = "other", "Other"
 
 
 class LeadStageEnum(models.TextChoices):

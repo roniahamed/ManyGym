@@ -48,6 +48,7 @@ LOCAL_APPS = [
     "apps.authentication",
     "apps.amenities",
     "apps.memberships",
+    "apps.members",
 ]
 
 
