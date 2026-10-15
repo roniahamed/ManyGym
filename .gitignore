@@ -29,9 +29,8 @@ ENV/
 
 # Environment Variables
 .env
+.env.*
 !.env.example
-!.env.dev
-!.env.prod
 
 # Database / SQLite
 *.sqlite3
