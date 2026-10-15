@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal
 from typing import Dict, Any, List, Optional
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.members.models import (
@@ -265,6 +266,11 @@ class MemberCreateSerializer(serializers.Serializer):
     initial_payment_notes = StrictCharField(required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
+        start = attrs.get("start_date") or timezone.now().date()
+        end = attrs.get("end_date")
+        if end and end < start:
+            raise serializers.ValidationError({"end_date": "Subscription end date cannot be prior to start date."})
+
         amt = attrs.get("initial_payment_amount")
         method = attrs.get("initial_payment_method")
         if amt and not method:
@@ -327,6 +333,11 @@ class MemberSubscriptionCreateSerializer(serializers.Serializer):
     initial_payment_notes = StrictCharField(required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
+        start = attrs.get("start_date") or timezone.now().date()
+        end = attrs.get("end_date")
+        if end and end < start:
+            raise serializers.ValidationError({"end_date": "Subscription end date cannot be prior to start date."})
+
         amt = attrs.get("initial_payment_amount")
         method = attrs.get("initial_payment_method")
         if amt and not method:

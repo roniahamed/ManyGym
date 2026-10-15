@@ -496,3 +496,464 @@ def test_standard_error_envelope_structure():
     assert "code" in resp.data
     assert "message" in resp.data
     assert "details" in resp.data
+
+
+# =====================================================================
+# 11. ADDITIONAL TYPE JUGGLING ACROSS OTHER PHASE 4 ENDPOINTS
+# =====================================================================
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("payload", [
+    {"first_name": 999},
+    {"first_name": ["Bad"]},
+    {"first_name": {"nested": "value"}},
+    {"last_name": 123},
+    {"last_name": ["List"]},
+    {"email": 456},
+    {"phone": 789},
+    {"date_of_birth": 12345},
+    {"date_of_birth": "not-a-date"},
+    {"assigned_trainer_id": 123},
+    {"assigned_trainer_id": ["not-uuid"]},
+])
+def test_member_patch_type_juggling(payload):
+    ctx = setup_gym_and_member_context("patch_tj@manygym.com")
+    url = reverse("member-detail", kwargs={"member_id": ctx["member"].id})
+    resp = ctx["client"].patch(url, payload, format="json")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("payload", [
+    {"plan_id": 12345},
+    {"plan_id": ["not-a-uuid"]},
+    {"plan_id": {"id": "uuid"}},
+    {"plan_id": True},
+    {"start_date": 12345},
+    {"start_date": "not-a-date"},
+    {"start_date": "2026-13-45"},
+    {"extra_amenity_ids": "not-a-list"},
+    {"extra_amenity_ids": 12345},
+    {"extra_amenity_ids": [12345]},
+    {"initial_payment_amount": "invalid-number"},
+    {"initial_payment_amount": [50.00]},
+    {"initial_payment_amount": -50.00},
+    {"initial_payment_amount": 0.00},
+    {"initial_payment_method": 12345},
+])
+def test_subscription_create_type_juggling(payload):
+    ctx = setup_gym_and_member_context("sub_create_tj@manygym.com")
+    url = reverse("member-subscription-create", kwargs={"member_id": ctx["member"].id})
+    # If plan_id is not in payload, supply valid one unless testing plan_id
+    if "plan_id" not in payload:
+        payload["plan_id"] = str(ctx["plan"].id)
+    resp = ctx["client"].post(url, payload, format="json")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("payload", [
+    {"amenity_ids": "not-a-list"},
+    {"amenity_ids": 12345},
+    {"amenity_ids": {"id": "val"}},
+    {"amenity_ids": True},
+    {"amenity_ids": [12345]},
+    {"amenity_ids": ["not-a-uuid"]},
+])
+def test_extra_amenities_type_juggling(payload):
+    ctx = setup_gym_and_member_context("extra_am_tj@manygym.com")
+    url = reverse("member-subscription-extra-amenities", kwargs={"subscription_id": ctx["subscription"].id})
+    resp = ctx["client"].post(url, payload, format="json")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("payload", [
+    {"token": 12345},
+    {"token": ["not-a-token"]},
+    {"token": {"nested": "token"}},
+    {"token": True},
+    {"invitation_token": 12345},
+    {"invitation_token": ["bad"]},
+])
+def test_accept_invitation_type_juggling(payload):
+    _, client, _ = create_user_with_tokens("accept_tj@manygym.com")
+    url = reverse("member-accept-invitation")
+    resp = client.post(url, payload, format="json")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("payload", [
+    {"membership_status": 12345},
+    {"membership_status": ["bad"]},
+    {"membership_status": {"status": "active"}},
+    {"membership_status": True},
+    {"membership_status": "non_existent_status"},
+])
+def test_subscription_status_type_juggling(payload):
+    ctx = setup_gym_and_member_context("sub_status_tj@manygym.com")
+    url = reverse("member-subscription-status", kwargs={"subscription_id": ctx["subscription"].id})
+    resp = ctx["client"].patch(url, payload, format="json")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# =====================================================================
+# 12. BOUNDARIES, LENGTH & DATE LOGIC
+# =====================================================================
+
+@pytest.mark.django_db
+def test_subscription_create_end_date_before_start_date():
+    ctx = setup_gym_and_member_context("sub_dates@manygym.com")
+    url = reverse("member-subscription-create", kwargs={"member_id": ctx["member"].id})
+    payload = {
+        "plan_id": str(ctx["plan"].id),
+        "start_date": str(date.today()),
+        "end_date": str(date.today() - timedelta(days=5)),
+    }
+    resp = ctx["client"].post(url, payload, format="json")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+    assert "code" in resp.data
+
+
+@pytest.mark.django_db
+def test_subscription_create_session_plan_requires_end_date():
+    ctx = setup_gym_and_member_context("sub_session_date@manygym.com")
+    url = reverse("member-subscription-create", kwargs={"member_id": ctx["member"].id})
+    payload = {
+        "plan_id": str(ctx["session_plan"].id),
+        "start_date": str(date.today()),
+    }
+    resp = ctx["client"].post(url, payload, format="json")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+def test_extra_amenities_free_amenity_rejection():
+    ctx = setup_gym_and_member_context("free_amenity_rej@manygym.com")
+    catalog2 = AmenityCatalog.objects.last()
+    free_amenity = GymAmenity.objects.create(
+        gym=ctx["gym"],
+        amenity=catalog2,
+        is_paid=False,
+    )
+    url = reverse("member-subscription-extra-amenities", kwargs={"subscription_id": ctx["subscription"].id})
+    resp = ctx["client"].post(url, {"amenity_ids": [str(free_amenity.id)]}, format="json")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+    assert "free" in str(resp.data).lower()
+
+
+@pytest.mark.django_db
+def test_extra_amenities_deduplication():
+    ctx = setup_gym_and_member_context("am_dedup@manygym.com")
+    url = reverse("member-subscription-extra-amenities", kwargs={"subscription_id": ctx["subscription"].id})
+    aid = str(ctx["gym_amenity"].id)
+    resp = ctx["client"].post(url, {"amenity_ids": [aid, aid, aid]}, format="json")
+    assert resp.status_code == status.HTTP_201_CREATED
+    assert len(resp.data) == 1
+
+
+# =====================================================================
+# 13. MASS ASSIGNMENT & SERVER-CONTROLLED FIELDS PROTECTION
+# =====================================================================
+
+@pytest.mark.django_db
+def test_member_mass_assignment_protection():
+    ctx = setup_gym_and_member_context("mass_assign@manygym.com")
+    url = reverse("member-list-create")
+    fake_id = uuid.uuid4()
+    payload = {
+        "id": str(fake_id),
+        "first_name": "Injected",
+        "last_name": "Member",
+        "email": "injected@massassign.com",
+        "joining_status": "joined",
+        "is_active": False,
+        "created_at": "2020-01-01T00:00:00Z",
+    }
+    resp = ctx["client"].post(url, payload, format="json")
+    assert resp.status_code == status.HTTP_201_CREATED
+    data = resp.data
+    assert str(data["id"]) != str(fake_id)
+    assert data["joining_status"] == MemberJoiningStatus.SENT_INVITATION
+
+
+@pytest.mark.django_db
+def test_subscription_mass_assignment_protection():
+    ctx = setup_gym_and_member_context("sub_mass_assign@manygym.com")
+    url = reverse("member-subscription-create", kwargs={"member_id": ctx["member"].id})
+    payload = {
+        "plan_id": str(ctx["plan"].id),
+        "payment_status": "fully_paid",
+        "total_sessions": 9999,
+        "remaining_sessions": 9999,
+    }
+    resp = ctx["client"].post(url, payload, format="json")
+    assert resp.status_code == status.HTTP_201_CREATED
+    assert resp.data["payment_status"] == PaymentStatusEnum.UNPAID
+
+
+# =====================================================================
+# 14. SECURITY PAYLOADS ACROSS MEMBER FIELDS
+# =====================================================================
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("sec_payload", [
+    "'; DROP TABLE apps_members_member; --",
+    "\" OR \"\"=\"",
+    "<script>alert('XSS')</script>",
+    "<img src=x onerror=alert(1)>",
+    "../../../../../../etc/passwd",
+    "🏋️‍♂️🔥বাংলা টেস্ট ইউজার",
+    "العربية / 日本語 / Русский",
+    "Z̵a̶l̶g̸o̶ ̷T̷e̴x̵t̸",
+])
+def test_member_create_security_payloads_in_all_fields(sec_payload):
+    ctx = setup_gym_and_member_context("sec_fields@manygym.com")
+    url = reverse("member-list-create")
+    email = f"user_{uuid.uuid4().hex[:8]}@manygym.com"
+    payload = {
+        "first_name": sec_payload[:50],
+        "last_name": sec_payload[:50],
+        "email": email,
+        "address": sec_payload[:200],
+        "city": sec_payload[:50],
+        "country": sec_payload[:50],
+        "internal_notes": sec_payload,
+        "emergency_contact_name": sec_payload[:50],
+        "emergency_contact_relationship": sec_payload[:50],
+    }
+    resp = ctx["client"].post(url, payload, format="json")
+    assert resp.status_code == status.HTTP_201_CREATED
+    member_id = resp.data["id"]
+
+    detail_url = reverse("member-detail", kwargs={"member_id": member_id})
+    detail_resp = ctx["client"].get(detail_url)
+    assert detail_resp.status_code == status.HTTP_200_OK
+
+
+# =====================================================================
+# 15. PAYMENT LEDGER CALCULATIONS (PARTIAL, FULL, OVERPAID)
+# =====================================================================
+
+@pytest.mark.django_db
+def test_payment_ledger_calculations_and_status_transitions():
+    ctx = setup_gym_and_member_context("ledger_calc@manygym.com")
+    sub = ctx["subscription"]
+    assert sub.payment_status == PaymentStatusEnum.UNPAID
+
+    pay_url = reverse("member-subscription-payment-create", kwargs={"subscription_id": sub.id})
+
+    # 1. Partial payment: $50.00
+    resp1 = ctx["client"].post(pay_url, {"amount": "50.00", "payment_method": "cash"}, format="json")
+    assert resp1.status_code == status.HTTP_201_CREATED
+    sub.refresh_from_db()
+    assert sub.payment_status == PaymentStatusEnum.PARTIALLY_PAID
+
+    # 2. Settle remaining balance: $70.00 (Total paid = $120.00)
+    resp2 = ctx["client"].post(pay_url, {"amount": "70.00", "payment_method": "credit_card"}, format="json")
+    assert resp2.status_code == status.HTTP_201_CREATED
+    sub.refresh_from_db()
+    assert sub.payment_status == PaymentStatusEnum.FULLY_PAID
+
+    # 3. Overpayment: $20.00 (Total paid = $140.00)
+    resp3 = ctx["client"].post(pay_url, {"amount": "20.00", "payment_method": "bank_transfer"}, format="json")
+    assert resp3.status_code == status.HTTP_201_CREATED
+    sub.refresh_from_db()
+    assert sub.payment_status == PaymentStatusEnum.FULLY_PAID
+
+
+# =====================================================================
+# 16. EXHAUSTIVE IDOR & CROSS-TENANT ISOLATION
+# =====================================================================
+
+@pytest.mark.django_db
+def test_cross_tenant_idor_exhaustive_operations():
+    gym_a_ctx = setup_gym_and_member_context("gyma_idor@manygym.com")
+    gym_b_ctx = setup_gym_and_member_context("gymb_idor@manygym.com")
+
+    member_a = gym_a_ctx["member"]
+    sub_a = gym_a_ctx["subscription"]
+
+    # 1. Gym B tries to resend invitation for Gym A's member
+    resp = gym_b_ctx["client"].post(reverse("member-resend-invitation", kwargs={"member_id": member_a.id}))
+    assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+    # 2. Gym B tries to attach subscription to Gym A's member
+    resp = gym_b_ctx["client"].post(
+        reverse("member-subscription-create", kwargs={"member_id": member_a.id}),
+        {"plan_id": str(gym_b_ctx["plan"].id)},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+    # 3. Gym B tries to transition status of Gym A's subscription
+    resp = gym_b_ctx["client"].patch(
+        reverse("member-subscription-status", kwargs={"subscription_id": sub_a.id}),
+        {"status": "cancelled"},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+    # 4. Gym B tries to attach extra amenities to Gym A's subscription
+    resp = gym_b_ctx["client"].post(
+        reverse("member-subscription-extra-amenities", kwargs={"subscription_id": sub_a.id}),
+        {"amenity_ids": [str(gym_b_ctx["gym_amenity"].id)]},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+    # 5. Gym A tries to attach Gym B's amenity to Gym A's subscription
+    resp = gym_a_ctx["client"].post(
+        reverse("member-subscription-extra-amenities", kwargs={"subscription_id": sub_a.id}),
+        {"amenity_ids": [str(gym_b_ctx["gym_amenity"].id)]},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# =====================================================================
+# 17. EXHAUSTIVE RBAC & SCOPE PERMISSIONS
+# =====================================================================
+
+@pytest.mark.django_db
+def test_rbac_read_only_staff_cannot_perform_mutations():
+    ctx = setup_gym_and_member_context("rbac_mutations@manygym.com")
+    member = ctx["member"]
+    sub = ctx["subscription"]
+
+    staff_user, staff_client, _ = create_user_with_tokens("readonly_staff@manygym.com")
+    read_role = Role.objects.create(gym=ctx["gym"], name="Reader Role", slug="reader-role")
+    perm = Permission.objects.get(scope_code="members:read")
+    read_role.permissions.add(perm)
+    GymStaffAssignment.objects.create(
+        gym=ctx["gym"],
+        user=staff_user,
+        role=read_role,
+        status="active",
+    )
+    tokens = issue_context_token(staff_user, context_type=TokenContextType.GYM, gym=ctx["gym"])
+    staff_client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # Can read
+    assert staff_client.get(reverse("member-list-create")).status_code == status.HTTP_200_OK
+    assert staff_client.get(reverse("member-detail", kwargs={"member_id": member.id})).status_code == status.HTTP_200_OK
+    assert staff_client.get(reverse("member-metrics")).status_code == status.HTTP_200_OK
+
+    # Cannot mutate
+    assert staff_client.post(reverse("member-list-create"), {"first_name": "Test", "last_name": "X", "email": "t@x.com"}).status_code == status.HTTP_403_FORBIDDEN
+    assert staff_client.patch(reverse("member-detail", kwargs={"member_id": member.id}), {"first_name": "Y"}).status_code == status.HTTP_403_FORBIDDEN
+    assert staff_client.delete(reverse("member-detail", kwargs={"member_id": member.id})).status_code == status.HTTP_403_FORBIDDEN
+    assert staff_client.post(reverse("member-resend-invitation", kwargs={"member_id": member.id})).status_code == status.HTTP_403_FORBIDDEN
+    assert staff_client.post(reverse("member-subscription-create", kwargs={"member_id": member.id}), {"plan_id": str(ctx["plan"].id)}).status_code == status.HTTP_403_FORBIDDEN
+    assert staff_client.patch(reverse("member-subscription-status", kwargs={"subscription_id": sub.id}), {"status": "paused"}).status_code == status.HTTP_403_FORBIDDEN
+    assert staff_client.post(reverse("member-subscription-payment-create", kwargs={"subscription_id": sub.id}), {"amount": "10.00", "payment_method": "cash"}).status_code == status.HTTP_403_FORBIDDEN
+    assert staff_client.post(reverse("member-subscription-extra-amenities", kwargs={"subscription_id": sub.id}), {"amenity_ids": [str(ctx["gym_amenity"].id)]}).status_code == status.HTTP_403_FORBIDDEN
+
+
+# =====================================================================
+# 18. EXHAUSTIVE HTTP METHOD NOT ALLOWED (405)
+# =====================================================================
+
+@pytest.mark.django_db
+def test_exhaustive_http_methods_not_allowed():
+    ctx = setup_gym_and_member_context("methods_exhaustive@manygym.com")
+    member = ctx["member"]
+    sub = ctx["subscription"]
+    client = ctx["client"]
+
+    # Metrics endpoint: only GET allowed
+    assert client.post(reverse("member-metrics"), {}).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.delete(reverse("member-metrics")).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+    # Accept invitation endpoint: only POST allowed
+    assert client.get(reverse("member-accept-invitation")).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.delete(reverse("member-accept-invitation")).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+    # Resend invitation endpoint: only POST allowed
+    resend_url = reverse("member-resend-invitation", kwargs={"member_id": member.id})
+    assert client.get(resend_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.put(resend_url, {}).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.delete(resend_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+    # Subscription create endpoint: only POST allowed
+    sub_create_url = reverse("member-subscription-create", kwargs={"member_id": member.id})
+    assert client.get(sub_create_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.put(sub_create_url, {}).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.delete(sub_create_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+    # Subscription status transition endpoint: only PATCH allowed
+    sub_status_url = reverse("member-subscription-status", kwargs={"subscription_id": sub.id})
+    assert client.get(sub_status_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.post(sub_status_url, {}).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.delete(sub_status_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+    # Payment create endpoint: only POST allowed
+    pay_url = reverse("member-subscription-payment-create", kwargs={"subscription_id": sub.id})
+    assert client.get(pay_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.put(pay_url, {}).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.delete(pay_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+    # Extra amenities endpoint: only POST allowed
+    am_url = reverse("member-subscription-extra-amenities", kwargs={"subscription_id": sub.id})
+    assert client.get(am_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.put(am_url, {}).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert client.delete(am_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+
+# =====================================================================
+# 19. BUSINESS INVARIANTS & INTEGRATION EDGE CASES
+# =====================================================================
+
+@pytest.mark.django_db
+def test_delete_member_with_and_without_payments():
+    ctx = setup_gym_and_member_context("del_invariants@manygym.com")
+    member = ctx["member"]
+    sub = ctx["subscription"]
+    detail_url = reverse("member-detail", kwargs={"member_id": member.id})
+
+    # 1. Record a payment
+    record_member_payment(
+        subscription=sub,
+        amount=Decimal("50.00"),
+        payment_method="cash",
+        payment_date=date.today(),
+    )
+
+    # Attempt to delete member with existing payments -> 409 Conflict
+    resp = ctx["client"].delete(detail_url)
+    assert resp.status_code == status.HTTP_409_CONFLICT
+    assert "code" in resp.data
+    assert Member.objects.filter(id=member.id).exists()
+
+    # 2. Create another member with NO payments
+    member_no_pay = create_member(
+        gym=ctx["gym"],
+        first_name="NoPay",
+        last_name="Member",
+        email="nopay@deltest.com",
+    )
+    no_pay_url = reverse("member-detail", kwargs={"member_id": member_no_pay.id})
+    del_resp = ctx["client"].delete(no_pay_url)
+    assert del_resp.status_code == status.HTTP_200_OK
+    assert not Member.objects.filter(id=member_no_pay.id).exists()
+
+
+@pytest.mark.django_db
+def test_resend_invitation_already_joined_member():
+    ctx = setup_gym_and_member_context("resend_joined@manygym.com")
+    member = ctx["member"]
+    token = member.invitation_token
+
+    # Accept invitation so member status transitions to 'joined'
+    user, client, _ = create_user_with_tokens("joined_user@manygym.com")
+    client.post(reverse("member-accept-invitation"), {"invitation_token": str(token)}, format="json")
+    member.refresh_from_db()
+    assert member.joining_status == MemberJoiningStatus.JOINED
+
+    # Resend invitation must now fail with 400 Bad Request
+    resend_url = reverse("member-resend-invitation", kwargs={"member_id": member.id})
+    resp = ctx["client"].post(resend_url)
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
+    assert "already" in str(resp.data).lower()
+
