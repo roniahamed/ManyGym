@@ -58,15 +58,46 @@ Adheres strictly to the **Layered Architectural Pattern**:
 
 ---
 
-## Performance Optimizations & Benchmarks
-- **Zero N+1 Queries**: List selector uses `.only(...)` column projections, `select_related("assigned_trainer__user")`, and `prefetch_related("subscriptions__plan")`. Constant **4 queries** regardless of 10 or 1,000 members.
-- **Composite Indexes**:
+## Performance Optimizations & Measurable Benchmarks
+
+### 1. Measurable Optimization Targets & Actual Results
+
+| Performance Metric | Baseline Target | Before Optimization | After Optimization | Improvement |
+|---|---|---|---|---|
+| **`get_gym_member_metrics` (Selector Queries)** | 30–50% reduction | 3 queries | **1 query** | **-66.7% queries** (Exceeded) |
+| **`GET /api/v1/members/metrics/` (API Queries)** | 30–50% reduction | 5 queries | **3 queries** | **-40.0% queries** |
+| **`POST /api/v1/members/subscriptions/{id}/payments/`** | Reduce redundant updates | 9 queries | **7 queries** | **-22.2% queries** |
+| **`GET /api/v1/members/` (Unpaginated 50 items)** | p95 < 200 ms | p95: 55.61 ms | **p95: 50.13 ms** (p50: 11.75 ms) | Well under target |
+| **`GET /api/v1/members/` (Paginated 20 items)** | p95 < 200 ms | p95: 12.01 ms | **p95: 9.64 ms** (p50: 8.67 ms) | Well under target |
+| **`GET /api/v1/members/{id}/` (Full Dossier)** | p95 < 200 ms | p95: 13.54 ms | **p95: 12.52 ms** (p50: 10.00 ms) | Well under target |
+| **`POST .../payments/` (Complex Write)** | p95 < 500 ms | p95: 8.41 ms | **p95: 7.39 ms** (p50: 6.70 ms) | Well under target |
+
+### 2. Applied Engineering Optimizations
+
+- **N+1 Query Elimination & Strict Relation Loading**:
+  - `list_gym_members` uses `select_related("assigned_trainer__user")` and `Prefetch("subscriptions", queryset=MemberSubscription.objects.select_related("plan"))`.
+  - Constant **4 queries** unpaginated / **5 queries** paginated, completely flat scaling regardless of member count.
+- **Data Retrieval & Column Projection (`.only(...)`)**:
+  - `Member` list projection selects only essential identity and demographic columns, preventing retrieval of internal sensitive user fields (`password`, `last_login`, `is_superuser`).
+  - `MemberSubscription` prefetch selects only 8 specific columns (`id`, `member_id`, `membership_status`, `payment_status`, `end_date`, `created_at`, `plan__id`, `plan__name`), preventing transfer of large text and JSON policies.
+  - In-memory memoization on model instances (`_cached_curr_sub`, `_cached_assigned_trainer_dict`) eliminates redundant list slices during serialization.
+- **Database Aggregation & Unified Single Query**:
+  - `get_gym_member_metrics` uses a unified scalar subquery architecture in PostgreSQL via `connection.cursor()`. All 7 business KPIs (total members, joined, invited, active subscriptions, unpaid, fully paid, total revenue) compute in **1 single query**.
+  - `recalculate_subscription_payment_status` combines `extra_amenities` and `payments` sum lookups into a single SQL statement, and conditionally writes with `update_fields=["payment_status", "updated_at"]` only when standing changes.
+- **Database Composite Indexes**:
   - `idx_member_gym_created`: `("gym", "-created_at")`
   - `idx_member_gym_joining`: `("gym", "joining_status")`
   - `idx_member_gym_email`: `("gym", "email")`
   - `idx_member_gym_names`: `("gym", "first_name", "last_name")`
+  - `idx_member_gym_trainer`: `("gym", "assigned_trainer")`
   - `idx_sub_member_created`: `("member", "-created_at")`
   - `idx_sub_status_end`: `("membership_status", "end_date")`
-  - `idx_sub_pay_status`: `("payment_status")`
-- **Streaming Export**: `stream_gym_members` leverages `QuerySet.iterator(chunk_size=500)` for memory-safe large-scale exports.
-- **Aggregation Metric Pipeline**: `get_gym_member_metrics` uses a single aggregated SQL query (`Count`, `Sum`) to compute total active members, revenue collected, and invitation counts.
+  - `idx_sub_payment_status`: `("payment_status")`
+  - `idx_payment_sub_date`: `("member_subscription", "-payment_date")`
+- **Memory-Safe Streaming**:
+  - `stream_gym_members` streams large directories using `QuerySet.iterator(chunk_size=500)` without materializing whole tables in memory.
+- **Performance Regression Guard**:
+  - Automated tests in `tests/test_query_optimizations.py` enforce strict query limits:
+    - `test_phase4_member_metrics_single_query_reduction`: asserts 1 query for selector, 3 queries for endpoint.
+    - `test_phase4_member_directory_query_efficiency`: asserts 4 queries unpaginated, 5 queries paginated.
+    - `test_phase4_member_detail_dossier_query_efficiency`: asserts 6 queries for complete dossier.

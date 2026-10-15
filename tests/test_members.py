@@ -84,7 +84,9 @@ def test_create_member_with_initial_subscription_and_payment():
     gym_amenity = GymAmenity.objects.create(gym=gym, amenity=cat, is_paid=True, default_price=Decimal("30.00"))
 
     # Total expected cost: $100 + $20 + $30 = $150
-    start_date_str = "2026-10-15"
+    start_date = date.today() + timedelta(days=5)
+    start_date_str = str(start_date)
+    expected_end_date = str(start_date + relativedelta(months=3))
     payload = {
         "first_name": "John",
         "last_name": "Doe",
@@ -123,10 +125,10 @@ def test_create_member_with_initial_subscription_and_payment():
     sub = data["active_subscription"]
     assert sub is not None
     assert sub["plan_name"] == "Gold 3-Month Plan"
-    assert sub["membership_status"] == MembershipStatusEnum.SCHEDULED  # 2026-10-15 is future from mock now
+    assert sub["membership_status"] == MembershipStatusEnum.SCHEDULED  # future from today
     assert sub["payment_status"] == PaymentStatusEnum.FULLY_PAID
-    assert sub["start_date"] == "2026-10-15"
-    assert sub["end_date"] == "2027-01-15"  # + 3 calendar months
+    assert sub["start_date"] == start_date_str
+    assert sub["end_date"] == expected_end_date  # + 3 calendar months
 
     # Check extra amenities
     assert len(sub["extra_amenities"]) == 1

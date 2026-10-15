@@ -77,6 +77,7 @@ class Member(models.Model):
             models.Index(fields=["gym", "joining_status"], name="idx_member_gym_joining"),
             models.Index(fields=["gym", "email"], name="idx_member_gym_email"),
             models.Index(fields=["gym", "first_name", "last_name"], name="idx_member_gym_names"),
+            models.Index(fields=["gym", "assigned_trainer"], name="idx_member_gym_trainer"),
         ]
 
     @property

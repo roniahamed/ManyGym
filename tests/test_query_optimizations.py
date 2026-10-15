@@ -619,5 +619,232 @@ def test_phase2_amenities_endpoints_query_count(django_assert_num_queries):
         assert len(data["free_amenities"]) == 1
 
 
+# =====================================================================
+# PHASE 4: MEMBER LIFECYCLE & SUBSCRIPTION PERFORMANCE TESTS
+# =====================================================================
+
+@pytest.mark.django_db
+def test_phase4_member_metrics_single_query_reduction(django_assert_num_queries):
+    """
+    Verify get_gym_member_metrics executes in exactly 1 query (reduced from 3, 66.7% reduction).
+    Verify GET /api/v1/members/metrics/ executes in exactly 3 queries (reduced from 5, 40% reduction).
+    """
+    import uuid
+    from datetime import date
+    from decimal import Decimal
+    from apps.gyms.services import create_gym
+    from apps.memberships.services import create_membership_plan
+    from apps.members.services import create_member, create_member_subscription
+    from apps.members.selectors import get_gym_member_metrics
+    from common.enums import PlanStatusEnum, PlanTypeEnum, DurationUnitEnum
+
+    owner = User.objects.create_user(
+        email="p4.metrics.opt@manygym.com",
+        password="Password123!",
+        first_name="P4",
+        last_name="Metrics",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Metrics Gym")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Metrics Pro Plan",
+        description="Performance testing plan description for metric aggregation.",
+        plan_status=PlanStatusEnum.ACTIVE,
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("80.00"),
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    for i in range(5):
+        m = create_member(
+            gym=gym,
+            first_name=f"User{i}",
+            last_name="Test",
+            email=f"user{i}_{uuid.uuid4().hex[:6]}@test.com",
+        )
+        create_member_subscription(
+            member=m,
+            plan=plan,
+            start_date=date.today(),
+            initial_payment_amount=Decimal("40.00"),
+            initial_payment_method="cash",
+        )
+
+    # 1. Direct selector execution: Exactly 1 query
+    with django_assert_num_queries(1):
+        metrics = get_gym_member_metrics(gym)
+        assert metrics["total_members"] == 5
+        assert metrics["active_subscriptions"] == 5
+        assert metrics["total_revenue"] == 200.0
+
+    # 2. REST API endpoint: Exactly 3 queries (1 FastJWT auth + 1 gym context + 1 unified metrics)
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(3):
+        res = client.get(f"{reverse('member-metrics')}?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total_members"] == 5
+        assert data["active_subscriptions"] == 5
+        assert data["total_revenue"] == 200.0
+
+
+@pytest.mark.django_db
+def test_phase4_member_directory_query_efficiency(django_assert_num_queries):
+    """
+    Verify GET /api/v1/members/ executes in exactly 4 queries regardless of dataset size:
+    1. FastJWT auth (select_related profile)
+    2. resolve_member_gym (.only)
+    3. Member directory (with .only and select_related assigned_trainer__user)
+    4. Prefetched subscriptions (with .only on subscriptions and plan)
+    Eliminating N+1 queries.
+    """
+    import uuid
+    from datetime import date
+    from decimal import Decimal
+    from apps.gyms.services import create_gym
+    from apps.memberships.services import create_membership_plan
+    from apps.members.services import create_member, create_member_subscription
+    from common.enums import PlanStatusEnum, PlanTypeEnum, DurationUnitEnum
+
+    owner = User.objects.create_user(
+        email="p4.dir.opt@manygym.com",
+        password="Password123!",
+        first_name="P4",
+        last_name="Dir",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Directory Gym")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Dir Plan",
+        description="Performance testing plan description for directory listings.",
+        plan_status=PlanStatusEnum.ACTIVE,
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("50.00"),
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    for i in range(10):
+        m = create_member(
+            gym=gym,
+            first_name=f"DirUser{i}",
+            last_name="Test",
+            email=f"diruser{i}_{uuid.uuid4().hex[:6]}@test.com",
+        )
+        create_member_subscription(
+            member=m,
+            plan=plan,
+            start_date=date.today(),
+        )
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # 1. Unpaginated directory listing: exactly 4 queries
+    with django_assert_num_queries(4):
+        res = client.get(f"{reverse('member-list-create')}?gym_id={gym.id}")
+        assert res.status_code == 200
+        assert len(res.json()) == 10
+
+    # 2. Paginated directory listing: exactly 5 queries (4 + 1 pagination COUNT)
+    with django_assert_num_queries(5):
+        res = client.get(f"{reverse('member-list-create')}?gym_id={gym.id}&page=1&page_size=5")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 10
+        assert len(data["results"]) == 5
+
+
+@pytest.mark.django_db
+def test_phase4_member_detail_dossier_query_efficiency(django_assert_num_queries):
+    """
+    Verify GET /api/v1/members/{id}/ executes in exactly 6 queries with full relations:
+    1. FastJWT auth
+    2. resolve_member_gym
+    3. Member dossier (.only + select_related gym, user, assigned_trainer__user)
+    4. Subscriptions prefetch (.only + select_related plan)
+    5. Extra amenities prefetch (.only + select_related gym_amenity__amenity)
+    6. Payments prefetch (.only)
+    """
+    from decimal import Decimal
+    from datetime import date
+    from apps.gyms.services import create_gym
+    from apps.memberships.services import create_membership_plan
+    from apps.members.services import (
+        create_member,
+        create_member_subscription,
+        record_member_payment,
+        attach_extra_amenities,
+    )
+    from apps.amenities.models import AmenityCatalog, GymAmenity
+    from common.enums import PlanStatusEnum, PlanTypeEnum, DurationUnitEnum
+
+    owner = User.objects.create_user(
+        email="p4.dossier.opt@manygym.com",
+        password="Password123!",
+        first_name="P4",
+        last_name="Dossier",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Dossier Gym")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Dossier Plan",
+        description="Performance testing plan description for dossier endpoint.",
+        plan_status=PlanStatusEnum.ACTIVE,
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("120.00"),
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    from apps.amenities.services import seed_amenity_catalog
+    seed_amenity_catalog()
+    cat = AmenityCatalog.objects.first()
+    gym_amenity = GymAmenity.objects.create(gym=gym, amenity=cat, is_paid=True, default_price=Decimal("20.00"))
+
+    member = create_member(
+        gym=gym,
+        first_name="Jane",
+        last_name="Dossier",
+        email="jane.dossier@manygym.com",
+    )
+    sub = create_member_subscription(
+        member=member,
+        plan=plan,
+        start_date=date.today(),
+    )
+    attach_extra_amenities(sub, [gym_amenity.id])
+    record_member_payment(sub, amount=Decimal("70.00"), payment_method="cash", payment_date=date.today())
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(6):
+        res = client.get(f"{reverse('member-detail', kwargs={'member_id': member.id})}?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["email"] == "jane.dossier@manygym.com"
+        assert len(data["subscriptions"]) == 1
+        assert len(data["subscriptions"][0]["extra_amenities"]) == 1
+        assert len(data["subscriptions"][0]["payments"]) == 1
+        assert Decimal(data["subscriptions"][0]["total_cost"]) == Decimal("140.00")
+
+
+
 
 

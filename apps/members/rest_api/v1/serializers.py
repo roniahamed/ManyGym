@@ -129,11 +129,16 @@ class MemberListSerializer(serializers.ModelSerializer):
         ]
 
     def _get_current_subscription(self, obj: Member) -> Optional[MemberSubscription]:
-        # Fast in-memory inspection from prefetched subscriptions
+        # Fast in-memory inspection from prefetched subscriptions with per-instance memoization
+        if hasattr(obj, "_cached_curr_sub"):
+            return obj._cached_curr_sub
         if hasattr(obj, "_prefetched_objects_cache") and "subscriptions" in obj._prefetched_objects_cache:
             subs = obj._prefetched_objects_cache["subscriptions"]
-            return subs[0] if subs else None
-        return obj.subscriptions.first()
+            sub = subs[0] if subs else None
+        else:
+            sub = obj.subscriptions.first()
+        obj._cached_curr_sub = sub
+        return sub
 
     def get_current_plan_name(self, obj: Member) -> Optional[str]:
         sub = self._get_current_subscription(obj)
@@ -152,14 +157,19 @@ class MemberListSerializer(serializers.ModelSerializer):
         return str(sub.end_date) if sub else None
 
     def get_assigned_trainer(self, obj: Member) -> Optional[Dict[str, Any]]:
+        if hasattr(obj, "_cached_assigned_trainer_dict"):
+            return obj._cached_assigned_trainer_dict
         trainer = obj.assigned_trainer
         if not trainer:
-            return None
-        return {
-            "id": str(trainer.id),
-            "name": trainer.user.full_name,
-            "email": trainer.user.email,
-        }
+            res = None
+        else:
+            res = {
+                "id": str(trainer.id),
+                "name": trainer.user.full_name,
+                "email": trainer.user.email,
+            }
+        obj._cached_assigned_trainer_dict = res
+        return res
 
 
 class MemberDetailSerializer(serializers.ModelSerializer):

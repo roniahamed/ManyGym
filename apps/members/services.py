@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
 from dateutil.relativedelta import relativedelta
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Sum
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -421,31 +421,36 @@ def attach_extra_amenities(
 def recalculate_subscription_payment_status(subscription: MemberSubscription) -> None:
     """
     Calculates total cost (plan price + joining fee + extra amenities) vs total paid,
-    and updates subscription payment_status.
+    and updates subscription payment_status using a single aggregated SQL lookup and selective update_fields.
     """
     plan = subscription.plan
     base_cost = plan.price + plan.joining_fee
-    extra_cost = (
-        MemberExtraAmenities.objects.filter(member_subscription=subscription, is_active=True)
-        .aggregate(total=Sum("extra_fee"))["total"]
-        or Decimal("0.00")
-    )
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                (SELECT COALESCE(SUM(extra_fee), 0.00) FROM member_extra_amenities WHERE member_subscription_id = %s AND is_active = true),
+                (SELECT COALESCE(SUM(amount), 0.00) FROM member_payments WHERE member_subscription_id = %s)
+            """,
+            [subscription.id, subscription.id],
+        )
+        row = cursor.fetchone()
+        extra_cost = Decimal(str(row[0] or 0.00))
+        total_paid = Decimal(str(row[1] or 0.00))
+
     total_cost = base_cost + extra_cost
 
-    total_paid = (
-        MemberPayment.objects.filter(member_subscription=subscription)
-        .aggregate(total=Sum("amount"))["total"]
-        or Decimal("0.00")
-    )
-
     if total_paid >= total_cost:
-        subscription.payment_status = PaymentStatusEnum.FULLY_PAID
+        new_status = PaymentStatusEnum.FULLY_PAID
     elif total_paid > Decimal("0.00"):
-        subscription.payment_status = PaymentStatusEnum.PARTIALLY_PAID
+        new_status = PaymentStatusEnum.PARTIALLY_PAID
     else:
-        subscription.payment_status = PaymentStatusEnum.UNPAID
+        new_status = PaymentStatusEnum.UNPAID
 
-    subscription.save(update_fields=["payment_status", "updated_at"])
+    if subscription.payment_status != new_status:
+        subscription.payment_status = new_status
+        subscription.save(update_fields=["payment_status", "updated_at"])
 
 
 @transaction.atomic

@@ -1,6 +1,8 @@
 import uuid
+from decimal import Decimal
 from typing import Optional, Dict, Any, Generator
-from django.db.models import QuerySet, Q, Prefetch, Count, Sum
+from django.db import connection
+from django.db.models import QuerySet, Q, Prefetch
 from apps.gyms.models import Gym
 from apps.members.models import (
     Member,
@@ -31,7 +33,20 @@ def list_gym_members(
     """
     sub_prefetch = Prefetch(
         "subscriptions",
-        queryset=MemberSubscription.objects.select_related("plan").order_by("-created_at"),
+        queryset=(
+            MemberSubscription.objects.select_related("plan")
+            .only(
+                "id",
+                "member_id",
+                "membership_status",
+                "payment_status",
+                "end_date",
+                "created_at",
+                "plan__id",
+                "plan__name",
+            )
+            .order_by("-created_at")
+        ),
     )
 
     qs = (
@@ -49,6 +64,13 @@ def list_gym_members(
             "joining_status",
             "created_at",
             "updated_at",
+            "assigned_trainer__id",
+            "assigned_trainer__gym_id",
+            "assigned_trainer__user_id",
+            "assigned_trainer__user__id",
+            "assigned_trainer__user__first_name",
+            "assigned_trainer__user__last_name",
+            "assigned_trainer__user__email",
         )
         .select_related("assigned_trainer__user")
         .prefetch_related(sub_prefetch)
@@ -60,15 +82,18 @@ def list_gym_members(
         if status_clean:
             qs = qs.filter(joining_status=status_clean)
 
+    has_reverse_filter = False
     if membership_status is not None:
         ms_clean = str(membership_status).lower().strip()
         if ms_clean:
             qs = qs.filter(subscriptions__membership_status=ms_clean)
+            has_reverse_filter = True
 
     if payment_status is not None:
         ps_clean = str(payment_status).lower().strip()
         if ps_clean:
             qs = qs.filter(subscriptions__payment_status=ps_clean)
+            has_reverse_filter = True
 
     if assigned_trainer_id is not None:
         qs = qs.filter(assigned_trainer_id=assigned_trainer_id)
@@ -83,7 +108,9 @@ def list_gym_members(
                 | Q(phone__icontains=search_term)
             )
 
-    return qs.distinct()
+    if has_reverse_filter:
+        return qs.distinct()
+    return qs
 
 
 def get_member_detail(
@@ -93,26 +120,87 @@ def get_member_detail(
     """
     Retrieves a complete member dossier including subscription history,
     bundled extra amenities, payment transaction ledger, and notes.
+    Optimized with precise column projection to eliminate over-fetching.
     """
     extra_amenity_prefetch = Prefetch(
         "extra_amenities",
-        queryset=MemberExtraAmenities.objects.select_related("gym_amenity__amenity"),
+        queryset=(
+            MemberExtraAmenities.objects.select_related("gym_amenity__amenity")
+            .only(
+                "id",
+                "member_subscription_id",
+                "gym_amenity_id",
+                "extra_fee",
+                "is_active",
+                "created_at",
+                "gym_amenity__id",
+                "gym_amenity__amenity_id",
+                "gym_amenity__amenity__name",
+                "gym_amenity__amenity__group_name",
+            )
+        ),
     )
     payment_prefetch = Prefetch(
         "payments",
-        queryset=MemberPayment.objects.order_by("-payment_date", "-created_at"),
+        queryset=(
+            MemberPayment.objects.only(
+                "id",
+                "member_subscription_id",
+                "amount",
+                "payment_method",
+                "payment_date",
+                "is_initial_payment",
+                "notes",
+                "created_at",
+            )
+            .order_by("-payment_date", "-created_at")
+        ),
     )
     sub_prefetch = Prefetch(
         "subscriptions",
-        queryset=MemberSubscription.objects.select_related("plan")
-        .prefetch_related(extra_amenity_prefetch, payment_prefetch)
-        .order_by("-created_at"),
+        queryset=(
+            MemberSubscription.objects.select_related("plan")
+            .only(
+                "id",
+                "member_id",
+                "plan_id",
+                "membership_status",
+                "payment_status",
+                "start_date",
+                "end_date",
+                "total_sessions",
+                "remaining_sessions",
+                "created_at",
+                "updated_at",
+                "plan__id",
+                "plan__name",
+                "plan__plan_type",
+                "plan__price",
+                "plan__joining_fee",
+            )
+            .prefetch_related(extra_amenity_prefetch, payment_prefetch)
+            .order_by("-created_at")
+        ),
     )
 
     try:
         return (
             Member.objects.filter(id=member_id, gym=gym)
             .select_related("gym", "user", "assigned_trainer__user")
+            .only(
+                "id", "gym_id", "user_id", "assigned_trainer_id",
+                "first_name", "last_name", "email", "phone",
+                "profile_photo_url", "address", "city", "country",
+                "date_of_birth", "sex", "nationality",
+                "emergency_contact_name", "emergency_contact_phone", "emergency_contact_relationship",
+                "joining_status", "invitation_sent_at", "internal_notes",
+                "created_at", "updated_at",
+                "gym__id", "gym__name",
+                "user__id", "user__email", "user__first_name", "user__last_name",
+                "assigned_trainer__id", "assigned_trainer__user_id",
+                "assigned_trainer__user__id", "assigned_trainer__user__first_name",
+                "assigned_trainer__user__last_name", "assigned_trainer__user__email",
+            )
             .prefetch_related(sub_prefetch)
             .get()
         )
@@ -122,28 +210,41 @@ def get_member_detail(
 
 def get_gym_member_metrics(gym: Gym) -> Dict[str, Any]:
     """
-    Calculates member and subscription metrics at the database level in a single query.
+    Calculates member and subscription metrics at the database level in a single unified query.
+    Reduces database round-trips from 3 to 1 (66.7% query reduction).
     """
-    member_aggregates = Member.objects.filter(gym=gym).aggregate(
-        total_members=Count("id", distinct=True),
-        joined_members=Count("id", filter=Q(joining_status=MemberJoiningStatus.JOINED), distinct=True),
-        invited_members=Count("id", filter=Q(joining_status=MemberJoiningStatus.SENT_INVITATION), distinct=True),
-    )
-
-    sub_aggregates = MemberSubscription.objects.filter(member__gym=gym).aggregate(
-        active_subscriptions=Count("id", filter=Q(membership_status=MembershipStatusEnum.ACTIVE), distinct=True),
-        unpaid_subscriptions=Count("id", filter=Q(payment_status=PaymentStatusEnum.UNPAID), distinct=True),
-        fully_paid_subscriptions=Count("id", filter=Q(payment_status=PaymentStatusEnum.FULLY_PAID), distinct=True),
-    )
-
-    revenue_aggregates = MemberPayment.objects.filter(member_subscription__member__gym=gym).aggregate(
-        total_revenue=Sum("amount"),
-    )
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM members WHERE gym_id = %s) AS total_members,
+                (SELECT COUNT(*) FROM members WHERE gym_id = %s AND joining_status = %s) AS joined_members,
+                (SELECT COUNT(*) FROM members WHERE gym_id = %s AND joining_status = %s) AS invited_members,
+                (SELECT COUNT(*) FROM member_subscriptions ms INNER JOIN members m ON ms.member_id = m.id WHERE m.gym_id = %s AND ms.membership_status = %s) AS active_subscriptions,
+                (SELECT COUNT(*) FROM member_subscriptions ms INNER JOIN members m ON ms.member_id = m.id WHERE m.gym_id = %s AND ms.payment_status = %s) AS unpaid_subscriptions,
+                (SELECT COUNT(*) FROM member_subscriptions ms INNER JOIN members m ON ms.member_id = m.id WHERE m.gym_id = %s AND ms.payment_status = %s) AS fully_paid_subscriptions,
+                (SELECT COALESCE(SUM(mp.amount), 0.00) FROM member_payments mp INNER JOIN member_subscriptions ms ON mp.member_subscription_id = ms.id INNER JOIN members m ON ms.member_id = m.id WHERE m.gym_id = %s) AS total_revenue
+            """,
+            [
+                gym.id,
+                gym.id, MemberJoiningStatus.JOINED,
+                gym.id, MemberJoiningStatus.SENT_INVITATION,
+                gym.id, MembershipStatusEnum.ACTIVE,
+                gym.id, PaymentStatusEnum.UNPAID,
+                gym.id, PaymentStatusEnum.FULLY_PAID,
+                gym.id,
+            ],
+        )
+        row = cursor.fetchone()
 
     return {
-        **member_aggregates,
-        **sub_aggregates,
-        "total_revenue": revenue_aggregates["total_revenue"] or 0.0,
+        "total_members": row[0] or 0,
+        "joined_members": row[1] or 0,
+        "invited_members": row[2] or 0,
+        "active_subscriptions": row[3] or 0,
+        "unpaid_subscriptions": row[4] or 0,
+        "fully_paid_subscriptions": row[5] or 0,
+        "total_revenue": float(row[6]) if row[6] is not None else 0.0,
     }
 
 
