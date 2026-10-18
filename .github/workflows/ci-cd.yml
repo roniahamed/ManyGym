@@ -127,6 +127,7 @@ jobs:
 
             echo "Step 3: Updating running Docker services..."
             docker compose up -d --remove-orphans
+            docker compose restart nginx
 
             echo "Step 4: Executing database migrations..."
             docker compose exec -T web python manage.py migrate --noinput
