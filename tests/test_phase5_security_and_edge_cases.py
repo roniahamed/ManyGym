@@ -635,3 +635,755 @@ class TestLeadAPIEndpoints:
         # Attempt to update lead of gym 1 with gym 2 credentials
         resp_patch = client2.patch(f"/api/v1/leads/{lead1.id}/", {"first_name": "Hacked"}, format="json")
         assert resp_patch.status_code == status.HTTP_404_NOT_FOUND
+
+
+def create_staff_with_scopes(gym, scopes: list[str], email_prefix="staff.custom"):
+    user, _, _ = create_user_with_tokens(f"{email_prefix}.{uuid.uuid4().hex[:8]}@manygym.com")
+    role = Role.objects.create(
+        gym=gym,
+        name=f"Role_{uuid.uuid4().hex[:6]}",
+        slug=f"slug_{uuid.uuid4().hex[:8]}",
+        is_custom=True,
+    )
+    perm_objs = [Permission.objects.get(scope_code=sc) for sc in scopes if Permission.objects.filter(scope_code=sc).exists()]
+    role.permissions.set(perm_objs)
+    assignment = GymStaffAssignment.objects.create(
+        gym=gym,
+        user=user,
+        role=role,
+        status=StaffStatus.ACTIVE,
+    )
+    tokens = issue_context_token(user, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+    return user, client, assignment
+
+
+# ==============================================================================
+# 3. TYPE JUGGLING & DATA TYPE MISMATCH TESTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5TypeJugglingAndMismatches:
+
+    @pytest.mark.parametrize("bad_name", [
+        12345,
+        True,
+        ["Invalid", "Array"],
+        {"first_name": "nested_dict"},
+    ])
+    def test_lead_first_name_type_mismatch_rejected(self, bad_name):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        payload = {
+            "first_name": bad_name,
+            "phone": "+1234567890",
+        }
+        resp = client.post("/api/v1/leads/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_goals", [
+        "weight_loss",  # string instead of list
+        123,
+        True,
+        {"goal": "weight_loss"},
+    ])
+    def test_lead_fitness_goals_non_array_rejected(self, bad_goals):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        payload = {
+            "first_name": "TypeTest",
+            "phone": "+1234567890",
+            "fitness_goals": bad_goals,
+        }
+        resp = client.post("/api/v1/leads/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_date", [
+        1700000000,
+        ["2026-10-15"],
+        {"date": "2026-10-15"},
+        True,
+    ])
+    def test_next_move_scheduled_date_type_mismatch_rejected(self, bad_date):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="MoveType", phone="+111")
+
+        payload = {
+            "scheduled_date": bad_date,
+            "short_description": "Follow-up call",
+        }
+        resp = client.post(f"/api/v1/leads/{lead.id}/next-moves/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_amount", [
+        ["100.00"],
+        {"amount": 100},
+        True,
+    ])
+    def test_convert_initial_payment_amount_type_mismatch_rejected(self, bad_amount):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="ConvertType", email="ct@test.com", interested_plan_id=ctx["plan"].id)
+
+        payload = {
+            "initial_payment_amount": bad_amount,
+            "initial_payment_method": "cash",
+        }
+        resp = client.post(f"/api/v1/leads/{lead.id}/convert/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_note", [
+        12345,
+        ["nested", "note"],
+        {"note": "text"},
+        None,
+    ])
+    def test_note_text_type_mismatch_rejected(self, bad_note):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="NoteType", phone="+111")
+
+        payload = {"note_text": bad_note}
+        resp = client.post(f"/api/v1/leads/{lead.id}/notes/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ==============================================================================
+# 4. BOUNDARY & EXTREME LENGTH VALUES TESTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5BoundaryAndExtremeLengths:
+
+    def test_first_name_extreme_length_rejected(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        # Exactly 100 chars (valid)
+        valid_name = "A" * 100
+        resp_valid = client.post("/api/v1/leads/", {"first_name": valid_name, "phone": "+12345"}, format="json")
+        assert resp_valid.status_code == status.HTTP_201_CREATED
+
+        # 101 chars (invalid)
+        resp_over = client.post("/api/v1/leads/", {"first_name": "A" * 101, "phone": "+12345"}, format="json")
+        assert resp_over.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 10,000 chars (extreme payload)
+        resp_extreme = client.post("/api/v1/leads/", {"first_name": "A" * 10000, "phone": "+12345"}, format="json")
+        assert resp_extreme.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("blank_name", ["", "   ", "\t\t\n"])
+    def test_whitespace_and_blank_names_rejected(self, blank_name):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/leads/", {"first_name": blank_name, "phone": "+12345"}, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_empty_contact_methods_rejected(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        # Neither phone nor email provided
+        resp = client.post("/api/v1/leads/", {"first_name": "NoContact"}, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Whitespace-only phone and email
+        resp_ws = client.post("/api/v1/leads/", {"first_name": "NoContact", "phone": "   ", "email": "   "}, format="json")
+        assert resp_ws.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_decimal", [
+        "-0.01",
+        "-100.00",
+        "0.00",  # min_value=0.01
+        "99999999999999999.99",  # exceeds max_digits
+    ])
+    def test_payment_amount_boundary_decimals_rejected(self, bad_decimal):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="DecTest", email="dec@test.com", interested_plan_id=ctx["plan"].id)
+
+        resp = client.post(
+            f"/api/v1/leads/{lead.id}/convert/",
+            {"initial_payment_amount": bad_decimal, "initial_payment_method": "cash"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_valid_boundary_payment_amount_accepted(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="DecValid", email="decvalid@test.com", interested_plan_id=ctx["plan"].id)
+
+        resp = client.post(
+            f"/api/v1/leads/{lead.id}/convert/",
+            {"initial_payment_amount": "99999999.99", "initial_payment_method": "cash"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_201_CREATED
+
+
+# ==============================================================================
+# 5. MISSING, EXTRA & GARBAGE FIELDS TESTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5MissingAndGarbageFields:
+
+    @pytest.mark.parametrize("endpoint,method", [
+        ("/api/v1/leads/", "post"),
+        ("/api/v1/leads/reasons/", "post"),
+    ])
+    def test_empty_json_payload_rejected(self, endpoint, method):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = getattr(client, method)(endpoint, {}, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_extra_garbage_fields_handled_gracefully(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        garbage_payload = {
+            "first_name": "GarbageTester",
+            "phone": "+1234567890",
+        }
+        for i in range(100):
+            garbage_payload[f"unknown_field_{i}"] = f"garbage_val_{i}"
+
+        resp = client.post("/api/v1/leads/", garbage_payload, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert resp.data["first_name"] == "GarbageTester"
+
+    def test_mass_assignment_protection_on_system_fields(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="MassAssign", phone="+123")
+
+        fake_id = str(uuid.uuid4())
+        fake_gym_id = str(uuid.uuid4())
+        malicious_payload = {
+            "id": fake_id,
+            "gym_id": fake_gym_id,
+            "created_at": "2020-01-01T00:00:00Z",
+            "converted_member_id": str(uuid.uuid4()),
+            "first_name": "TamperedName",
+        }
+
+        resp = client.patch(f"/api/v1/leads/{lead.id}/", malicious_payload, format="json")
+        assert resp.status_code == status.HTTP_200_OK
+
+        lead.refresh_from_db()
+        assert str(lead.id) != fake_id
+        assert str(lead.gym_id) != fake_gym_id
+        assert lead.converted_member_id is None
+        assert lead.first_name == "TamperedName"
+
+
+# ==============================================================================
+# 6. FORMAT-SPECIFIC & SEMANTIC INVALID INPUTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5FormatAndSemanticValidation:
+
+    @pytest.mark.parametrize("bad_date", [
+        "2026-13-45",
+        "32-01-2026",
+        "tomorrow",
+        "2026/05/10",
+        "invalid-date",
+    ])
+    def test_invalid_date_formats_rejected(self, bad_date):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/leads/", {
+            "first_name": "BadDateLead",
+            "phone": "+12345",
+            "expected_start_date": bad_date,
+        }, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_email", [
+        "plainaddress",
+        "@missingusername.com",
+        "username@.com",
+        "username@name@name.com",
+        "user name@domain.com",
+    ])
+    def test_invalid_email_formats_rejected(self, bad_email):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/leads/", {
+            "first_name": "BadEmailLead",
+            "email": bad_email,
+        }, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_choice_field,bad_value", [
+        ("stage", "SUPER_HOT_PROSPECT"),
+        ("source", "FLYING_SAUCER"),
+        ("not_joining_reason_standard", "TOO_TIRED_FOREVER"),
+    ])
+    def test_invalid_enum_choices_rejected(self, bad_choice_field, bad_value):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        payload = {
+            "first_name": "ChoiceLead",
+            "phone": "+12345",
+            bad_choice_field: bad_value,
+        }
+        resp = client.post("/api/v1/leads/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_non_existent_uuid_foreign_keys_rejected(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        non_existent_uuid = str(uuid.uuid4())
+        resp = client.post("/api/v1/leads/", {
+            "first_name": "FakeFKLead",
+            "phone": "+12345",
+            "interested_plan_id": non_existent_uuid,
+        }, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ==============================================================================
+# 7. QUERY PARAMS, FILTERS & PAGINATION EDGE CASES
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5QueryParamsAndPaginationEdgeCases:
+
+    @pytest.mark.parametrize("sqli_param", [
+        "' OR '1'='1",
+        "'; DROP TABLE apps_leads_lead; --",
+        "admin'--",
+        "\" OR \"\"=\"",
+        "%' OR 1=1 --",
+        "_",
+        "%%%",
+    ])
+    def test_search_parameter_sqli_resilience(self, sqli_param):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        create_lead(gym=ctx["gym"], first_name="SearchTarget", phone="+12345")
+
+        resp = client.get(f"/api/v1/leads/?search={sqli_param}")
+        assert resp.status_code == status.HTTP_200_OK
+        # Zero crash, safe parameterized SQL executed
+
+    @pytest.mark.parametrize("xss_search", [
+        "<script>alert(1)</script>",
+        "<img src=x onerror=alert(1)>",
+        "<svg/onload=alert('xss')>",
+    ])
+    def test_search_parameter_xss_resilience(self, xss_search):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.get(f"/api/v1/leads/?search={xss_search}")
+        assert resp.status_code == status.HTTP_200_OK
+
+    @pytest.mark.parametrize("bad_page", [
+        0,
+        -1,
+        -99,
+        "abc",
+        "null",
+    ])
+    def test_pagination_invalid_page_handles_gracefully(self, bad_page):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.get(f"/api/v1/leads/?page={bad_page}")
+        assert resp.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND]
+
+    def test_pagination_out_of_bounds_page_returns_404(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        create_lead(gym=ctx["gym"], first_name="P1", phone="+1")
+
+        resp = client.get("/api/v1/leads/?page=999999")
+        assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+    @pytest.mark.parametrize("bad_page_size", [
+        0,
+        -10,
+        999999,
+    ])
+    def test_pagination_boundary_page_size(self, bad_page_size):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        create_lead(gym=ctx["gym"], first_name="SizeTester", phone="+1")
+
+        resp = client.get(f"/api/v1/leads/?page_size={bad_page_size}")
+        assert resp.status_code in [status.HTTP_200_OK, status.HTTP_400_BAD_REQUEST]
+
+    def test_invalid_assigned_staff_uuid_query_param_fails(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.get("/api/v1/leads/?assigned_staff_id=not-a-uuid")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ==============================================================================
+# 8. SECURITY & ADVERSARIAL INJECTIONS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5SecurityAndAdversarialInjections:
+
+    @pytest.mark.parametrize("injection_string", [
+        "'; DROP TABLE apps_leads_lead; --",
+        "' OR 1=1 --",
+        "UNION SELECT NULL, NULL, NULL --",
+        "\" OR \"a\"=\"a",
+    ])
+    def test_sql_injection_stored_literally_without_execution(self, injection_string):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        # In lead first name
+        resp = client.post("/api/v1/leads/", {
+            "first_name": injection_string,
+            "phone": "+12345",
+        }, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+        lead_id = resp.data["id"]
+
+        # In lead note
+        resp_note = client.post(f"/api/v1/leads/{lead_id}/notes/", {
+            "note_text": injection_string,
+        }, format="json")
+        assert resp_note.status_code == status.HTTP_201_CREATED
+
+        # In next move description
+        resp_move = client.post(f"/api/v1/leads/{lead_id}/next-moves/", {
+            "scheduled_date": str(date.today()),
+            "short_description": injection_string,
+        }, format="json")
+        assert resp_move.status_code == status.HTTP_201_CREATED
+
+        # Database tables must remain completely intact
+        assert Lead.objects.filter(id=lead_id).exists()
+        lead = Lead.objects.get(id=lead_id)
+        assert lead.first_name == injection_string
+
+    @pytest.mark.parametrize("xss_payload", [
+        "<script>alert('xss')</script>",
+        "<img src=x onerror=alert(document.cookie)>",
+        "<iframe src=\"javascript:alert('pwned')\"></iframe>",
+    ])
+    def test_stored_xss_payloads_persisted_safely_as_strings(self, xss_payload):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/leads/", {
+            "first_name": xss_payload,
+            "phone": "+12345",
+            "initial_note": xss_payload,
+        }, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert resp.data["first_name"] == xss_payload
+
+    @pytest.mark.parametrize("traversal_string", [
+        "../../../../../../etc/passwd",
+        "..\\..\\..\\windows\\system32\\cmd.exe",
+        "/var/log/syslog",
+    ])
+    def test_path_traversal_payloads_handled_as_plain_strings(self, traversal_string):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/leads/", {
+            "first_name": "PathTest",
+            "phone": "+12345",
+            "initial_note": traversal_string,
+        }, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+
+    @pytest.mark.parametrize("unicode_string", [
+        "مرحبا بك في صالة الألعاب الرياضية",  # Arabic
+        "ברוכים הבאים לחדר כושר",             # Hebrew
+        "健身房潜在客户测试",                  # Chinese
+        "🏋️‍♂️ Muscle Building & Fat Loss 💪🔥💯",  # Emojis
+    ])
+    def test_unicode_and_multilingual_data_integrity(self, unicode_string):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/leads/", {
+            "first_name": unicode_string,
+            "phone": "+12345",
+            "initial_note": unicode_string,
+        }, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert resp.data["first_name"] == unicode_string
+
+
+# ==============================================================================
+# 9. AUTHENTICATION & RBAC PERMISSIONS TESTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5RBACAndAuthentication:
+
+    def test_anonymous_requests_blocked_with_401(self):
+        anon_client = APIClient()
+        fake_uuid = uuid.uuid4()
+
+        endpoints = [
+            ("get", "/api/v1/leads/"),
+            ("post", "/api/v1/leads/"),
+            ("get", "/api/v1/leads/metrics/"),
+            ("get", "/api/v1/leads/reasons/"),
+            ("post", "/api/v1/leads/reasons/"),
+            ("get", f"/api/v1/leads/{fake_uuid}/"),
+            ("patch", f"/api/v1/leads/{fake_uuid}/"),
+            ("delete", f"/api/v1/leads/{fake_uuid}/"),
+            ("post", f"/api/v1/leads/{fake_uuid}/next-moves/"),
+            ("post", f"/api/v1/leads/{fake_uuid}/notes/"),
+            ("post", f"/api/v1/leads/{fake_uuid}/convert/"),
+        ]
+
+        for method, url in endpoints:
+            resp = getattr(anon_client, method)(url, {}, format="json")
+            assert resp.status_code == status.HTTP_401_UNAUTHORIZED, f"Failed for {method.upper()} {url}"
+
+    def test_invalid_bearer_token_rejected_with_401(self):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Bearer invalid.token.payload")
+
+        resp = client.get("/api/v1/leads/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_personal_token_without_gym_context_fails(self):
+        user, client, _ = create_user_with_tokens("personal.only@manygym.com")
+        resp = client.get("/api/v1/leads/")
+        assert resp.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_403_FORBIDDEN]
+
+    def test_read_only_staff_blocked_from_all_mutations(self):
+        ctx = setup_gym_and_lead_context()
+        lead = create_lead(gym=ctx["gym"], first_name="StaffTestLead", phone="+12345")
+
+        # Staff with ONLY 'leads:read'
+        _, read_client, _ = create_staff_with_scopes(ctx["gym"], scopes=["leads:read"])
+
+        # Reads succeed
+        resp_list = read_client.get("/api/v1/leads/")
+        assert resp_list.status_code == status.HTTP_200_OK
+
+        resp_detail = read_client.get(f"/api/v1/leads/{lead.id}/")
+        assert resp_detail.status_code == status.HTTP_200_OK
+
+        resp_metrics = read_client.get("/api/v1/leads/metrics/")
+        assert resp_metrics.status_code == status.HTTP_200_OK
+
+        resp_reasons = read_client.get("/api/v1/leads/reasons/")
+        assert resp_reasons.status_code == status.HTTP_200_OK
+
+        # Mutations MUST fail with 403 Forbidden
+        resp_post = read_client.post("/api/v1/leads/", {"first_name": "NewLead", "phone": "+999"}, format="json")
+        assert resp_post.status_code == status.HTTP_403_FORBIDDEN
+
+        resp_patch = read_client.patch(f"/api/v1/leads/{lead.id}/", {"first_name": "Changed"}, format="json")
+        assert resp_patch.status_code == status.HTTP_403_FORBIDDEN
+
+        resp_del = read_client.delete(f"/api/v1/leads/{lead.id}/")
+        assert resp_del.status_code == status.HTTP_403_FORBIDDEN
+
+        resp_move = read_client.post(
+            f"/api/v1/leads/{lead.id}/next-moves/",
+            {"scheduled_date": str(date.today()), "short_description": "Call"},
+            format="json",
+        )
+        assert resp_move.status_code == status.HTTP_403_FORBIDDEN
+
+        resp_note = read_client.post(f"/api/v1/leads/{lead.id}/notes/", {"note_text": "Note"}, format="json")
+        assert resp_note.status_code == status.HTTP_403_FORBIDDEN
+
+        resp_conv = read_client.post(f"/api/v1/leads/{lead.id}/convert/", {}, format="json")
+        assert resp_conv.status_code == status.HTTP_403_FORBIDDEN
+
+        resp_reas = read_client.post("/api/v1/leads/reasons/", {"reason_name": "Too far"}, format="json")
+        assert resp_reas.status_code == status.HTTP_403_FORBIDDEN
+
+
+# ==============================================================================
+# 10. IDOR & MULTI-TENANT ISOLATION TESTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5CrossTenantIDORIsolation:
+
+    def test_complete_cross_tenant_dossier_isolation(self):
+        ctx1 = setup_gym_and_lead_context("gym1.owner@manygym.com")
+        lead1 = create_lead(gym=ctx1["gym"], first_name="Gym1Lead", phone="+111")
+        move1 = schedule_next_move(lead=lead1, scheduled_date=date.today(), short_description="Initial Task")
+
+        ctx2 = setup_gym_and_lead_context("gym2.owner@manygym.com")
+        client2 = ctx2["client"]
+
+        # Gym 2 attempts all actions against Gym 1's lead
+        assert client2.get(f"/api/v1/leads/{lead1.id}/").status_code == status.HTTP_404_NOT_FOUND
+        assert client2.patch(f"/api/v1/leads/{lead1.id}/", {"first_name": "Tamper"}, format="json").status_code == status.HTTP_404_NOT_FOUND
+        assert client2.delete(f"/api/v1/leads/{lead1.id}/").status_code == status.HTTP_404_NOT_FOUND
+        assert client2.post(f"/api/v1/leads/{lead1.id}/notes/", {"note_text": "Spy Note"}, format="json").status_code == status.HTTP_404_NOT_FOUND
+        assert client2.post(f"/api/v1/leads/{lead1.id}/next-moves/", {"scheduled_date": str(date.today()), "short_description": "Spy Move"}, format="json").status_code == status.HTTP_404_NOT_FOUND
+        assert client2.patch(f"/api/v1/leads/{lead1.id}/next-moves/{move1.id}/", {"is_completed": True}, format="json").status_code == status.HTTP_404_NOT_FOUND
+        assert client2.post(f"/api/v1/leads/{lead1.id}/convert/", {}, format="json").status_code == status.HTTP_404_NOT_FOUND
+
+    def test_foreign_key_cross_tenant_tampering_blocked(self):
+        ctx1 = setup_gym_and_lead_context("gym1.fk@manygym.com")
+        ctx2 = setup_gym_and_lead_context("gym2.fk@manygym.com")
+
+        # Gym 1 tries to use Gym 2's plan
+        resp_plan = ctx1["client"].post("/api/v1/leads/", {
+            "first_name": "CrossPlanLead",
+            "phone": "+123",
+            "interested_plan_id": str(ctx2["plan"].id),
+        }, format="json")
+        assert resp_plan.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Gym 1 tries to assign Gym 2's staff member
+        resp_staff = ctx1["client"].post("/api/v1/leads/", {
+            "first_name": "CrossStaffLead",
+            "phone": "+123",
+            "assigned_staff_id": str(ctx2["staff_assignment"].id),
+        }, format="json")
+        assert resp_staff.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Gym 1 creates a valid lead, then tries to convert using Gym 2's plan
+        lead1 = create_lead(gym=ctx1["gym"], first_name="ConvertFK", email="fk@test.com")
+        resp_conv = ctx1["client"].post(f"/api/v1/leads/{lead1.id}/convert/", {
+            "plan_id": str(ctx2["plan"].id),
+        }, format="json")
+        assert resp_conv.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ==============================================================================
+# 11. BUSINESS INVARIANTS & STATE RULES
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5BusinessInvariantsAndStateRules:
+
+    def test_not_joining_without_reason_rejected_on_create_and_patch(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        # Create with stage=not_joining but no reason -> 400
+        resp_create = client.post("/api/v1/leads/", {
+            "first_name": "LostLead",
+            "phone": "+123",
+            "stage": "not_joining",
+        }, format="json")
+        assert resp_create.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Valid lead, then patch to not_joining without reason -> 400
+        lead = create_lead(gym=ctx["gym"], first_name="ValidLead", phone="+123")
+        resp_patch = client.patch(f"/api/v1/leads/{lead.id}/", {
+            "stage": "not_joining",
+        }, format="json")
+        assert resp_patch.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_cannot_revert_joined_lead(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="JoinedRevert", email="jr@test.com", interested_plan_id=ctx["plan"].id)
+        convert_lead_to_member(lead=lead)
+
+        # Attempt to patch stage back to new or contacted -> 409 Conflict
+        for target_stage in ["new", "contacted", "visit_trial_booked", "not_joining"]:
+            resp = client.patch(f"/api/v1/leads/{lead.id}/", {"stage": target_stage}, format="json")
+            assert resp.status_code == status.HTTP_409_CONFLICT
+
+    def test_cannot_reconvert_already_joined_lead(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="DoubleConvert", email="dc@test.com", interested_plan_id=ctx["plan"].id)
+        convert_lead_to_member(lead=lead)
+
+        resp = client.post(f"/api/v1/leads/{lead.id}/convert/", {}, format="json")
+        assert resp.status_code == status.HTTP_409_CONFLICT
+
+    def test_cannot_delete_joined_lead(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="DeleteJoined", email="dj@test.com", interested_plan_id=ctx["plan"].id)
+        convert_lead_to_member(lead=lead)
+
+        resp = client.delete(f"/api/v1/leads/{lead.id}/")
+        assert resp.status_code == status.HTTP_409_CONFLICT
+
+
+# ==============================================================================
+# 12. HTTP METHOD NOT ALLOWED (405) TESTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5HTTPMethodNotAllowed:
+
+    def test_disallowed_http_methods(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+        lead = create_lead(gym=ctx["gym"], first_name="MethodLead", phone="+123")
+
+        disallowed_routes = [
+            ("put", "/api/v1/leads/"),
+            ("delete", "/api/v1/leads/"),
+            ("post", "/api/v1/leads/metrics/"),
+            ("put", "/api/v1/leads/metrics/"),
+            ("delete", "/api/v1/leads/metrics/"),
+            ("put", "/api/v1/leads/reasons/"),
+            ("delete", "/api/v1/leads/reasons/"),
+            ("post", f"/api/v1/leads/{lead.id}/"),
+            ("get", f"/api/v1/leads/{lead.id}/convert/"),
+            ("put", f"/api/v1/leads/{lead.id}/convert/"),
+            ("delete", f"/api/v1/leads/{lead.id}/convert/"),
+            ("put", f"/api/v1/leads/{lead.id}/notes/"),
+            ("delete", f"/api/v1/leads/{lead.id}/notes/"),
+        ]
+
+        for method, url in disallowed_routes:
+            resp = getattr(client, method)(url, {}, format="json")
+            assert resp.status_code == status.HTTP_405_METHOD_NOT_ALLOWED, f"Expected 405 for {method.upper()} {url}, got {resp.status_code}"
+
+
+# ==============================================================================
+# 13. ERROR ENVELOPE CONSISTENCY TESTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase5ErrorEnvelopeConsistency:
+
+    def test_error_envelope_structure(self):
+        ctx = setup_gym_and_lead_context()
+        client = ctx["client"]
+
+        # 400 Bad Request
+        resp_400 = client.post("/api/v1/leads/", {"first_name": "NoContact"}, format="json")
+        assert resp_400.status_code == status.HTTP_400_BAD_REQUEST
+        assert "code" in resp_400.data or "message" in resp_400.data or "detail" in resp_400.data
+
+        # 404 Not Found
+        non_existent_uuid = uuid.uuid4()
+        resp_404 = client.get(f"/api/v1/leads/{non_existent_uuid}/")
+        assert resp_404.status_code == status.HTTP_404_NOT_FOUND
+        assert "code" in resp_404.data or "message" in resp_404.data or "detail" in resp_404.data
+
+        # Malformed non-UUID in path returns 404 (URL pattern does not match)
+        resp_bad_path = client.get("/api/v1/leads/not-a-valid-uuid/")
+        assert resp_bad_path.status_code == status.HTTP_404_NOT_FOUND
+

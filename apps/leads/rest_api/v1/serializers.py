@@ -18,6 +18,14 @@ from apps.leads.models import (
 )
 
 
+class StrictCharField(serializers.CharField):
+    """CharField that enforces strict string types, preventing silent coercion of numbers or booleans."""
+    def to_internal_value(self, data):
+        if not isinstance(data, str):
+            raise serializers.ValidationError("This field must be a valid string.")
+        return super().to_internal_value(data)
+
+
 class LeadCustomReasonSerializer(serializers.ModelSerializer):
     class Meta:
         model = LeadCustomReasons
@@ -26,7 +34,7 @@ class LeadCustomReasonSerializer(serializers.ModelSerializer):
 
 
 class LeadCustomReasonCreateSerializer(serializers.Serializer):
-    reason_name = serializers.CharField(max_length=255, required=True)
+    reason_name = StrictCharField(max_length=255, required=True)
 
     def validate_reason_name(self, value):
         val = value.strip()
@@ -44,7 +52,7 @@ class LeadNextMoveSerializer(serializers.ModelSerializer):
 
 class LeadNextMoveCreateSerializer(serializers.Serializer):
     scheduled_date = serializers.DateField(required=True)
-    short_description = serializers.CharField(max_length=255, required=True)
+    short_description = StrictCharField(max_length=255, required=True)
 
     def validate_short_description(self, value):
         val = value.strip()
@@ -56,7 +64,13 @@ class LeadNextMoveCreateSerializer(serializers.Serializer):
 class LeadNextMoveUpdateSerializer(serializers.Serializer):
     is_completed = serializers.BooleanField(required=False)
     scheduled_date = serializers.DateField(required=False)
-    short_description = serializers.CharField(max_length=255, required=False)
+    short_description = StrictCharField(max_length=255, required=False)
+
+    def validate_short_description(self, value):
+        val = value.strip()
+        if not val:
+            raise serializers.ValidationError("Description cannot be blank.")
+        return val
 
 
 class LeadNoteSerializer(serializers.ModelSerializer):
@@ -75,7 +89,7 @@ class LeadNoteSerializer(serializers.ModelSerializer):
 
 
 class LeadNoteCreateSerializer(serializers.Serializer):
-    note_text = serializers.CharField(required=True)
+    note_text = StrictCharField(required=True)
     author_staff_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_note_text(self, value):
@@ -168,9 +182,9 @@ class LeadDetailSerializer(LeadListSerializer):
 
 
 class LeadCreateSerializer(serializers.Serializer):
-    first_name = serializers.CharField(max_length=100, required=True)
-    last_name = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
-    phone = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+    first_name = StrictCharField(max_length=100, required=True)
+    last_name = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    phone = StrictCharField(max_length=50, required=False, allow_blank=True, allow_null=True)
     email = serializers.EmailField(max_length=255, required=False, allow_blank=True, allow_null=True)
     interested_plan_id = serializers.UUIDField(required=False, allow_null=True)
     assigned_staff_id = serializers.UUIDField(required=False, allow_null=True)
@@ -189,7 +203,7 @@ class LeadCreateSerializer(serializers.Serializer):
         required=False,
         default=list,
     )
-    initial_note = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    initial_note = StrictCharField(required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs):
         phone = (attrs.get("phone") or "").strip()
@@ -207,9 +221,9 @@ class LeadCreateSerializer(serializers.Serializer):
 
 
 class LeadUpdateSerializer(serializers.Serializer):
-    first_name = serializers.CharField(max_length=100, required=False)
-    last_name = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
-    phone = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+    first_name = StrictCharField(max_length=100, required=False)
+    last_name = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    phone = StrictCharField(max_length=50, required=False, allow_blank=True, allow_null=True)
     email = serializers.EmailField(max_length=255, required=False, allow_blank=True, allow_null=True)
     interested_plan_id = serializers.UUIDField(required=False, allow_null=True)
     assigned_staff_id = serializers.UUIDField(required=False, allow_null=True)
@@ -237,7 +251,7 @@ class LeadStageUpdateSerializer(serializers.Serializer):
         allow_null=True,
     )
     not_joining_custom_reason_id = serializers.UUIDField(required=False, allow_null=True)
-    custom_reason_name = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
+    custom_reason_name = StrictCharField(max_length=255, required=False, allow_blank=True, allow_null=True)
     trial_booked_at = serializers.DateTimeField(required=False, allow_null=True)
 
     def validate(self, attrs):
@@ -269,6 +283,7 @@ class LeadConvertToMemberSerializer(serializers.Serializer):
     initial_payment_amount = serializers.DecimalField(
         max_digits=10,
         decimal_places=2,
+        min_value=Decimal("0.01"),
         required=False,
         allow_null=True,
     )
