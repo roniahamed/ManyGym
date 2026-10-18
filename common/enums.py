@@ -114,41 +114,33 @@ class PaymentMethodEnum(models.TextChoices):
 class LeadStageEnum(models.TextChoices):
     NEW = "new", "New"
     CONTACTED = "contacted", "Contacted"
-    TRIAL_BOOKED = "trial_booked", "Trial Booked"
-    TRIAL_COMPLETED = "trial_completed", "Trial Completed"
-    NEGOTIATION = "negotiation", "Negotiation"
-    CONVERTED = "converted", "Converted"
-    LOST = "lost", "Lost"
+    VISIT_TRIAL_BOOKED = "visit_trial_booked", "Visit / Trial Booked"
+    JOINED = "joined", "Joined"
+    NOT_JOINING = "not_joining", "Not Joining"
 
 
 class NotJoiningReasonStandard(models.TextChoices):
-    TOO_EXPENSIVE = "too_expensive", "Too Expensive"
-    WRONG_LOCATION = "wrong_location", "Wrong Location"
-    LACK_OF_TIME = "lack_of_time", "Lack of Time"
-    JOINED_COMPETITOR = "joined_competitor", "Joined Competitor"
-    MEDICAL_REASONS = "medical_reasons", "Medical Reasons"
-    NOT_INTERESTED = "not_interested", "Not Interested"
+    PRICE = "price", "Price"
+    LOCATION = "location", "Location"
+    TIMING = "timing", "Timing"
+    CHOSE_ANOTHER_GYM = "chose_another_gym", "Chose Another Gym"
     OTHER = "other", "Other"
 
 
 class LeadSourceEnum(models.TextChoices):
-    WEBSITE = "website", "Website"
     WALK_IN = "walk_in", "Walk In"
-    REFERRAL = "referral", "Referral"
+    PHONE = "phone", "Phone"
     SOCIAL_MEDIA = "social_media", "Social Media"
-    PHONE_INQUIRY = "phone_inquiry", "Phone Inquiry"
-    FLYER = "flyer", "Flyer / Banner"
+    REFERRAL = "referral", "Referral"
+    WEBSITE = "website", "Website"
     OTHER = "other", "Other"
 
 
 class FitnessGoalEnum(models.TextChoices):
-    WEIGHT_LOSS = "weight_loss", "Weight Loss"
-    MUSCLE_GAIN = "muscle_gain", "Muscle Gain"
     GENERAL_FITNESS = "general_fitness", "General Fitness"
-    BODYBUILDING = "bodybuilding", "Bodybuilding"
-    ENDURANCE = "endurance", "Endurance"
-    REHABILITATION = "rehabilitation", "Rehabilitation"
-    STRENGTH_TRAINING = "strength_training", "Strength Training"
+    STRENGTH = "strength", "Strength"
+    MUSCLE_GAIN = "muscle_gain", "Muscle Gain"
+    WEIGHT_LOSS = "weight_loss", "Weight Loss"
     OTHER = "other", "Other"
 
 

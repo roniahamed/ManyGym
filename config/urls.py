@@ -25,6 +25,8 @@ urlpatterns = [
     path("api/v1/plans/", include("apps.memberships.rest_api.v1.urls")),
     # Phase 4: Member Lifecycle, Subscriptions & Payment Transactions
     path("api/v1/members/", include("apps.members.rest_api.v1.urls")),
+    # Phase 5: Leads CRM, Pipeline Tracking & Conversion Funnel
+    path("api/v1/leads/", include("apps.leads.rest_api.v1.urls")),
     # OpenAPI Schema & API Documentation
 
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),

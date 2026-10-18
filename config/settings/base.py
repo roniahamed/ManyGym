@@ -49,6 +49,7 @@ LOCAL_APPS = [
     "apps.amenities",
     "apps.memberships",
     "apps.members",
+    "apps.leads",
 ]
 
 
