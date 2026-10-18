@@ -135,7 +135,8 @@ jobs:
             docker compose exec -T web python manage.py collectstatic --noinput
 
             echo "Step 6: Verifying public API health check..."
-            curl -f -s https://v0.manygym.com/api/v1/health/ || exit 1
+            sleep 5
+            curl --fail --retry 5 --retry-delay 2 --retry-connrefused -s https://v0.manygym.com/api/v1/health/ || exit 1
 
             echo "=========================================================="
             echo "ManyGym Deployment Successful!"
