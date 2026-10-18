@@ -845,6 +845,393 @@ def test_phase4_member_detail_dossier_query_efficiency(django_assert_num_queries
         assert Decimal(data["subscriptions"][0]["total_cost"]) == Decimal("140.00")
 
 
+# ==============================================================================
+# PHASE 5: LEADS CRM & PIPELINE QUERY OPTIMIZATIONS & BENCHMARKS
+# ==============================================================================
+
+@pytest.mark.django_db
+def test_stream_leads_generator():
+    """Verify that stream_leads yields data via QuerySet.iterator() without materializing whole queryset."""
+    import types
+    from apps.gyms.services import create_gym
+    from apps.leads.models import Lead
+    from apps.leads.selectors import stream_leads
+    from common.enums import LeadStageEnum
+
+    owner = User.objects.create_user(
+        email="p5.stream.opt@manygym.com",
+        password="Password123!",
+        first_name="Stream",
+        last_name="Owner",
+        is_verified=True,
+    )
+    gym = create_gym(owner_user=owner, name="Stream Leads Gym")
+
+    for i in range(12):
+        Lead.objects.create(
+            gym=gym,
+            first_name=f"Lead{i}",
+            phone=f"+1000{i:03d}",
+            stage=LeadStageEnum.NEW,
+        )
+
+    leads_gen = stream_leads(gym=gym, chunk_size=5)
+    assert isinstance(leads_gen, types.GeneratorType)
+    yielded = list(leads_gen)
+    assert len(yielded) == 12
+    assert yielded[0].first_name == "Lead11"  # default ordering -created_at
+
+
+@pytest.mark.django_db
+def test_phase5_lead_metrics_query_reduction(django_assert_num_queries):
+    """
+    Verify get_lead_metrics executes in exactly 1 query via unified PostgreSQL aggregation,
+    and GET /api/v1/leads/metrics/ executes in exactly 3 queries:
+    1. FastJWT auth
+    2. resolve_lead_gym
+    3. Unified single-query aggregation
+    """
+    from apps.gyms.services import create_gym
+    from apps.leads.models import Lead, LeadNextMove
+    from apps.leads.selectors import get_lead_metrics
+    from common.enums import LeadStageEnum
+
+    owner = User.objects.create_user(
+        email="p5.metrics.opt@manygym.com",
+        password="Password123!",
+        first_name="Metrics",
+        last_name="Opt",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Metrics Gym")
+
+    # Seed diverse lead pipeline states
+    l1 = Lead.objects.create(gym=gym, first_name="L1", phone="+1", stage=LeadStageEnum.NEW)
+    l2 = Lead.objects.create(gym=gym, first_name="L2", phone="+2", stage=LeadStageEnum.CONTACTED)
+    l3 = Lead.objects.create(gym=gym, first_name="L3", phone="+3", stage=LeadStageEnum.VISIT_TRIAL_BOOKED)
+    l4 = Lead.objects.create(gym=gym, first_name="L4", phone="+4", stage=LeadStageEnum.JOINED)
+    l5 = Lead.objects.create(gym=gym, first_name="L5", phone="+5", stage=LeadStageEnum.NOT_JOINING, not_joining_reason_standard="price")
+
+    LeadNextMove.objects.create(lead=l1, scheduled_date="2026-10-20", short_description="Call", is_completed=False)
+    LeadNextMove.objects.create(lead=l2, scheduled_date="2026-10-21", short_description="Email", is_completed=True)
+
+    # 1. Selector query count assertion: exactly 1 single query
+    with django_assert_num_queries(1):
+        metrics = get_lead_metrics(gym)
+        assert metrics["total_leads"] == 5
+        assert metrics["new"] == 1
+        assert metrics["contacted"] == 1
+        assert metrics["visit_trial_booked"] == 1
+        assert metrics["joined"] == 1
+        assert metrics["not_joining"] == 1
+        assert metrics["conversion_rate_percentage"] == 20.0
+        assert metrics["pending_next_moves_count"] == 1
+
+    # 2. API endpoint query count assertion: exactly 3 queries
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(3):
+        res = client.get(f"{reverse('lead-metrics')}?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total_leads"] == 5
+        assert data["pending_next_moves_count"] == 1
+
+
+@pytest.mark.django_db
+def test_phase5_lead_directory_n_plus_one_elimination(django_assert_num_queries):
+    """
+    Verify GET /api/v1/leads/ executes in exactly 4 queries unpaginated / 5 queries paginated
+    regardless of lead count, eliminating N+1 queries:
+    1. FastJWT auth
+    2. resolve_lead_gym (.only)
+    3. Lead directory (with .only, select_related, and annotated pending_next_moves_count)
+    4. Prefetched fitness goals (.only)
+    """
+    import uuid
+    from decimal import Decimal
+    from datetime import date
+    from apps.gyms.services import create_gym
+    from apps.memberships.services import create_membership_plan
+    from apps.leads.models import Lead, LeadFitnessGoals, LeadNextMove
+    from common.enums import PlanStatusEnum, PlanTypeEnum, DurationUnitEnum, LeadStageEnum
+
+    owner = User.objects.create_user(
+        email="p5.dir.opt@manygym.com",
+        password="Password123!",
+        first_name="P5",
+        last_name="Dir",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Lead Dir Gym")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Lead Plan",
+        description="Comprehensive 50-character testing lead query optimization plan description.",
+        plan_status=PlanStatusEnum.ACTIVE,
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("80.00"),
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    trainer_role = Role.objects.get(slug="trainer")
+    staff_user = User.objects.create_user(
+        email="staff.dir.opt@manygym.com",
+        password="Password123!",
+        first_name="Staff",
+        last_name="Dir",
+        is_verified=True,
+    )
+    staff_assignment = GymStaffAssignment.objects.create(
+        gym=gym,
+        user=staff_user,
+        role=trainer_role,
+        status=StaffStatus.ACTIVE,
+    )
+
+    # Create 15 leads with goals and moves
+    for i in range(15):
+        lead = Lead.objects.create(
+            gym=gym,
+            first_name=f"LeadUser{i}",
+            last_name="Test",
+            phone=f"+1800{i:04d}",
+            email=f"lead{i}_{uuid.uuid4().hex[:6]}@example.com",
+            stage=LeadStageEnum.NEW if i % 2 == 0 else LeadStageEnum.CONTACTED,
+            interested_plan=plan,
+            assigned_staff=staff_assignment,
+        )
+        LeadFitnessGoals.objects.create(lead=lead, goal="general_fitness")
+        LeadNextMove.objects.create(lead=lead, scheduled_date=date.today(), short_description=f"Action {i}", is_completed=(i % 2 == 0))
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # 1. Default directory listing: exactly 5 queries (Auth, resolve gym, count, leads, prefetched goals)
+    with django_assert_num_queries(5):
+        res = client.get(f"{reverse('lead-list-create')}?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 15
+        assert len(data["results"]) == 15
+
+    # 2. Paginated page_size=5: exactly 5 queries
+    with django_assert_num_queries(5):
+        res = client.get(f"{reverse('lead-list-create')}?gym_id={gym.id}&page=1&page_size=5")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 15
+        assert len(data["results"]) == 5
+
+
+@pytest.mark.django_db
+def test_phase5_lead_detail_dossier_query_efficiency(django_assert_num_queries):
+    """
+    Verify GET /api/v1/leads/{id}/ executes in exactly 6 queries with full relations:
+    1. FastJWT auth
+    2. resolve_lead_gym (.only)
+    3. Lead detail dossier (.only + select_related)
+    4. Prefetched fitness goals (.only)
+    5. Prefetched next moves (.only)
+    6. Prefetched staff notes (.only + select_related author_staff__user)
+    """
+    from decimal import Decimal
+    from datetime import date
+    from apps.gyms.services import create_gym
+    from apps.memberships.services import create_membership_plan
+    from apps.leads.models import Lead, LeadFitnessGoals, LeadNextMove, LeadNotes
+    from common.enums import PlanStatusEnum, PlanTypeEnum, DurationUnitEnum, LeadStageEnum
+
+    owner = User.objects.create_user(
+        email="p5.dossier.opt@manygym.com",
+        password="Password123!",
+        first_name="P5",
+        last_name="Dossier",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Lead Dossier Gym")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Dossier Plan",
+        description="Comprehensive 50-character testing lead dossier query efficiency plan.",
+        plan_status=PlanStatusEnum.ACTIVE,
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("95.00"),
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    lead = Lead.objects.create(
+        gym=gym,
+        first_name="DossierLead",
+        last_name="Candidate",
+        phone="+1987654321",
+        email="candidate@example.com",
+        stage=LeadStageEnum.CONTACTED,
+        interested_plan=plan,
+    )
+    LeadFitnessGoals.objects.create(lead=lead, goal="strength")
+    LeadNextMove.objects.create(lead=lead, scheduled_date=date.today(), short_description="Call back regarding membership")
+    LeadNotes.objects.create(lead=lead, note_text="Initial call completed successfully.")
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    with django_assert_num_queries(6):
+        res = client.get(f"{reverse('lead-detail-update-delete', kwargs={'lead_id': lead.id})}?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["email"] == "candidate@example.com"
+        assert len(data["fitness_goals"]) == 1
+        assert len(data["next_moves"]) == 1
+        assert len(data["notes"]) == 1
+
+
+@pytest.mark.django_db
+def test_phase5_performance_benchmarks():
+    """
+    Measures and asserts latency performance across Phase 5 endpoints under test load:
+    - Target: p95 < 200 ms for read endpoints
+    - Target: p95 < 500 ms for complex endpoints (atomic conversion)
+    """
+    import time
+    import uuid
+    from decimal import Decimal
+    from datetime import date
+    from apps.gyms.services import create_gym
+    from apps.memberships.services import create_membership_plan
+    from apps.leads.models import Lead, LeadFitnessGoals, LeadNextMove, LeadNotes
+    from common.enums import PlanStatusEnum, PlanTypeEnum, DurationUnitEnum, LeadStageEnum
+
+    def calc_p(data, p):
+        s = sorted(data)
+        idx = int((len(s) - 1) * (p / 100.0))
+        return s[idx]
+
+    owner = User.objects.create_user(
+        email="p5.bench.opt@manygym.com",
+        password="Password123!",
+        first_name="P5",
+        last_name="Bench",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Bench Gym")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Bench Plan",
+        description="Testing lead performance benchmarks plan description.",
+        plan_status=PlanStatusEnum.ACTIVE,
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("110.00"),
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    # Pre-create 20 leads
+    leads = []
+    for i in range(20):
+        lead = Lead.objects.create(
+            gym=gym,
+            first_name=f"BenchLead{i}",
+            phone=f"+1555{i:04d}",
+            email=f"bench{i}@example.com",
+            stage=LeadStageEnum.NEW if i % 2 == 0 else LeadStageEnum.CONTACTED,
+            interested_plan=plan,
+        )
+        LeadFitnessGoals.objects.create(lead=lead, goal="general_fitness")
+        LeadNextMove.objects.create(lead=lead, scheduled_date=date.today(), short_description="Follow up")
+        LeadNotes.objects.create(lead=lead, note_text=f"Note {i}")
+        leads.append(lead)
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # 1. Benchmark GET /api/v1/leads/
+    list_latencies = []
+    for _ in range(20):
+        t0 = time.perf_counter()
+        res = client.get(f"{reverse('lead-list-create')}?gym_id={gym.id}")
+        t1 = time.perf_counter()
+        assert res.status_code == 200
+        list_latencies.append((t1 - t0) * 1000)
+
+    p50_list = calc_p(list_latencies, 50)
+    p95_list = calc_p(list_latencies, 95)
+    assert p95_list < 200, f"GET /api/v1/leads/ p95 exceeded target: {p95_list:.2f}ms"
+
+    # 2. Benchmark GET /api/v1/leads/metrics/
+    metrics_latencies = []
+    for _ in range(20):
+        t0 = time.perf_counter()
+        res = client.get(f"{reverse('lead-metrics')}?gym_id={gym.id}")
+        t1 = time.perf_counter()
+        assert res.status_code == 200
+        metrics_latencies.append((t1 - t0) * 1000)
+
+    p50_metrics = calc_p(metrics_latencies, 50)
+    p95_metrics = calc_p(metrics_latencies, 95)
+    assert p95_metrics < 200, f"GET /api/v1/leads/metrics/ p95 exceeded target: {p95_metrics:.2f}ms"
+
+    # 3. Benchmark GET /api/v1/leads/{id}/ (Full Dossier)
+    dossier_latencies = []
+    for lead in leads[:10]:
+        t0 = time.perf_counter()
+        res = client.get(f"{reverse('lead-detail-update-delete', kwargs={'lead_id': lead.id})}?gym_id={gym.id}")
+        t1 = time.perf_counter()
+        assert res.status_code == 200
+        dossier_latencies.append((t1 - t0) * 1000)
+
+    p50_dossier = calc_p(dossier_latencies, 50)
+    p95_dossier = calc_p(dossier_latencies, 95)
+    assert p95_dossier < 200, f"GET /api/v1/leads/{id}/ p95 exceeded target: {p95_dossier:.2f}ms"
+
+    # 4. Benchmark POST /api/v1/leads/{id}/convert/ (Complex Write Endpoint)
+    convert_latencies = []
+    for i in range(10):
+        conv_lead = Lead.objects.create(
+            gym=gym,
+            first_name=f"ConvLead{i}",
+            last_name="Convertible",
+            email=f"conv{i}_{uuid.uuid4().hex[:6]}@example.com",
+            interested_plan=plan,
+        )
+        t0 = time.perf_counter()
+        res = client.post(
+            f"{reverse('lead-convert', kwargs={'lead_id': conv_lead.id})}?gym_id={gym.id}",
+            {"initial_payment_amount": "50.00", "initial_payment_method": "cash"},
+            format="json",
+        )
+        t1 = time.perf_counter()
+        assert res.status_code == 201
+        convert_latencies.append((t1 - t0) * 1000)
+
+    p50_convert = calc_p(convert_latencies, 50)
+    p95_convert = calc_p(convert_latencies, 95)
+    assert p95_convert < 500, f"POST /api/v1/leads/{id}/convert/ p95 exceeded target: {p95_convert:.2f}ms"
+
+    print("\n" + "=" * 60)
+    print("PHASE 5 PERFORMANCE BENCHMARK REPORT:")
+    print(f"GET /api/v1/leads/ (20 items):         p50={p50_list:.2f}ms, p95={p95_list:.2f}ms (Target < 200ms)")
+    print(f"GET /api/v1/leads/metrics/:             p50={p50_metrics:.2f}ms, p95={p95_metrics:.2f}ms (Target < 200ms)")
+    print(f"GET /api/v1/leads/{{id}}/ (Dossier):      p50={p50_dossier:.2f}ms, p95={p95_dossier:.2f}ms (Target < 200ms)")
+    print(f"POST /api/v1/leads/{{id}}/convert/:      p50={p50_convert:.2f}ms, p95={p95_convert:.2f}ms (Target < 500ms)")
+    print("=" * 60)
+
+
+
 
 
 

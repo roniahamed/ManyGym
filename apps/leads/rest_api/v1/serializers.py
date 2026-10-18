@@ -152,7 +152,11 @@ class LeadListSerializer(serializers.ModelSerializer):
         return [fg.goal for fg in obj.fitness_goals.all()]
 
     def get_pending_next_moves_count(self, obj) -> int:
-        return sum(1 for nm in obj.next_moves.all() if not nm.is_completed)
+        if hasattr(obj, "annotated_pending_moves"):
+            return obj.annotated_pending_moves
+        if hasattr(obj, "_prefetched_objects_cache") and "next_moves" in obj._prefetched_objects_cache:
+            return sum(1 for nm in obj.next_moves.all() if not nm.is_completed)
+        return obj.next_moves.filter(is_completed=False).count()
 
 
 class LeadDetailSerializer(LeadListSerializer):
