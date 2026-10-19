@@ -29,6 +29,8 @@ urlpatterns = [
     path("api/v1/leads/", include("apps.leads.rest_api.v1.urls")),
     # Phase 6: Routine Templates & Workout Prescription Engine
     path("api/v1/", include("apps.routines.rest_api.v1.urls")),
+    # Phase 7: Community Feed, Social Posts & Asynchronous Media Pipeline
+    path("api/v1/posts/", include("apps.posts.rest_api.v1.urls")),
     # OpenAPI Schema & API Documentation
 
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),

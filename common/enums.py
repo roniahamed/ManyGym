@@ -157,6 +157,7 @@ class RoutineLevelEnum(models.TextChoices):
 
 class PostPrivacyEnum(models.TextChoices):
     PUBLIC = "public", "Public"
+    MEMBERS_ONLY = "members_only", "Gym Members Only"
     GYM_MEMBERS_ONLY = "gym_members_only", "Gym Members Only"
     PRIVATE = "private", "Private"
 

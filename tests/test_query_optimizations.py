@@ -1551,6 +1551,168 @@ def test_phase6_performance_benchmarks():
     print("=" * 60)
 
 
+# ==============================================================================
+# PHASE 7 PERFORMANCE & QUERY OPTIMIZATION BENCHMARKS
+# ==============================================================================
+
+@pytest.mark.django_db
+def test_phase7_stream_gym_feed_generator():
+    """Verify that stream_gym_feed returns a memory-efficient generator."""
+    from apps.posts.models import GymPost
+    from apps.posts.selectors import stream_gym_feed
+    from apps.posts.services import create_post
+
+    owner = User.objects.create_user(
+        email="p7.stream.owner@manygym.com",
+        password="Password123!",
+        first_name="Stream",
+        last_name="Owner",
+        is_verified=True,
+    )
+    gym = Gym.objects.create(owner_user=owner, name="Stream Gym", timezone="UTC")
+
+    for i in range(10):
+        create_post(gym=gym, author_user=owner, content_text=f"Stream post #{i}")
+
+    feed_gen = stream_gym_feed(gym=gym, is_member_or_staff=True, chunk_size=3)
+    assert isinstance(feed_gen, types.GeneratorType)
+    posts = list(feed_gen)
+    assert len(posts) == 10
+
+
+@pytest.mark.django_db
+def test_phase7_post_queries_elimination_of_n_plus_one(django_assert_num_queries):
+    """Verify list_gym_feed executes O(1) constant queries regardless of item count (eliminates N+1)."""
+    from apps.posts.models import GymPost, GymPostMedia
+    from apps.posts.selectors import list_gym_feed
+    from apps.posts.services import create_post
+    from apps.posts.rest_api.v1.serializers import GymPostListSerializer
+
+    owner = User.objects.create_user(
+        email="p7.nplus1.owner@manygym.com",
+        password="Password123!",
+        first_name="NPlus",
+        last_name="One",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = Gym.objects.create(owner_user=owner, name="N+1 Post Gym", timezone="UTC")
+
+    # Seed 15 posts with 3 media items each
+    for i in range(15):
+        post = create_post(gym=gym, author_user=owner, content_text=f"Community update #{i}")
+        GymPostMedia.objects.bulk_create([
+            GymPostMedia(post=post, media_url=f"/media/test_{i}_1.jpg", order_index=0),
+            GymPostMedia(post=post, media_url=f"/media/test_{i}_2.jpg", order_index=1),
+            GymPostMedia(post=post, media_url=f"/media/test_{i}_3.jpg", order_index=2),
+        ])
+
+    # Reset queries counter
+    connection.queries_log.clear()
+
+    # Query and serialize all 15 posts and their 45 media attachments
+    qs = list_gym_feed(gym=gym, is_member_or_staff=True)
+    with django_assert_num_queries(2):
+        serializer = GymPostListSerializer(list(qs), many=True)
+        data = serializer.data
+        assert len(data) == 15
+        assert len(data[0]["media_attachments"]) == 3
+
+
+@pytest.mark.django_db
+def test_phase7_performance_benchmarks_and_p95_latencies():
+    """
+    Validates measurable performance targets for Phase 7:
+    - GET /api/v1/posts/ (Feed) p95 < 200 ms
+    - GET /api/v1/posts/{id}/ (Detail Dossier) p95 < 200 ms
+    - POST /api/v1/posts/ (Write) p95 < 500 ms
+    """
+    import time
+    from apps.posts.models import GymPost, GymPostMedia
+    from apps.posts.services import create_post
+
+    owner = User.objects.create_user(
+        email="p7.bench.owner@manygym.com",
+        password="Password123!",
+        first_name="Bench",
+        last_name="Tester",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = Gym.objects.create(owner_user=owner, name="Phase 7 Bench Gym", timezone="UTC")
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.PERSONAL)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # Seed 25 posts
+    posts = []
+    for i in range(25):
+        p = create_post(
+            gym=gym,
+            author_user=owner,
+            content_text=f"Benchmarking community feed item #{i:02d} with tips and tricks.",
+        )
+        GymPostMedia.objects.create(post=p, media_url=f"/media/post_{i}.jpg", order_index=0)
+        posts.append(p)
+
+    def calc_p(latencies, percentile):
+        s = sorted(latencies)
+        idx = int(len(s) * (percentile / 100.0))
+        return s[min(idx, len(s) - 1)]
+
+    # 1. Benchmark GET /api/v1/posts/ (Feed)
+    feed_latencies = []
+    for _ in range(20):
+        t0 = time.perf_counter()
+        res = client.get(f"/api/v1/posts/?gym_id={gym.id}")
+        t1 = time.perf_counter()
+        assert res.status_code == 200
+        feed_latencies.append((t1 - t0) * 1000)
+
+    p50_feed = calc_p(feed_latencies, 50)
+    p95_feed = calc_p(feed_latencies, 95)
+    assert p95_feed < 200, f"GET /api/v1/posts/ p95 exceeded target: {p95_feed:.2f}ms"
+
+    # 2. Benchmark GET /api/v1/posts/{id}/ (Dossier)
+    detail_latencies = []
+    for p in posts[:10]:
+        t0 = time.perf_counter()
+        res = client.get(f"/api/v1/posts/{p.id}/?gym_id={gym.id}")
+        t1 = time.perf_counter()
+        assert res.status_code == 200
+        detail_latencies.append((t1 - t0) * 1000)
+
+    p50_detail = calc_p(detail_latencies, 50)
+    p95_detail = calc_p(detail_latencies, 95)
+    assert p95_detail < 200, f"GET /api/v1/posts/{{id}}/ p95 exceeded target: {p95_detail:.2f}ms"
+
+    # 3. Benchmark POST /api/v1/posts/ (Write)
+    create_latencies = []
+    for i in range(10):
+        t0 = time.perf_counter()
+        res = client.post(
+            f"/api/v1/posts/?gym_id={gym.id}",
+            {"content_text": f"Benchmark live post creation #{i}"},
+            format="json",
+        )
+        t1 = time.perf_counter()
+        assert res.status_code == 201
+        create_latencies.append((t1 - t0) * 1000)
+
+    p50_create = calc_p(create_latencies, 50)
+    p95_create = calc_p(create_latencies, 95)
+    assert p95_create < 500, f"POST /api/v1/posts/ p95 exceeded target: {p95_create:.2f}ms"
+
+    print("\n" + "=" * 60)
+    print("PHASE 7 PERFORMANCE BENCHMARK REPORT:")
+    print(f"GET /api/v1/posts/ (Feed list):        p50={p50_feed:.2f}ms, p95={p95_feed:.2f}ms (Target < 200ms)")
+    print(f"GET /api/v1/posts/{{id}}/ (Dossier):     p50={p50_detail:.2f}ms, p95={p95_detail:.2f}ms (Target < 200ms)")
+    print(f"POST /api/v1/posts/ (Create post):     p50={p50_create:.2f}ms, p95={p95_create:.2f}ms (Target < 500ms)")
+    print("=" * 60)
+
+
+
 
 
 

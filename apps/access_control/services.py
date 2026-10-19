@@ -49,6 +49,10 @@ DEFAULT_PERMISSIONS_DEFINITION = [
     # Topic 9: People & Roles
     {"topic": "People & Roles", "scope_code": "people_roles:read", "name": "View Staff & Roles", "description": "View staff assignments and role scopes."},
     {"topic": "People & Roles", "scope_code": "people_roles:manage", "name": "Manage Staff & Roles", "description": "Invite staff, manage custom roles, and assign scopes."},
+
+    # Topic 10: Community Posts & Feed
+    {"topic": "Community", "scope_code": "posts:read", "name": "View Community Posts", "description": "Access to view gym community feed and posts."},
+    {"topic": "Community", "scope_code": "posts:manage", "name": "Manage Community Posts", "description": "Create, edit, or delete gym community posts and media."},
 ]
 
 
@@ -88,6 +92,7 @@ def seed_default_permissions_and_roles() -> None:
         "plans:read", "members:read", "members:edit",
         "leads:read", "leads:manage", "trainers:read",
         "routines:read", "people_roles:read",
+        "posts:read", "posts:manage",
     ]
     staff_role, _ = Role.objects.get_or_create(
         gym=None,
@@ -104,6 +109,7 @@ def seed_default_permissions_and_roles() -> None:
     trainer_scopes = [
         "members:read", "trainers:read",
         "routines:read", "routines:assign", "routines:manage",
+        "posts:read", "posts:manage",
     ]
     trainer_role, _ = Role.objects.get_or_create(
         gym=None,

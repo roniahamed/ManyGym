@@ -51,6 +51,7 @@ LOCAL_APPS = [
     "apps.members",
     "apps.leads",
     "apps.routines",
+    "apps.posts",
 ]
 
 
