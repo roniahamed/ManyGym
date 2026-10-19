@@ -102,7 +102,7 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: SSH and Deploy to VPS
@@ -113,6 +113,8 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           script_stop: true
+          command_timeout: 25m
+          timeout: 60s
           script: |
             echo "=========================================================="
             echo "Starting ManyGym Automated Deployment..."
@@ -122,20 +124,27 @@ jobs:
             echo "Step 1: Pulling latest code from master branch..."
             git pull origin master
 
-            echo "Step 2: Building updated Docker images..."
+            echo "Step 2: Cleaning unused Docker build cache..."
+            docker builder prune -f --filter "until=24h" || true
+
+            echo "Step 3: Building updated Docker images..."
             docker compose build web celery_worker celery_beat
 
-            echo "Step 3: Updating running Docker services..."
-            docker compose up -d --remove-orphans
+            echo "Step 4: Ensuring database & redis are healthy..."
+            docker compose up -d db redis
+            sleep 3
+
+            echo "Step 5: Executing database migrations (Isolated Memory)..."
+            docker compose run --rm web python manage.py migrate --noinput
+
+            echo "Step 6: Collecting static files..."
+            docker compose run --rm web python manage.py collectstatic --noinput
+
+            echo "Step 7: Bringing up the full application stack..."
+            docker compose up -d --remove-orphans web celery_worker celery_beat nginx
             docker compose restart nginx
 
-            echo "Step 4: Executing database migrations..."
-            docker compose exec -T web python manage.py migrate --noinput
-
-            echo "Step 5: Collecting static files..."
-            docker compose exec -T web python manage.py collectstatic --noinput
-
-            echo "Step 6: Verifying public API health check..."
+            echo "Step 8: Verifying public API health check..."
             sleep 5
             curl --fail --retry 5 --retry-delay 2 --retry-connrefused -s https://v0.manygym.com/api/v1/health/ || exit 1
 
