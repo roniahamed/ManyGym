@@ -50,6 +50,7 @@ LOCAL_APPS = [
     "apps.memberships",
     "apps.members",
     "apps.leads",
+    "apps.routines",
 ]
 
 

@@ -1231,6 +1231,327 @@ def test_phase5_performance_benchmarks():
     print("=" * 60)
 
 
+# =====================================================================
+# PHASE 6: ROUTINE TEMPLATES & WORKOUT PRESCRIPTION PERFORMANCE TESTS
+# =====================================================================
+
+@pytest.mark.django_db
+def test_stream_routine_templates_generator():
+    """
+    Verify stream_routine_templates yields templates as a generator
+    using QuerySet.iterator() without full memory materialization.
+    """
+    from apps.gyms.services import create_gym
+    from apps.routines.services import create_routine_template
+    from apps.routines.selectors import stream_routine_templates
+
+    owner = User.objects.create_user(
+        email="p6.gen.opt@manygym.com",
+        password="Password123!",
+        first_name="P6",
+        last_name="Gen",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Generator Gym")
+
+    for i in range(15):
+        create_routine_template(
+            gym=gym,
+            template_name=f"Template {i}",
+            notes=f"Note {i}",
+        )
+
+    gen = stream_routine_templates(gym=gym, chunk_size=5)
+    import types
+    assert isinstance(gen, types.GeneratorType)
+
+    collected = list(gen)
+    assert len(collected) == 15
+    assert collected[0].template_name.startswith("Template")
+
+
+@pytest.mark.django_db
+def test_phase6_routine_template_directory_n_plus_one_elimination(django_assert_num_queries):
+    """
+    Verify GET /api/v1/routine-templates/ executes in a constant number of queries
+    regardless of how many templates, days, and exercises are stored:
+    1. FastJWT auth
+    2. resolve_routine_gym (.only)
+    3. RoutineTemplate directory (select_related gym, created_by_staff__user)
+    4. Prefetch goals
+    5. Prefetch days
+    6. Prefetch exercises
+    """
+    from apps.gyms.services import create_gym
+    from apps.routines.services import create_routine_template
+    from common.enums import RoutineFormatEnum, RoutineLevelEnum, FitnessGoalEnum
+
+    owner = User.objects.create_user(
+        email="p6.dir.nplus1@manygym.com",
+        password="Password123!",
+        first_name="P6",
+        last_name="NPlusOne",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="N+1 Routine Gym")
+
+    for i in range(10):
+        create_routine_template(
+            gym=gym,
+            template_name=f"Bulk Template {i}",
+            routine_format=RoutineFormatEnum.WEEKLY,
+            level=RoutineLevelEnum.INTERMEDIATE,
+            goals=[FitnessGoalEnum.MUSCLE_GAIN, FitnessGoalEnum.STRENGTH],
+            days=[
+                {
+                    "day_of_week": 1,
+                    "workout_title": "Chest & Triceps",
+                    "exercises": [
+                        {"exercise_name": "Bench Press", "sets": 4, "reps_or_duration": "10 reps"},
+                        {"exercise_name": "Pushups", "sets": 3, "reps_or_duration": "15 reps"},
+                    ],
+                },
+                {
+                    "day_of_week": 2,
+                    "is_rest_day": True,
+                },
+            ],
+        )
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # Paginated directory query count: exactly 5 queries (FastJWT auth + gym context + COUNT + Template QS with SQL Count annotations + prefetched goals)
+    with django_assert_num_queries(5):
+        res = client.get(f"/api/v1/routine-templates/?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 10
+        assert len(data["results"]) == 10
+        assert data["results"][0]["days_count"] == 2
+        assert data["results"][0]["total_exercises_count"] == 2
+
+    # Paginated with custom page_size: exactly 5 queries
+    with django_assert_num_queries(5):
+        res_paginated = client.get(f"/api/v1/routine-templates/?gym_id={gym.id}&page=1&page_size=5")
+        assert res_paginated.status_code == 200
+        assert res_paginated.json()["count"] == 10
+        assert len(res_paginated.json()["results"]) == 5
+
+
+@pytest.mark.django_db
+def test_phase6_member_routine_dossier_query_efficiency(django_assert_num_queries):
+    """
+    Verify GET /api/v1/members/{member_id}/routines/ executes with constant queries
+    eagerly loading prescribed staff and nested days/exercises without N+1 hits.
+    """
+    from apps.gyms.services import create_gym
+    from apps.memberships.services import create_membership_plan
+    from apps.members.services import create_member
+    from apps.routines.services import create_routine_template, assign_routine_to_member
+    from common.enums import PlanStatusEnum, PlanTypeEnum, DurationUnitEnum
+
+    owner = User.objects.create_user(
+        email="p6.member.queries@manygym.com",
+        password="Password123!",
+        first_name="P6",
+        last_name="MemberQuery",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Member Routine Query Gym")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Routine Pro Plan",
+        description="Comprehensive plan description for testing member workout routine queries.",
+        plan_status=PlanStatusEnum.ACTIVE,
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=120.00,
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    member = create_member(
+        gym=gym,
+        first_name="Athlete",
+        last_name="One",
+        email="athlete.one@example.com",
+        plan_id=plan.id,
+    )
+
+    template = create_routine_template(
+        gym=gym,
+        template_name="Template Blueprint",
+        days=[
+            {
+                "day_of_week": 1,
+                "workout_title": "Squat Day",
+                "exercises": [
+                    {"exercise_name": "Back Squat", "sets": 5, "reps_or_duration": "5 reps"},
+                ],
+            }
+        ],
+    )
+
+    assign_routine_to_member(gym=gym, member=member, source_template_id=template.id)
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # 1. Member existence check + 2. Auth + 3. Gym context + 4. MemberRoutine query + 5. Days prefetch + 6. Exercises prefetch
+    with django_assert_num_queries(6):
+        res = client.get(f"/api/v1/members/{member.id}/routines/?gym_id={gym.id}")
+        assert res.status_code == 200
+        assert len(res.json()) == 1
+
+
+@pytest.mark.django_db
+def test_phase6_performance_benchmarks():
+    """
+    Load and latency benchmark testing for Phase 6 endpoints:
+    - GET /api/v1/routine-templates/ (Target p95 < 200ms)
+    - GET /api/v1/routine-templates/{id}/ (Target p95 < 200ms)
+    - GET /api/v1/members/{id}/routines/ (Target p95 < 200ms)
+    - POST /api/v1/members/{id}/routines/assign/ (Target p95 < 500ms)
+    """
+    import time
+    from apps.gyms.services import create_gym
+    from apps.memberships.services import create_membership_plan
+    from apps.members.services import create_member
+    from apps.routines.services import create_routine_template
+    from common.enums import PlanStatusEnum, PlanTypeEnum, DurationUnitEnum, RoutineFormatEnum, RoutineLevelEnum
+
+    def calc_p(values, percentile):
+        if not values:
+            return 0.0
+        sorted_vals = sorted(values)
+        idx = int(len(sorted_vals) * (percentile / 100.0))
+        idx = min(idx, len(sorted_vals) - 1)
+        return sorted_vals[idx]
+
+    owner = User.objects.create_user(
+        email="p6.benchmarks@manygym.com",
+        password="Password123!",
+        first_name="P6",
+        last_name="Bench",
+        is_verified=True,
+    )
+    UserProfile.objects.create(user=owner)
+    gym = create_gym(owner_user=owner, name="Benchmark Phase 6 Gym")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Bench Plan",
+        description="Plan for benchmarking workout prescription latency.",
+        plan_status=PlanStatusEnum.ACTIVE,
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=150.00,
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    templates = []
+    for i in range(20):
+        t = create_routine_template(
+            gym=gym,
+            template_name=f"Benchmark Template {i}",
+            routine_format=RoutineFormatEnum.WEEKLY,
+            level=RoutineLevelEnum.INTERMEDIATE,
+            days=[
+                {
+                    "day_of_week": 1,
+                    "workout_title": "Heavy Lift",
+                    "exercises": [
+                        {"exercise_name": "Deadlift", "sets": 5, "reps_or_duration": "5 reps"},
+                    ],
+                }
+            ],
+        )
+        templates.append(t)
+
+    member = create_member(
+        gym=gym,
+        first_name="BenchAthlete",
+        last_name="Fast",
+        email="bench.athlete@example.com",
+        plan_id=plan.id,
+    )
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.GYM, gym=gym)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    # 1. Benchmark GET /api/v1/routine-templates/
+    list_latencies = []
+    for _ in range(20):
+        t0 = time.perf_counter()
+        res = client.get(f"/api/v1/routine-templates/?gym_id={gym.id}")
+        t1 = time.perf_counter()
+        assert res.status_code == 200
+        list_latencies.append((t1 - t0) * 1000)
+
+    p50_list = calc_p(list_latencies, 50)
+    p95_list = calc_p(list_latencies, 95)
+    assert p95_list < 200, f"GET /api/v1/routine-templates/ p95 exceeded target: {p95_list:.2f}ms"
+
+    # 2. Benchmark GET /api/v1/routine-templates/{id}/ (Dossier)
+    detail_latencies = []
+    for t in templates[:10]:
+        t0 = time.perf_counter()
+        res = client.get(f"/api/v1/routine-templates/{t.id}/?gym_id={gym.id}")
+        t1 = time.perf_counter()
+        assert res.status_code == 200
+        detail_latencies.append((t1 - t0) * 1000)
+
+    p50_detail = calc_p(detail_latencies, 50)
+    p95_detail = calc_p(detail_latencies, 95)
+    assert p95_detail < 200, f"GET /api/v1/routine-templates/{{id}}/ p95 exceeded target: {p95_detail:.2f}ms"
+
+    # 3. Benchmark POST /api/v1/members/{id}/routines/assign/ (Complex write & clone)
+    assign_latencies = []
+    for i in range(10):
+        t0 = time.perf_counter()
+        res = client.post(
+            f"/api/v1/members/{member.id}/routines/assign/?gym_id={gym.id}",
+            {"source_template_id": str(templates[i].id)},
+            format="json",
+        )
+        t1 = time.perf_counter()
+        assert res.status_code == 201
+        assign_latencies.append((t1 - t0) * 1000)
+
+    p50_assign = calc_p(assign_latencies, 50)
+    p95_assign = calc_p(assign_latencies, 95)
+    assert p95_assign < 500, f"POST /api/v1/members/{{id}}/routines/assign/ p95 exceeded target: {p95_assign:.2f}ms"
+
+    # 4. Benchmark GET /api/v1/members/{id}/routines/
+    member_routines_latencies = []
+    for _ in range(20):
+        t0 = time.perf_counter()
+        res = client.get(f"/api/v1/members/{member.id}/routines/?gym_id={gym.id}")
+        t1 = time.perf_counter()
+        assert res.status_code == 200
+        member_routines_latencies.append((t1 - t0) * 1000)
+
+    p50_mr = calc_p(member_routines_latencies, 50)
+    p95_mr = calc_p(member_routines_latencies, 95)
+    assert p95_mr < 200, f"GET /api/v1/members/{{id}}/routines/ p95 exceeded target: {p95_mr:.2f}ms"
+
+    print("\n" + "=" * 60)
+    print("PHASE 6 PERFORMANCE BENCHMARK REPORT:")
+    print(f"GET /api/v1/routine-templates/ (20 items):    p50={p50_list:.2f}ms, p95={p95_list:.2f}ms (Target < 200ms)")
+    print(f"GET /api/v1/routine-templates/{{id}}/:          p50={p50_detail:.2f}ms, p95={p95_detail:.2f}ms (Target < 200ms)")
+    print(f"POST /api/v1/members/{{id}}/routines/assign/:   p50={p50_assign:.2f}ms, p95={p95_assign:.2f}ms (Target < 500ms)")
+    print(f"GET /api/v1/members/{{id}}/routines/:           p50={p50_mr:.2f}ms, p95={p95_mr:.2f}ms (Target < 200ms)")
+    print("=" * 60)
+
+
+
 
 
 

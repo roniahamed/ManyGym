@@ -145,20 +145,14 @@ class FitnessGoalEnum(models.TextChoices):
 
 
 class RoutineFormatEnum(models.TextChoices):
-    STANDARD = "standard", "Standard"
-    SUPERSET = "superset", "Superset"
-    CIRCUIT = "circuit", "Circuit"
-    EMOM = "emom", "EMOM"
-    AMRAP = "amrap", "AMRAP"
-    FOR_TIME = "for_time", "For Time"
-    TABATA = "tabata", "Tabata"
+    WEEKLY = "weekly", "Weekly"
+    SESSION_BASED = "session_based", "Session-Based"
 
 
 class RoutineLevelEnum(models.TextChoices):
     BEGINNER = "beginner", "Beginner"
     INTERMEDIATE = "intermediate", "Intermediate"
     ADVANCED = "advanced", "Advanced"
-    ELITE = "elite", "Elite"
 
 
 class PostPrivacyEnum(models.TextChoices):
