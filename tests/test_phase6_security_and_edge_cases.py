@@ -966,3 +966,586 @@ class TestPhase6HTTPMethodNotAllowed:
         for method, url in disallowed_routes:
             resp = getattr(client, method)(url, {}, format="json")
             assert resp.status_code == status.HTTP_405_METHOD_NOT_ALLOWED, f"Expected 405 for {method.upper()} {url}, got {resp.status_code}"
+
+
+# ==============================================================================
+# 10. QUERY PARAMETERS, FILTERS, SEARCH & PAGINATION EDGE CASES
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase6QueryParamsAndFilters:
+
+    def test_query_param_filters_valid_and_empty_results(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        gym = ctx["gym"]
+
+        create_routine_template(
+            gym=gym,
+            template_name="Strength Power Split",
+            routine_format=RoutineFormatEnum.WEEKLY,
+            level=RoutineLevelEnum.ADVANCED,
+            goals=[FitnessGoalEnum.STRENGTH],
+        )
+
+        # 1. Matching filters
+        r1 = client.get(f"/api/v1/routine-templates/?routine_format=weekly&level=advanced&goal=strength")
+        assert r1.status_code == status.HTTP_200_OK
+        data1 = r1.json()
+        items1 = data1["results"] if isinstance(data1, dict) and "results" in data1 else data1
+        assert len(items1) == 1
+
+        # 2. Non-matching format filter
+        r2 = client.get(f"/api/v1/routine-templates/?routine_format=session_based")
+        assert r2.status_code == status.HTTP_200_OK
+        data2 = r2.json()
+        items2 = data2["results"] if isinstance(data2, dict) and "results" in data2 else data2
+        assert len(items2) == 0
+
+        # 3. Invalid enum query param values handled gracefully without 500 error
+        r3 = client.get(f"/api/v1/routine-templates/?routine_format=non_existent_format&level=superhuman&goal=teleportation")
+        assert r3.status_code == status.HTTP_200_OK
+        data3 = r3.json()
+        items3 = data3["results"] if isinstance(data3, dict) and "results" in data3 else data3
+        assert len(items3) == 0
+
+    @pytest.mark.parametrize("search_param", [
+        "",
+        "   ",
+        "\t\n",
+        "a" * 1000,  # 1000 chars
+        "!@#$%^&*()_+-=[]{}|;':\",./<>?",  # Special chars
+        "' OR 1=1 --",  # SQL injection in search
+        "<script>alert(1)</script>",  # XSS in search
+    ])
+    def test_search_query_edge_cases(self, search_param):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        resp = client.get(f"/api/v1/routine-templates/", {"search": search_param})
+        assert resp.status_code == status.HTTP_200_OK
+        data = resp.json()
+        assert "results" in data or isinstance(data, list)
+
+    @pytest.mark.parametrize("bad_page", [0, -1, "abc", 999999])
+    def test_pagination_page_number_edge_cases(self, bad_page):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        create_routine_template(gym=ctx["gym"], template_name="PaginationTemplate")
+
+        resp = client.get(f"/api/v1/routine-templates/", {"page": bad_page})
+        # Invalid pages return 404 (NotFound) per DRF standard pagination contract
+        assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+    @pytest.mark.parametrize("page_size_val,expected_status", [
+        (0, status.HTTP_200_OK),  # falls back or returns empty/valid
+        (-5, status.HTTP_200_OK),
+        ("not_a_number", status.HTTP_200_OK),
+        (500, status.HTTP_200_OK),  # capped at max_page_size
+    ])
+    def test_pagination_page_size_edge_cases(self, page_size_val, expected_status):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        create_routine_template(gym=ctx["gym"], template_name="PageSizeTemplate")
+
+        resp = client.get(f"/api/v1/routine-templates/", {"page_size": page_size_val})
+        assert resp.status_code == expected_status
+
+    def test_arbitrary_garbage_query_params(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        resp = client.get("/api/v1/routine-templates/?unknown_var=123&__admin=true&bypass=yes&filter[invalid]=foo")
+        assert resp.status_code == status.HTTP_200_OK
+
+
+# ==============================================================================
+# 11. EXHAUSTIVE TYPE JUGGLING ON ALL INPUT SERIALIZERS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase6ExhaustiveTypeJuggling:
+
+    @pytest.mark.parametrize("bad_val", [12345, True, ["invalid"], {"nested": "obj"}])
+    def test_exercise_name_type_mismatch_rejected(self, bad_val):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {
+            "template_name": "Valid Template",
+            "days": [
+                {
+                    "day_of_week": 1,
+                    "exercises": [{"exercise_name": bad_val, "reps_or_duration": "10 reps"}],
+                }
+            ],
+        }
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_val", [12345, True, ["10"], {"reps": 10}])
+    def test_reps_or_duration_type_mismatch_rejected(self, bad_val):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {
+            "template_name": "Valid Template",
+            "days": [
+                {
+                    "day_of_week": 1,
+                    "exercises": [{"exercise_name": "Bench Press", "reps_or_duration": bad_val}],
+                }
+            ],
+        }
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_rest", [30.5, True, "thirty", [30], {"sec": 30}])
+    def test_rest_seconds_type_mismatch_rejected(self, bad_rest):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {
+            "template_name": "Valid Template",
+            "days": [
+                {
+                    "day_of_week": 1,
+                    "exercises": [{"exercise_name": "Deadlift", "reps_or_duration": "5 reps", "rest_seconds": bad_rest}],
+                }
+            ],
+        }
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_fmt", [123, True, ["weekly"], {"fmt": "weekly"}])
+    def test_routine_format_type_mismatch_rejected(self, bad_fmt):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {"template_name": "Valid Template", "routine_format": bad_fmt}
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_level", [123, True, ["beginner"], {"lvl": "beginner"}])
+    def test_routine_level_type_mismatch_rejected(self, bad_level):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {"template_name": "Valid Template", "level": bad_level}
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_assign_template_id", [12345, True, ["uuid"], {"id": "uuid"}, "not-a-valid-uuid"])
+    def test_member_routine_assign_template_id_type_mismatch_rejected(self, bad_assign_template_id):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        member = ctx["member"]
+
+        payload = {"source_template_id": bad_assign_template_id}
+        resp = client.post(f"/api/v1/members/{member.id}/routines/assign/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_routine_name", [12345, True, ["name"], {"name": "val"}])
+    def test_member_routine_assign_routine_name_type_mismatch_rejected(self, bad_routine_name):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        member = ctx["member"]
+
+        payload = {"routine_name": bad_routine_name}
+        resp = client.post(f"/api/v1/members/{member.id}/routines/assign/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("bad_routine_name", [12345, True, ["name"], {"name": "val"}])
+    def test_member_routine_customize_routine_name_type_mismatch_rejected(self, bad_routine_name):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        member = ctx["member"]
+        template = create_routine_template(gym=ctx["gym"], template_name="CustomTypeTest")
+        routine = assign_routine_to_member(gym=ctx["gym"], member=member, source_template_id=template.id)
+
+        payload = {"routine_name": bad_routine_name}
+        resp = client.patch(f"/api/v1/members/{member.id}/routines/{routine.id}/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ==============================================================================
+# 12. FORMAT-SPECIFIC & PATH PARAMETER INVALID INPUTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase6FormatSpecificInvalidInputs:
+
+    def test_invalid_uuid_in_path_parameters_returns_404(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        valid_uuid = str(uuid.uuid4())
+
+        invalid_paths = [
+            f"/api/v1/routine-templates/not-a-valid-uuid/",
+            f"/api/v1/routine-templates/12345/",
+            f"/api/v1/members/not-a-valid-uuid/routines/",
+            f"/api/v1/members/not-a-valid-uuid/routines/assign/",
+            f"/api/v1/members/{valid_uuid}/routines/not-a-valid-uuid/",
+        ]
+
+        for path in invalid_paths:
+            resp = client.get(path)
+            assert resp.status_code == status.HTTP_404_NOT_FOUND, f"Expected 404 for {path}, got {resp.status_code}"
+
+    def test_non_existent_uuid_in_path_parameters_returns_404(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        random_uuid = str(uuid.uuid4())
+        another_uuid = str(uuid.uuid4())
+
+        assert client.get(f"/api/v1/routine-templates/{random_uuid}/").status_code == status.HTTP_404_NOT_FOUND
+        assert client.patch(f"/api/v1/routine-templates/{random_uuid}/", {"template_name": "X"}).status_code == status.HTTP_404_NOT_FOUND
+        assert client.delete(f"/api/v1/routine-templates/{random_uuid}/").status_code == status.HTTP_404_NOT_FOUND
+        assert client.get(f"/api/v1/members/{random_uuid}/routines/").status_code == status.HTTP_404_NOT_FOUND
+        assert client.post(f"/api/v1/members/{random_uuid}/routines/assign/", {"routine_name": "X"}).status_code == status.HTTP_404_NOT_FOUND
+        assert client.get(f"/api/v1/members/{random_uuid}/routines/{another_uuid}/").status_code == status.HTTP_404_NOT_FOUND
+
+    def test_non_existent_source_template_id_in_assign_returns_400(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        member = ctx["member"]
+        random_uuid = str(uuid.uuid4())
+
+        resp = client.post(
+            f"/api/v1/members/{member.id}/routines/assign/",
+            {"source_template_id": random_uuid},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("invalid_choice,field", [
+        ("yearly", "routine_format"),
+        ("olympian", "level"),
+    ])
+    def test_invalid_choices_rejected(self, invalid_choice, field):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {"template_name": "Valid Title", field: invalid_choice}
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_invalid_goals_choice_rejected(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {"template_name": "Valid Title", "goals": ["flying_ability", "teleportation"]}
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ==============================================================================
+# 13. EXHAUSTIVE BOUNDARIES & EXTREME LENGTHS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase6ExhaustiveBoundariesAndLengths:
+
+    def test_exercise_name_boundary_lengths(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        # Valid 255 chars
+        resp_valid = client.post("/api/v1/routine-templates/", {
+            "template_name": "Boundary Split",
+            "days": [{"day_of_week": 1, "exercises": [{"exercise_name": "E" * 255, "reps_or_duration": "10 reps"}]}],
+        }, format="json")
+        assert resp_valid.status_code == status.HTTP_201_CREATED
+
+        # Exceeds max 255 chars (256)
+        resp_over = client.post("/api/v1/routine-templates/", {
+            "template_name": "Boundary Split",
+            "days": [{"day_of_week": 1, "exercises": [{"exercise_name": "E" * 256, "reps_or_duration": "10 reps"}]}],
+        }, format="json")
+        assert resp_over.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Blank or whitespace-only
+        for blank_ex in ["", "   ", "\t\n"]:
+            resp_blank = client.post("/api/v1/routine-templates/", {
+                "template_name": "Boundary Split",
+                "days": [{"day_of_week": 1, "exercises": [{"exercise_name": blank_ex, "reps_or_duration": "10 reps"}]}],
+            }, format="json")
+            assert resp_blank.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_reps_or_duration_boundary_lengths(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        # Valid 100 chars
+        resp_valid = client.post("/api/v1/routine-templates/", {
+            "template_name": "Reps Split",
+            "days": [{"day_of_week": 1, "exercises": [{"exercise_name": "Pushups", "reps_or_duration": "R" * 100}]}],
+        }, format="json")
+        assert resp_valid.status_code == status.HTTP_201_CREATED
+
+        # Exceeds 100 chars (101)
+        resp_over = client.post("/api/v1/routine-templates/", {
+            "template_name": "Reps Split",
+            "days": [{"day_of_week": 1, "exercises": [{"exercise_name": "Pushups", "reps_or_duration": "R" * 101}]}],
+        }, format="json")
+        assert resp_over.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Blank reps
+        for blank_reps in ["", "   "]:
+            resp_blank = client.post("/api/v1/routine-templates/", {
+                "template_name": "Reps Split",
+                "days": [{"day_of_week": 1, "exercises": [{"exercise_name": "Pushups", "reps_or_duration": blank_reps}]}],
+            }, format="json")
+            assert resp_blank.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_workout_title_boundary_length(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        # Valid 255 chars
+        resp_valid = client.post("/api/v1/routine-templates/", {
+            "template_name": "Workout Split",
+            "days": [{"day_of_week": 1, "workout_title": "W" * 255, "is_rest_day": True}],
+        }, format="json")
+        assert resp_valid.status_code == status.HTTP_201_CREATED
+
+        # Exceeds 255 chars
+        resp_over = client.post("/api/v1/routine-templates/", {
+            "template_name": "Workout Split",
+            "days": [{"day_of_week": 1, "workout_title": "W" * 256, "is_rest_day": True}],
+        }, format="json")
+        assert resp_over.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("invalid_sets", [0, -1, -50])
+    def test_exercise_sets_min_boundary_validation(self, invalid_sets):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/routine-templates/", {
+            "template_name": "Sets Split",
+            "days": [{"day_of_week": 1, "exercises": [{"exercise_name": "Pullups", "sets": invalid_sets, "reps_or_duration": "10 reps"}]}],
+        }, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("invalid_rest", [-1, -60])
+    def test_exercise_rest_seconds_min_boundary_validation(self, invalid_rest):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/routine-templates/", {
+            "template_name": "Rest Split",
+            "days": [{"day_of_week": 1, "exercises": [{"exercise_name": "Squats", "reps_or_duration": "10 reps", "rest_seconds": invalid_rest}]}],
+        }, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ==============================================================================
+# 14. ADVERSARIAL PATH TRAVERSAL & SECURITY INJECTIONS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase6AdversarialSecurityAndPathTraversal:
+
+    @pytest.mark.parametrize("traversal_payload", [
+        "../../../../etc/passwd",
+        "..\\..\\windows\\system32",
+        "/etc/shadow",
+        "%2e%2e%2f%2e%2e%2f",
+    ])
+    def test_path_traversal_payloads_persisted_safely_as_strings(self, traversal_payload):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        resp = client.post("/api/v1/routine-templates/", {
+            "template_name": traversal_payload,
+            "notes": traversal_payload,
+            "days": [
+                {
+                    "day_of_week": 1,
+                    "workout_title": traversal_payload,
+                    "exercises": [{"exercise_name": traversal_payload, "reps_or_duration": "10 reps"}],
+                }
+            ],
+        }, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert resp.data["template_name"] == traversal_payload
+
+    def test_extremely_long_unicode_strings(self):
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        # 5,000 unicode characters in notes
+        long_notes = "💪🔥🏋️‍♂️ " * 1000
+        resp = client.post("/api/v1/routine-templates/", {
+            "template_name": "Long Unicode Template",
+            "notes": long_notes,
+        }, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert resp.data["notes"] == long_notes.strip()
+
+
+# ==============================================================================
+# 15. COMPLEX BUSINESS LOGIC & STATE TRANSITIONS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase6ComplexBusinessLogicAndStateTransitions:
+
+    def test_actively_prescribed_template_deletion_protection(self):
+        """Active templates cannot be deleted (409 Conflict); once deactivated, deletion succeeds (200 OK)."""
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        gym = ctx["gym"]
+        member = ctx["member"]
+
+        template = create_routine_template(gym=gym, template_name="ProtectedTemplate")
+        routine = assign_routine_to_member(gym=gym, member=member, source_template_id=template.id)
+
+        # 1. Attempt delete while active -> 409 Conflict
+        resp_del = client.delete(f"/api/v1/routine-templates/{template.id}/")
+        assert resp_del.status_code == status.HTTP_409_CONFLICT
+        error_json = resp_del.json()
+        assert "Cannot delete routine template" in (error_json.get("message") or error_json.get("detail", ""))
+
+        # 2. Deactivate the routine via PATCH
+        resp_patch = client.patch(
+            f"/api/v1/members/{member.id}/routines/{routine.id}/",
+            {"is_active": False},
+            format="json",
+        )
+        assert resp_patch.status_code == status.HTTP_200_OK
+        assert resp_patch.data["is_active"] is False
+
+        # 3. Deletion now succeeds
+        resp_del_ok = client.delete(f"/api/v1/routine-templates/{template.id}/")
+        assert resp_del_ok.status_code == status.HTTP_200_OK
+        assert not RoutineTemplate.objects.filter(id=template.id).exists()
+
+    def test_single_active_routine_invariant_on_sequential_prescriptions(self):
+        """Prescribing a second routine automatically deactivates the first routine."""
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        gym = ctx["gym"]
+        member = ctx["member"]
+
+        t1 = create_routine_template(gym=gym, template_name="RoutineOne")
+        t2 = create_routine_template(gym=gym, template_name="RoutineTwo")
+
+        # Assign Routine 1
+        r1 = client.post(f"/api/v1/members/{member.id}/routines/assign/", {"source_template_id": str(t1.id)}, format="json")
+        assert r1.status_code == status.HTTP_201_CREATED
+        r1_id = r1.data["id"]
+        assert r1.data["is_active"] is True
+
+        # Assign Routine 2
+        r2 = client.post(f"/api/v1/members/{member.id}/routines/assign/", {"source_template_id": str(t2.id)}, format="json")
+        assert r2.status_code == status.HTTP_201_CREATED
+        r2_id = r2.data["id"]
+        assert r2.data["is_active"] is True
+
+        # Verify Routine 1 is now inactive in DB
+        mr1 = MemberRoutine.objects.get(id=r1_id)
+        assert mr1.is_active is False
+
+        # Only Routine 2 is active
+        active_routines = MemberRoutine.objects.filter(member=member, is_active=True)
+        assert active_routines.count() == 1
+        assert active_routines.first().id == uuid.UUID(r2_id)
+
+    def test_weekly_format_rest_day_with_exercises_rejected(self):
+        """In weekly format, a rest day cannot contain exercises."""
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {
+            "template_name": "Contradictory Day",
+            "routine_format": "weekly",
+            "days": [
+                {
+                    "day_of_week": 1,
+                    "is_rest_day": True,
+                    "workout_title": "Rest Day",
+                    "exercises": [{"exercise_name": "Bench Press", "reps_or_duration": "10 reps"}],
+                }
+            ],
+        }
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert "cannot contain exercises" in str(resp.json())
+
+    def test_session_format_rest_day_rejected(self):
+        """In session-based format, rest days are not allowed."""
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+
+        payload = {
+            "template_name": "Invalid Session Split",
+            "routine_format": "session_based",
+            "days": [
+                {
+                    "session_number": 1,
+                    "is_rest_day": True,
+                }
+            ],
+        }
+        resp = client.post("/api/v1/routine-templates/", payload, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert "cannot contain rest days" in str(resp.json())
+
+    def test_custom_workout_prescription_without_template(self):
+        """Staff can prescribe a completely bespoke routine without a source template."""
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        member = ctx["member"]
+
+        payload = {
+            "routine_name": "Bespoke Rehabilitation Split",
+            "routine_format": "weekly",
+            "level": "beginner",
+            "notes": "Low impact routine following knee injury",
+            "days": [
+                {
+                    "day_of_week": 2,
+                    "workout_title": "Leg Rehab",
+                    "exercises": [
+                        {"exercise_name": "Leg Extension", "sets": 3, "reps_or_duration": "12 reps"},
+                    ],
+                }
+            ],
+        }
+        resp = client.post(f"/api/v1/members/{member.id}/routines/assign/", payload, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert resp.data["source_template_id"] is None
+        assert resp.data["routine_name"] == "Bespoke Rehabilitation Split"
+        assert len(resp.data["days"]) == 1
+
+    def test_cross_member_routine_access_isolation_under_same_gym(self):
+        """Member A's routine cannot be retrieved or modified using Member B's member_id in the URL path."""
+        ctx = setup_gym_and_routine_context()
+        client = ctx["client"]
+        gym = ctx["gym"]
+        member_a = ctx["member"]
+
+        member_b = create_member(
+            gym=gym,
+            first_name="Member",
+            last_name="Beta",
+            email="beta.member@manygym.com",
+            plan_id=ctx["plan"].id,
+        )
+
+        template = create_routine_template(gym=gym, template_name="IsolatedTemplate")
+        routine_a = assign_routine_to_member(gym=gym, member=member_a, source_template_id=template.id)
+
+        # Accessing routine_a using member_b's URL -> 404 Not Found
+        r_get = client.get(f"/api/v1/members/{member_b.id}/routines/{routine_a.id}/")
+        assert r_get.status_code == status.HTTP_404_NOT_FOUND
+
+        # Updating routine_a using member_b's URL -> 404 Not Found
+        r_patch = client.patch(
+            f"/api/v1/members/{member_b.id}/routines/{routine_a.id}/",
+            {"routine_name": "Tampered"},
+            format="json",
+        )
+        assert r_patch.status_code == status.HTTP_404_NOT_FOUND
+

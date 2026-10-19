@@ -103,7 +103,9 @@ def _validate_days_payload(
             seen_identifiers.add(day_of_week)
             day_label = f"Day {day_of_week}"
         else:
-            # Session-Based: Rest days are disabled in session format
+            # Session-Based: Rest days are not permitted in session format
+            if day_data.get("is_rest_day"):
+                raise DomainValidationError(f"Session-based routine format cannot contain rest days.")
             is_rest_day = False
             raw_sess = day_data.get("session_number", idx + 1)
             try:
