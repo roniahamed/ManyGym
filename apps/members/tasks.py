@@ -10,11 +10,16 @@ logger = logging.getLogger(__name__)
 def send_member_invitation_email(
     self,
     member_id: str,
-    email: str,
-    first_name: str,
-    gym_name: str,
-    token: str,
+    email: str = None,
+    first_name: str = "Member",
+    gym_name: str = "Gym",
+    token: str = None,
+    recipient_email: str = None,
+    invite_token: str = None,
+    **kwargs,
 ) -> bool:
+    target_email = email or recipient_email
+    target_token = token or invite_token
     """
     Dispatches member onboarding invitation email with acceptance token.
     """
@@ -24,7 +29,7 @@ def send_member_invitation_email(
             f"Hi {first_name},\n\n"
             f"You have been invited to join {gym_name}.\n"
             f"Please activate your membership and complete your onboarding profile using the invitation token below:\n\n"
-            f"Invitation Token: {token}\n\n"
+            f"Invitation Token: {target_token}\n\n"
             f"Best regards,\n"
             f"The {gym_name} Team"
         )
@@ -32,13 +37,13 @@ def send_member_invitation_email(
             subject=subject,
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
+            recipient_list=[target_email],
             fail_silently=False,
         )
         logger.info(f"Onboarding invitation email sent to {email} for member {member_id}")
         return True
     except Exception as exc:
-        logger.error(f"Failed to dispatch member invitation email to {email}: {str(exc)}")
+        logger.error(f"Failed to dispatch member invitation email to {target_email}: {str(exc)}")
         raise self.retry(exc=exc)
 
 

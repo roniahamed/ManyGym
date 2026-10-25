@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 
 from apps.gyms.models import Gym
+from apps.access_control.models import GymStaffAssignment
 from apps.memberships.models import MembershipPlan
 from apps.members.models import Member, MemberSubscription
 from apps.members.selectors import (
@@ -75,7 +76,19 @@ def check_member_permission(request, gym: Gym, required_scope: str = None) -> No
     """Enforces gym owner or required permission scope."""
     if gym.owner_user_id == request.user.id or request.user.is_superuser:
         return
-    scopes = getattr(request, "scopes", [])
+    scopes = getattr(request, "scopes", None)
+    if not scopes:
+        staff = (
+            GymStaffAssignment.objects.filter(gym=gym, user=request.user, status="active")
+            .select_related("role")
+            .first()
+        )
+        if staff and staff.role:
+            scopes = list(staff.role.permissions.values_list("scope_code", flat=True))
+        else:
+            scopes = []
+        request.scopes = scopes
+
     if required_scope and required_scope not in scopes:
         raise PermissionDeniedError(f"You do not possess the required '{required_scope}' scope for this gym operation.")
 
@@ -301,6 +314,8 @@ class MemberAcceptInvitationView(APIView):
         },
     )
     def post(self, request):
+        if not request.user.is_active:
+            raise PermissionDeniedError("Your user account is inactive or disabled.")
         serializer = MemberAcceptInvitationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
