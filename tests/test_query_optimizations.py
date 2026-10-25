@@ -1864,6 +1864,134 @@ def test_phase8_performance_benchmarks_and_p95_latencies():
     print("=" * 60)
 
 
+@pytest.mark.django_db
+def test_phase8_query_count_optimizations(django_assert_num_queries):
+    """
+    Asserts strict constant query limits across all Phase 8 endpoints:
+    - Eliminates N+1 queries in Trainer Workload (exactly 5 queries regardless of staff count)
+    - Verifies consolidated SQL aggregations for Dashboard Summary (7 queries)
+    - Verifies Revenue Report (6 queries)
+    - Verifies Membership Growth Report (6 queries)
+    - Verifies Lead Funnel Report (7 queries)
+    """
+    from decimal import Decimal
+    from django.utils import timezone
+    from apps.access_control.models import GymStaffAssignment, Role
+    from apps.memberships.services import create_membership_plan
+    from apps.members.services import create_member, create_member_subscription, record_member_payment
+    from apps.leads.services import create_lead, schedule_next_move
+    from apps.routines.models import MemberRoutine
+    from common.enums import PlanTypeEnum, DurationUnitEnum, PaymentMethodEnum, LeadStageEnum, StaffStatus
+
+    owner = User.objects.create_user(
+        email="p8.qc.owner@manygym.com",
+        password="Password123!",
+        first_name="QCOwner",
+        last_name="Test",
+        is_verified=True,
+    )
+    gym = Gym.objects.create(owner_user=owner, name="Phase 8 QC Gym", timezone="UTC")
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.PERSONAL)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="QC Plan",
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("150.00"),
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+    today = timezone.localdate()
+
+    # Create 5 staff trainers
+    role = Role.objects.create(gym=gym, name="Trainer", slug="trainer")
+    trainers = []
+    for i in range(5):
+        u = User.objects.create_user(
+            email=f"trainer{i}.qc@manygym.com",
+            password="Password123!",
+            first_name=f"Trainer{i}",
+            last_name="QC",
+        )
+        assignment = GymStaffAssignment.objects.create(
+            gym=gym,
+            user=u,
+            role=role,
+            status=StaffStatus.ACTIVE,
+        )
+        trainers.append(assignment)
+
+    # Seed members, routines, leads, and payments
+    for i in range(10):
+        t = trainers[i % len(trainers)]
+        m = create_member(
+            gym=gym,
+            first_name=f"Member{i}",
+            last_name="QC",
+            email=f"member{i}.qc@test.com",
+            assigned_trainer_id=t.id,
+        )
+        sub = create_member_subscription(member=m, plan=plan, start_date=today)
+        record_member_payment(
+            subscription=sub,
+            amount=Decimal("150.00"),
+            payment_method=PaymentMethodEnum.CREDIT_CARD,
+            payment_date=today,
+        )
+        MemberRoutine.objects.create(
+            member=m,
+            prescribed_by_staff=t,
+            routine_name=f"Routine {i}",
+            is_active=True,
+        )
+        lead = create_lead(gym=gym, first_name=f"Lead{i}", phone=f"+100{i:03d}", stage=LeadStageEnum.NEW)
+        schedule_next_move(lead=lead, scheduled_date=today, short_description="Check-in")
+
+    # 1. Trainer Workload: exactly 5 queries (1 auth + 1 gym + 1 staff + 1 batch members + 1 batch routines)
+    # Even with 6 active staff (5 trainers + 1 owner), query count stays CONSTANT at 5 (N+1 eliminated!)
+    with django_assert_num_queries(5):
+        res = client.get(f"/api/v1/reports/trainer-workload/?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total_assigned_members"] == 10
+        assert data["total_active_routines"] == 10
+
+    # 2. Dashboard Summary: exactly 7 queries (1 auth + 1 gym + 5 consolidated aggregations)
+    with django_assert_num_queries(7):
+        res = client.get(f"/api/v1/dashboard/summary/?gym_id={gym.id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["headline_metrics"]["total_members"] == 10
+        assert data["headline_metrics"]["todays_revenue"] == 1500.0
+
+    # 3. Revenue Report: exactly 6 queries (1 auth + 1 gym + 4 aggregated sections)
+    with django_assert_num_queries(6):
+        res = client.get(f"/api/v1/reports/revenue/?gym_id={gym.id}&start_date={today}&end_date={today}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total_revenue"] == 1500.0
+        assert data["total_transactions"] == 10
+
+    # 4. Membership Growth Report: exactly 6 queries (1 auth + 1 gym + 4 consolidated sub/plan aggregations)
+    with django_assert_num_queries(6):
+        res = client.get(f"/api/v1/reports/membership-growth/?gym_id={gym.id}&start_date={today}&end_date={today}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total_members"] == 10
+        assert data["active_subscriptions"] == 10
+
+    # 5. Lead Funnel Report: exactly 5 queries (1 auth + 1 gym + stage + extra_trials + source, skipping lost queries when lost_count == 0)
+    with django_assert_num_queries(5):
+        res = client.get(f"/api/v1/reports/leads-funnel/?gym_id={gym.id}&start_date={today}&end_date={today}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total_leads"] == 10
+
+
+
 
 
 

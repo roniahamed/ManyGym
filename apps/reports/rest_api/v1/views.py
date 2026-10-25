@@ -62,11 +62,16 @@ def check_report_permission(request, gym: Gym) -> None:
     if gym.owner_user_id == user.id or user.is_superuser:
         return
 
-    assignment = GymStaffAssignment.objects.filter(
-        gym=gym,
-        user=user,
-        status=StaffStatus.ACTIVE,
-    ).first()
+    assignment = (
+        GymStaffAssignment.objects.filter(
+            gym=gym,
+            user=user,
+            status=StaffStatus.ACTIVE,
+        )
+        .select_related("role")
+        .only("id", "gym_id", "user_id", "status", "role__id", "role__name")
+        .first()
+    )
 
     if not assignment:
         raise PermissionDeniedError("You are not an active staff member of this gym.")
