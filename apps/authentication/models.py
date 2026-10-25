@@ -24,7 +24,7 @@ class AuthToken(models.Model):
         choices=TokenContextType.choices,
         default=TokenContextType.PERSONAL,
     )
-    expires_at = models.DateTimeField()
+    expires_at = models.DateTimeField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

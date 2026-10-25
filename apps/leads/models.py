@@ -216,6 +216,7 @@ class LeadNextMove(models.Model):
         ordering = ["is_completed", "scheduled_date", "-created_at"]
         indexes = [
             models.Index(fields=["lead", "is_completed", "scheduled_date"], name="idx_lead_next_move_sched"),
+            models.Index(fields=["is_completed", "scheduled_date"], name="idx_lead_move_comp_sched"),
         ]
 
     def __str__(self):

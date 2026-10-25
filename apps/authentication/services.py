@@ -152,5 +152,5 @@ def cleanup_expired_tokens() -> int:
     Returns number of deleted token records.
     """
     from django.utils import timezone
-    deleted_count, _ = AuthToken.objects.filter(expires_at__lt=timezone.now()).delete()
+    deleted_count, _ = AuthToken.objects.filter(expires_at__lt=timezone.now()).order_by().delete()
     return deleted_count

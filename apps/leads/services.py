@@ -527,6 +527,34 @@ def send_lead_followup_reminders() -> int:
             "lead__gym",
             "lead__gym__owner_user",
         )
+        .only(
+            "id",
+            "scheduled_date",
+            "short_description",
+            "is_completed",
+            "lead_id",
+            "lead__id",
+            "lead__first_name",
+            "lead__last_name",
+            "lead__phone",
+            "lead__email",
+            "lead__stage",
+            "lead__assigned_staff_id",
+            "lead__gym_id",
+            "lead__assigned_staff__id",
+            "lead__assigned_staff__user_id",
+            "lead__assigned_staff__user__id",
+            "lead__assigned_staff__user__first_name",
+            "lead__assigned_staff__user__email",
+            "lead__gym__id",
+            "lead__gym__name",
+            "lead__gym__owner_user_id",
+            "lead__gym__owner_user__id",
+            "lead__gym__owner_user__first_name",
+            "lead__gym__owner_user__email",
+        )
+        .order_by()
+        .iterator(chunk_size=1000)
     )
 
     dispatched = 0

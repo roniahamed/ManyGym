@@ -166,9 +166,12 @@ def create_member(
 def resend_member_invitation(member_id: uuid.UUID, gym: Gym) -> Member:
     """
     Regenerates invitation token and re-dispatches onboarding confirmation email.
+    Optimized with column projection.
     """
     try:
-        member = Member.objects.get(id=member_id, gym=gym)
+        member = Member.objects.only(
+            "id", "gym_id", "joining_status", "email", "first_name", "invitation_token", "invitation_sent_at"
+        ).get(id=member_id, gym=gym)
     except Member.DoesNotExist:
         raise ResourceNotFoundError(f"Member '{member_id}' not found.")
 
@@ -200,7 +203,11 @@ def accept_member_invitation(token: str, user: User) -> Member:
         raise DomainValidationError("An invitation token is required.")
 
     try:
-        member = Member.objects.select_related("gym").get(invitation_token=token_clean)
+        member = (
+            Member.objects.select_related("gym")
+            .only("id", "gym_id", "user_id", "joining_status", "invitation_token", "gym__id")
+            .get(invitation_token=token_clean)
+        )
     except Member.DoesNotExist:
         raise DomainValidationError("Invalid or expired invitation token.")
 
@@ -507,16 +514,20 @@ def reconcile_expired_subscriptions() -> int:
     Returns total number of subscriptions transitioned to EXPIRED.
     """
     today = timezone.localdate()
-    expired_count = MemberSubscription.objects.filter(
-        membership_status=MembershipStatusEnum.ACTIVE,
-        end_date__lt=today,
-    ).update(membership_status=MembershipStatusEnum.EXPIRED)
+    expired_count = (
+        MemberSubscription.objects.filter(
+            membership_status=MembershipStatusEnum.ACTIVE,
+            end_date__lt=today,
+        )
+        .order_by()
+        .update(membership_status=MembershipStatusEnum.EXPIRED)
+    )
 
     MemberSubscription.objects.filter(
         membership_status=MembershipStatusEnum.SCHEDULED,
         start_date__lte=today,
         end_date__gte=today,
-    ).update(membership_status=MembershipStatusEnum.ACTIVE)
+    ).order_by().update(membership_status=MembershipStatusEnum.ACTIVE)
 
     logger.info(f"Reconciled {expired_count} expired member subscriptions as of {today}.")
     return expired_count
@@ -526,6 +537,8 @@ def send_subscription_expiry_reminders() -> int:
     """
     Queries active subscriptions expiring in 7 days and 1 day,
     and dispatches reminder notifications.
+    Optimized with precise column projection (.only), un-ordered queryset,
+    and memory-efficient chunk streaming (.iterator).
     Returns count of notifications dispatched.
     """
     today = timezone.localdate()
@@ -536,6 +549,23 @@ def send_subscription_expiry_reminders() -> int:
             end_date__in=target_dates,
         )
         .select_related("member", "plan", "member__gym")
+        .only(
+            "id",
+            "end_date",
+            "membership_status",
+            "member_id",
+            "plan_id",
+            "member__id",
+            "member__first_name",
+            "member__email",
+            "member__gym_id",
+            "plan__id",
+            "plan__name",
+            "member__gym__id",
+            "member__gym__name",
+        )
+        .order_by()
+        .iterator(chunk_size=1000)
     )
 
     dispatched = 0

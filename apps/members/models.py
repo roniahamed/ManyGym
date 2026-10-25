@@ -140,6 +140,7 @@ class MemberSubscription(models.Model):
             models.Index(fields=["member", "-created_at"], name="idx_sub_member_created"),
             models.Index(fields=["membership_status", "end_date"], name="idx_sub_status_end"),
             models.Index(fields=["payment_status"], name="idx_sub_payment_status"),
+            models.Index(fields=["membership_status", "start_date", "end_date"], name="idx_sub_stat_start_end"),
         ]
 
     def clean(self):
