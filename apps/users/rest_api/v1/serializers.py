@@ -111,18 +111,20 @@ class VerifySignupResponseSerializer(serializers.Serializer):
 
 
 class CurrentContextSerializer(serializers.Serializer):
-    type = serializers.CharField()
-    gym_id = serializers.UUIDField(allow_null=True)
-    scopes = serializers.ListField(child=serializers.CharField())
+    type = serializers.CharField(help_text="Active token session context ('personal' or 'gym').")
+    gym_id = serializers.UUIDField(allow_null=True, help_text="ID of active gym if in gym context; null if personal.")
+    gym_name = serializers.CharField(allow_null=True, required=False, help_text="Name of active gym if in gym context.")
+    profile_picture_url = serializers.CharField(allow_null=True, required=False, help_text="Profile picture URL of active gym if in gym context.")
+    scopes = serializers.ListField(child=serializers.CharField(), help_text="Effective RBAC permission scopes for active context.")
 
 
 class AccessibleGymItemSerializer(serializers.Serializer):
-    gym_id = serializers.UUIDField()
-    name = serializers.CharField()
-    role = serializers.CharField()
-    is_owner = serializers.BooleanField()
-    primary_type = serializers.CharField()
-    profile_picture_url = serializers.CharField(allow_null=True)
+    gym_id = serializers.UUIDField(help_text="Unique identifier of accessible gym.")
+    name = serializers.CharField(help_text="Display name of the gym.")
+    role = serializers.CharField(help_text="User's role in this gym ('Owner' or assigned staff role).")
+    is_owner = serializers.BooleanField(help_text="True if user owns this gym tenant.")
+    primary_type = serializers.CharField(help_text="Gym facility category/type.")
+    profile_picture_url = serializers.CharField(allow_null=True, help_text="Profile/logo image URL of the gym.")
 
 
 class UserProfileMeResponseSerializer(serializers.Serializer):

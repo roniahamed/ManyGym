@@ -431,6 +431,8 @@ To switch to a gym context, user must be:
   "current_context": {
     "type": "personal",
     "gym_id": null,
+    "gym_name": null,
+    "profile_picture_url": null,
     "scopes": []
   },
   "accessible_gyms": [

@@ -140,3 +140,64 @@ def test_permissions_list_endpoint():
     assert "Studio" in data
     assert "Members" in data
     assert "People & Roles" in data
+
+
+@pytest.mark.django_db
+def test_me_endpoint_in_gym_context_sorting_and_profile_picture():
+    owner = User.objects.create_user(
+        email="multi.owner@manygym.com",
+        password="Password123!",
+        first_name="Multi",
+        last_name="Owner",
+        is_verified=True,
+    )
+    gym1 = Gym.objects.create(
+        name="First Gym",
+        owner_user=owner,
+        primary_type="crossfit_box",
+        profile_picture_url="https://cdn.manygym.com/gym1.jpg",
+    )
+    gym2 = Gym.objects.create(
+        name="Second Gym",
+        owner_user=owner,
+        primary_type="powerlifting_gym",
+        profile_picture_url="https://cdn.manygym.com/gym2.jpg",
+    )
+
+    # 1. In Personal context:
+    p_tokens = issue_context_token(owner, context_type=TokenContextType.PERSONAL)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {p_tokens['access']}")
+    res_p = client.get(reverse("me"))
+    assert res_p.status_code == 200
+    assert res_p.data["current_context"]["type"] == "personal"
+    assert res_p.data["current_context"]["gym_id"] is None
+    assert res_p.data["current_context"]["gym_name"] is None
+    assert res_p.data["current_context"]["profile_picture_url"] is None
+    assert len(res_p.data["accessible_gyms"]) == 2
+
+    # 2. Switch to Second Gym context:
+    switch_res = client.post(reverse("switch-context"), {
+        "context_type": "gym",
+        "gym_id": str(gym2.id),
+    })
+    assert switch_res.status_code == 200
+    gym2_token = switch_res.data["tokens"]["access"]
+
+    # 3. Call GET /me/ in Second Gym context:
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {gym2_token}")
+    res_g2 = client.get(reverse("me"))
+    assert res_g2.status_code == 200
+    ctx = res_g2.data["current_context"]
+    assert ctx["type"] == "gym"
+    assert str(ctx["gym_id"]) == str(gym2.id)
+    assert ctx["gym_name"] == "Second Gym"
+    assert ctx["profile_picture_url"] == "https://cdn.manygym.com/gym2.jpg"
+
+    # Verify sorting: Second Gym MUST be at index 0 (top of accessible_gyms list)
+    acc = res_g2.data["accessible_gyms"]
+    assert len(acc) == 2
+    assert str(acc[0]["gym_id"]) == str(gym2.id)
+    assert acc[0]["name"] == "Second Gym"
+    assert str(acc[1]["gym_id"]) == str(gym1.id)
+    assert acc[1]["name"] == "First Gym"
