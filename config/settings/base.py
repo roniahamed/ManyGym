@@ -191,6 +191,27 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "reconcile_expired_subscriptions_daily": {
+        "task": "apps.members.tasks.reconcile_expired_subscriptions_task",
+        "schedule": crontab(hour=0, minute=0),
+    },
+    "send_subscription_expiry_reminder_daily": {
+        "task": "apps.members.tasks.send_subscription_expiry_reminder_task",
+        "schedule": crontab(hour=8, minute=0),
+    },
+    "send_lead_followup_reminder_daily": {
+        "task": "apps.leads.tasks.send_lead_followup_reminder_task",
+        "schedule": crontab(hour=8, minute=30),
+    },
+    "cleanup_expired_tokens_nightly": {
+        "task": "apps.authentication.tasks.cleanup_expired_tokens_task",
+        "schedule": crontab(hour=3, minute=0),
+    },
+}
+
 # Email / SMTP Configuration
 EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = env("EMAIL_HOST", default="smtp.gmail.com")

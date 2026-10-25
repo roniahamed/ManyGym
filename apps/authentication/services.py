@@ -144,3 +144,13 @@ def revoke_token(access_token_str: str) -> None:
     """
     token_hash = hash_token_string(access_token_str)
     AuthToken.objects.filter(token_hash=token_hash).delete()
+
+
+def cleanup_expired_tokens() -> int:
+    """
+    Purges all expired AuthToken records where expires_at < timezone.now().
+    Returns number of deleted token records.
+    """
+    from django.utils import timezone
+    deleted_count, _ = AuthToken.objects.filter(expires_at__lt=timezone.now()).delete()
+    return deleted_count

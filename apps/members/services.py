@@ -1,3 +1,8 @@
+import logging
+from django.core.mail import send_mail
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
 import uuid
 import secrets
 from datetime import date, timedelta
@@ -492,3 +497,79 @@ def transition_membership_status(
     sub.membership_status = new_status
     sub.save(update_fields=["membership_status", "updated_at"])
     return sub
+
+
+@transaction.atomic
+def reconcile_expired_subscriptions() -> int:
+    """
+    Atomically updates active subscriptions where end_date < today to EXPIRED.
+    Also activates SCHEDULED subscriptions where start_date <= today and end_date >= today.
+    Returns total number of subscriptions transitioned to EXPIRED.
+    """
+    today = timezone.localdate()
+    expired_count = MemberSubscription.objects.filter(
+        membership_status=MembershipStatusEnum.ACTIVE,
+        end_date__lt=today,
+    ).update(membership_status=MembershipStatusEnum.EXPIRED)
+
+    MemberSubscription.objects.filter(
+        membership_status=MembershipStatusEnum.SCHEDULED,
+        start_date__lte=today,
+        end_date__gte=today,
+    ).update(membership_status=MembershipStatusEnum.ACTIVE)
+
+    logger.info(f"Reconciled {expired_count} expired member subscriptions as of {today}.")
+    return expired_count
+
+
+def send_subscription_expiry_reminders() -> int:
+    """
+    Queries active subscriptions expiring in 7 days and 1 day,
+    and dispatches reminder notifications.
+    Returns count of notifications dispatched.
+    """
+    today = timezone.localdate()
+    target_dates = [today + timedelta(days=7), today + timedelta(days=1)]
+    expiring_subs = (
+        MemberSubscription.objects.filter(
+            membership_status=MembershipStatusEnum.ACTIVE,
+            end_date__in=target_dates,
+        )
+        .select_related("member", "plan", "member__gym")
+    )
+
+    dispatched = 0
+    for sub in expiring_subs:
+        days_left = (sub.end_date - today).days
+        member = sub.member
+        gym = member.gym
+        if not member.email:
+            continue
+
+        day_str = "days" if days_left > 1 else "day"
+        subject = f"Reminder: Your {sub.plan.name} membership at {gym.name} expires in {days_left} {day_str}"
+        lines = [
+            f"Hi {member.first_name},",
+            "",
+            f"This is a friendly reminder that your {sub.plan.name} membership at {gym.name} is set to expire on {sub.end_date} ({days_left} {day_str} remaining).",
+            "",
+            "Please visit the gym reception or renew your subscription to maintain uninterrupted access.",
+            "",
+            "Best regards,",
+            f"The {gym.name} Team",
+        ]
+        message = chr(10).join(lines)
+        try:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[member.email],
+                fail_silently=False,
+            )
+            dispatched += 1
+        except Exception as exc:
+            logger.error(f"Failed to dispatch subscription expiry reminder to {member.email}: {exc}")
+
+    logger.info(f"Dispatched {dispatched} subscription expiry reminder emails on {today}.")
+    return dispatched

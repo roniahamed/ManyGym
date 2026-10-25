@@ -1,3 +1,8 @@
+import logging
+from django.core.mail import send_mail
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -501,3 +506,79 @@ def delete_lead(lead: Lead) -> None:
     if lead.stage == LeadStageEnum.JOINED or lead.converted_member_id is not None:
         raise ResourceConflictError("Cannot delete a lead that has already been converted to a member.")
     lead.delete()
+
+
+def send_lead_followup_reminders() -> int:
+    """
+    Daily lifecycle worker:
+    Queries uncompleted LeadNextMove items scheduled for today and alerts assigned staff or gym owners.
+    Returns count of reminder notifications dispatched.
+    """
+    today = timezone.localdate()
+    moves = (
+        LeadNextMove.objects.filter(
+            scheduled_date=today,
+            is_completed=False,
+        )
+        .select_related(
+            "lead",
+            "lead__assigned_staff",
+            "lead__assigned_staff__user",
+            "lead__gym",
+            "lead__gym__owner_user",
+        )
+    )
+
+    dispatched = 0
+    for move in moves:
+        lead = move.lead
+        gym = lead.gym
+        recipient_email = None
+        recipient_name = None
+
+        if lead.assigned_staff and lead.assigned_staff.user and lead.assigned_staff.user.email:
+            recipient_email = lead.assigned_staff.user.email
+            recipient_name = f"{lead.assigned_staff.user.first_name}".strip() or "Staff Member"
+        elif gym and gym.owner_user and gym.owner_user.email:
+            recipient_email = gym.owner_user.email
+            recipient_name = f"{gym.owner_user.first_name}".strip() or "Gym Owner"
+
+        if not recipient_email:
+            continue
+
+        stage_disp = lead.get_stage_display()
+        lead_phone = lead.phone or "N/A"
+        lead_email = lead.email or "N/A"
+
+        subject = f"Action Required: Lead follow-up due today for {lead.full_name} ({gym.name})"
+        lines = [
+            f"Hi {recipient_name},",
+            "",
+            f"You have an uncompleted lead follow-up action due today at {gym.name}:",
+            "",
+            f"Lead Name: {lead.full_name}",
+            f"Phone: {lead_phone}",
+            f"Email: {lead_email}",
+            f"Current Stage: {stage_disp}",
+            f"Scheduled Task: {move.short_description}",
+            "",
+            "Please follow up with the prospective member and update their stage in Many Gym.",
+            "",
+            "Best regards,",
+            f"The {gym.name} Team",
+        ]
+        message = chr(10).join(lines)
+        try:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[recipient_email],
+                fail_silently=False,
+            )
+            dispatched += 1
+        except Exception as exc:
+            logger.error(f"Failed to dispatch lead follow-up reminder for move {move.id}: {exc}")
+
+    logger.info(f"Dispatched {dispatched} lead follow-up reminders on {today}.")
+    return dispatched
