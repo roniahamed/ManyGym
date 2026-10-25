@@ -627,3 +627,605 @@ class TestReportsHTTPMethodsAndBadUUID:
 
             res_missing = owner_client.get(ep)
             assert res_missing.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ==============================================================================
+# 7. DATA TYPE MISMATCHES (TYPE JUGGLING)
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8TypeJugglingAndDataTypes:
+    ENDPOINTS = [
+        "/api/v1/dashboard/summary/",
+        "/api/v1/reports/revenue/",
+        "/api/v1/reports/membership-growth/",
+        "/api/v1/reports/leads-funnel/",
+        "/api/v1/reports/trainer-workload/",
+    ]
+    DATE_ENDPOINTS = [
+        "/api/v1/reports/revenue/",
+        "/api/v1/reports/membership-growth/",
+        "/api/v1/reports/leads-funnel/",
+    ]
+
+    @pytest.mark.parametrize("bad_val", [
+        12345,
+        123.45,
+        True,
+        False,
+        "null",
+        "undefined",
+        "None",
+    ])
+    def test_gym_id_type_juggling_handled_gracefully(self, report_gym_setup, bad_val):
+        owner_client = report_gym_setup["owner_client"]
+        for ep in self.ENDPOINTS:
+            res = owner_client.get(f"{ep}?gym_id={bad_val}")
+            assert res.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+            assert res.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    @pytest.mark.parametrize("bad_date", [
+        12345,
+        True,
+        12.34,
+        "true",
+        "null",
+        "NaN",
+    ])
+    def test_date_params_type_juggling_handled_gracefully(self, report_gym_setup, bad_date):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+        for ep in self.DATE_ENDPOINTS:
+            res_start = owner_client.get(f"{ep}?gym_id={gym.id}&start_date={bad_date}")
+            assert res_start.status_code == status.HTTP_400_BAD_REQUEST
+            assert res_start.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+            res_end = owner_client.get(f"{ep}?gym_id={gym.id}&end_date={bad_date}")
+            assert res_end.status_code == status.HTTP_400_BAD_REQUEST
+            assert res_end.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+# ==============================================================================
+# 8. BOUNDARY & LENGTH EDGE CASES
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8BoundariesAndLengths:
+    DATE_ENDPOINTS = [
+        "/api/v1/reports/revenue/",
+        "/api/v1/reports/membership-growth/",
+        "/api/v1/reports/leads-funnel/",
+    ]
+
+    def test_whitespace_and_blank_query_values(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        # Blank gym_id
+        res = owner_client.get(f"/api/v1/dashboard/summary/?gym_id=")
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Whitespace-only gym_id
+        res_ws = owner_client.get(f"/api/v1/dashboard/summary/?gym_id=%20%20%20")
+        assert res_ws.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+
+        # Whitespace-only dates
+        for ep in self.DATE_ENDPOINTS:
+            res_date = owner_client.get(f"{ep}?gym_id={gym.id}&start_date=%20%20%20")
+            assert res_date.status_code == status.HTTP_400_BAD_REQUEST
+            assert "Invalid date format" in str(res_date.data)
+
+    def test_extreme_length_strings(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+        huge_str = "a" * 10000
+
+        # Huge gym_id
+        res = owner_client.get(f"/api/v1/dashboard/summary/?gym_id={huge_str}")
+        assert res.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+        assert res.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        # Huge date strings
+        for ep in self.DATE_ENDPOINTS:
+            res_date = owner_client.get(f"{ep}?gym_id={gym.id}&start_date={huge_str}")
+            assert res_date.status_code == status.HTTP_400_BAD_REQUEST
+            assert res_date.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    def test_leading_and_trailing_whitespace_trimmed_or_handled(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        for ep in self.DATE_ENDPOINTS:
+            res = owner_client.get(f"{ep}?gym_id={gym.id}&start_date=%202026-01-01%20&end_date=%202026-01-31%20")
+            assert res.status_code == status.HTTP_200_OK
+            assert res.data["start_date"] == "2026-01-01"
+            assert res.data["end_date"] == "2026-01-31"
+
+    def test_date_range_exact_boundaries(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        for ep in self.DATE_ENDPOINTS:
+            # Same day (min range: 0 days)
+            res_same = owner_client.get(f"{ep}?gym_id={gym.id}&start_date=2026-03-15&end_date=2026-03-15")
+            assert res_same.status_code == status.HTTP_200_OK
+
+            # Exactly 1 day inverted (min - 1)
+            res_inv = owner_client.get(f"{ep}?gym_id={gym.id}&start_date=2026-03-16&end_date=2026-03-15")
+            assert res_inv.status_code == status.HTTP_400_BAD_REQUEST
+            assert "'start_date' cannot be after 'end_date'" in str(res_inv.data)
+
+
+# ==============================================================================
+# 9. MISSING, EXTRA & MALFORMED FIELDS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8MissingExtraAndMalformedFields:
+    ENDPOINTS = [
+        "/api/v1/dashboard/summary/",
+        "/api/v1/reports/revenue/",
+        "/api/v1/reports/membership-growth/",
+        "/api/v1/reports/leads-funnel/",
+        "/api/v1/reports/trainer-workload/",
+    ]
+
+    def test_hundred_garbage_query_params_ignored_without_500(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        garbage_params = "&".join(f"garbage_key_{i}=garbage_val_{i}" for i in range(120))
+        for ep in self.ENDPOINTS:
+            res = owner_client.get(f"{ep}?gym_id={gym.id}&{garbage_params}")
+            assert res.status_code == status.HTTP_200_OK, f"Failed on {ep}"
+            assert res.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    def test_server_controlled_and_mass_assignment_fields_in_query(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        for ep in self.ENDPOINTS:
+            res = owner_client.get(f"{ep}?gym_id={gym.id}&is_superuser=true&role=admin&total_revenue=9999999")
+            assert res.status_code == status.HTTP_200_OK
+            assert res.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    def test_duplicate_query_params_handled(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res = owner_client.get(
+            f"/api/v1/reports/revenue/?gym_id={gym.id}&gym_id={gym.id}&start_date=2026-01-01&start_date=2026-01-05"
+        )
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["start_date"] == "2026-01-05"
+
+
+# ==============================================================================
+# 10. FORMAT-SPECIFIC INVALID INPUTS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8FormatSpecificInvalidInputs:
+    DATE_ENDPOINTS = [
+        "/api/v1/reports/revenue/",
+        "/api/v1/reports/membership-growth/",
+        "/api/v1/reports/leads-funnel/",
+    ]
+
+    @pytest.mark.parametrize("invalid_date", [
+        "2026-13-45",
+        "2026-02-29",
+        "31/12/2026",
+        "12-31-2026",
+        "2026.01.01",
+        "today",
+        "yesterday",
+        "1740000000",
+        "2026-01-01T00:00:00",
+        "2026-1-1",
+        "10000-01-01",
+    ])
+    def test_invalid_date_formats_rejected_with_400(self, report_gym_setup, invalid_date):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        for ep in self.DATE_ENDPOINTS:
+            res_start = owner_client.get(f"{ep}?gym_id={gym.id}&start_date={invalid_date}")
+            assert res_start.status_code == status.HTTP_400_BAD_REQUEST
+            assert res_start.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+            res_end = owner_client.get(f"{ep}?gym_id={gym.id}&end_date={invalid_date}")
+            assert res_end.status_code == status.HTTP_400_BAD_REQUEST
+            assert res_end.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    def test_leap_year_february_29_handled_cleanly(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        # 2024 is a leap year (Feb 29 exists)
+        res_leap = owner_client.get(
+            f"/api/v1/reports/revenue/?gym_id={gym.id}&start_date=2024-02-01&end_date=2024-02-29"
+        )
+        assert res_leap.status_code == status.HTTP_200_OK
+
+        # 2025 is not a leap year (Feb 29 does not exist)
+        res_non_leap = owner_client.get(
+            f"/api/v1/reports/revenue/?gym_id={gym.id}&start_date=2025-02-01&end_date=2025-02-29"
+        )
+        assert res_non_leap.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("invalid_uuid", [
+        "not-a-uuid",
+        "12345",
+        "g" * 36,
+        "00000000-0000-0000-0000-00000000000g",
+        "0",
+        "-1",
+    ])
+    def test_invalid_uuid_formats_rejected(self, report_gym_setup, invalid_uuid):
+        owner_client = report_gym_setup["owner_client"]
+        res = owner_client.get(f"/api/v1/dashboard/summary/?gym_id={invalid_uuid}")
+        assert res.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+        assert res.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    def test_nonexistent_valid_uuid_returns_404(self, report_gym_setup):
+        owner_client = report_gym_setup["owner_client"]
+        non_existent_uuid = str(uuid.uuid4())
+        res = owner_client.get(f"/api/v1/dashboard/summary/?gym_id={non_existent_uuid}")
+        assert res.status_code == status.HTTP_404_NOT_FOUND
+        assert "Gym not found" in str(res.data)
+
+
+# ==============================================================================
+# 11. SECURITY & INJECTION TESTING (SQLi, XSS, Path Traversal, Unicode)
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8SecurityAndInjections:
+    ENDPOINTS = [
+        "/api/v1/dashboard/summary/",
+        "/api/v1/reports/revenue/",
+        "/api/v1/reports/membership-growth/",
+        "/api/v1/reports/leads-funnel/",
+        "/api/v1/reports/trainer-workload/",
+    ]
+
+    @pytest.mark.parametrize("sqli_payload", [
+        "' OR 1=1 --",
+        '" OR ""="',
+        "'; DROP TABLE gyms; --",
+        "UNION SELECT NULL, NULL, NULL --",
+        "1' AND SLEEP(5) --",
+        "admin'--",
+    ])
+    def test_sqli_payloads_in_parameters_blocked(self, report_gym_setup, sqli_payload):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res_gym = owner_client.get(f"/api/v1/dashboard/summary/?gym_id={sqli_payload}")
+        assert res_gym.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+        assert res_gym.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        res_date = owner_client.get(f"/api/v1/reports/revenue/?gym_id={gym.id}&start_date={sqli_payload}")
+        assert res_date.status_code == status.HTTP_400_BAD_REQUEST
+        assert res_date.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    @pytest.mark.parametrize("xss_payload", [
+        "<script>alert(1)</script>",
+        "<img src=x onerror=alert(document.cookie)>",
+        "javascript:alert('pwned')",
+        "<svg/onload=alert('xss')>",
+    ])
+    def test_xss_payloads_in_parameters_blocked(self, report_gym_setup, xss_payload):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res_gym = owner_client.get(f"/api/v1/dashboard/summary/?gym_id={xss_payload}")
+        assert res_gym.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+
+        res_date = owner_client.get(f"/api/v1/reports/revenue/?gym_id={gym.id}&start_date={xss_payload}")
+        assert res_date.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("path_payload", [
+        "../../etc/passwd",
+        "..%2F..%2Fetc%2Fpasswd",
+        "/etc/shadow",
+        "..\..\windows\system32",
+    ])
+    def test_path_traversal_payloads_blocked(self, report_gym_setup, path_payload):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res_gym = owner_client.get(f"/api/v1/dashboard/summary/?gym_id={path_payload}")
+        assert res_gym.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+
+        res_date = owner_client.get(f"/api/v1/reports/revenue/?gym_id={gym.id}&start_date={path_payload}")
+        assert res_date.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize("unicode_payload", [
+        "🏋️‍♂️💪🔥📊",
+        "تقرير اللياقة البدنية والتحليلات",
+        "דוח אנליטיקה וביצועים של חדר כושר",
+        "月次売上レポートと会員獲得メトリクス",
+        "Z̡̢͏a̴̴͏l̶g̢o̷ ̴T͏e̷x̶t",
+    ])
+    def test_unicode_and_adversarial_encoding_resilience(self, report_gym_setup, unicode_payload):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res_gym = owner_client.get(f"/api/v1/dashboard/summary/?gym_id={unicode_payload}")
+        assert res_gym.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+        assert res_gym.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        res_date = owner_client.get(f"/api/v1/reports/revenue/?gym_id={gym.id}&start_date={unicode_payload}")
+        assert res_date.status_code == status.HTTP_400_BAD_REQUEST
+        assert res_date.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+# ==============================================================================
+# 12. AUTHENTICATION, REVOCATION & USER STATUS EDGE CASES
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8AuthAndUserStatusEdgeCases:
+    ENDPOINTS = [
+        "/api/v1/dashboard/summary/",
+        "/api/v1/reports/revenue/",
+        "/api/v1/reports/membership-growth/",
+        "/api/v1/reports/leads-funnel/",
+        "/api/v1/reports/trainer-workload/",
+    ]
+
+    def test_malformed_authorization_headers(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        client = APIClient()
+
+        # Missing token after Bearer
+        client.credentials(HTTP_AUTHORIZATION="Bearer ")
+        res1 = client.get(f"/api/v1/dashboard/summary/?gym_id={gym.id}")
+        assert res1.status_code == status.HTTP_401_UNAUTHORIZED
+
+        # Garbage token
+        client.credentials(HTTP_AUTHORIZATION="Bearer totally.invalid.jwt.token")
+        res2 = client.get(f"/api/v1/dashboard/summary/?gym_id={gym.id}")
+        assert res2.status_code == status.HTTP_401_UNAUTHORIZED
+
+        # Basic auth instead of Bearer
+        client.credentials(HTTP_AUTHORIZATION="Basic dXNlcjpwYXNz")
+        res3 = client.get(f"/api/v1/dashboard/summary/?gym_id={gym.id}")
+        assert res3.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_suspended_gym_owner_blocked_with_403(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner = report_gym_setup["owner"]
+        owner_client = report_gym_setup["owner_client"]
+
+        owner.status = UserStatus.SUSPENDED
+        owner.save()
+
+        for ep in self.ENDPOINTS:
+            res = owner_client.get(f"{ep}?gym_id={gym.id}")
+            assert res.status_code == status.HTTP_403_FORBIDDEN, f"Suspended owner allowed on {ep}"
+            assert "inactive or suspended" in str(res.data)
+
+    def test_inactive_user_account_rejected_with_401_or_403(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        staff_user = report_gym_setup["staff_user"]
+        staff_client = report_gym_setup["staff_client"]
+
+        staff_user.is_active = False
+        staff_user.save()
+
+        for ep in self.ENDPOINTS:
+            res = staff_client.get(f"{ep}?gym_id={gym.id}")
+            assert res.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+    def test_superuser_access_allowed(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        admin_user, admin_client, _ = create_user_with_tokens(email="admin.phase8@manygym.com")
+        admin_user.is_superuser = True
+        admin_user.is_staff = True
+        admin_user.save()
+
+        for ep in self.ENDPOINTS:
+            res = admin_client.get(f"{ep}?gym_id={gym.id}")
+            assert res.status_code == status.HTTP_200_OK
+
+
+# ==============================================================================
+# 13. QUERY PARAMETERS, FILTERS & UNEXPECTED PAGINATION
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8QueryParamsAndFilters:
+    ENDPOINTS = [
+        "/api/v1/dashboard/summary/",
+        "/api/v1/reports/revenue/",
+        "/api/v1/reports/membership-growth/",
+        "/api/v1/reports/leads-funnel/",
+        "/api/v1/reports/trainer-workload/",
+    ]
+
+    @pytest.mark.parametrize("bad_pagination", [
+        "?page=0",
+        "?page=-1",
+        "?page=abc",
+        "?page=999999",
+        "?page_size=0",
+        "?page_size=-10",
+        "?page_size=1000000",
+        "?search=test&ordering=-created_at",
+    ])
+    def test_unexpected_pagination_and_search_ignored_without_500(self, report_gym_setup, bad_pagination):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        for ep in self.ENDPOINTS:
+            res = owner_client.get(f"{ep}?gym_id={gym.id}&{bad_pagination.lstrip('?')}")
+            assert res.status_code == status.HTTP_200_OK
+            assert res.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+# ==============================================================================
+# 14. RESPONSE VALIDATION & CONTRACT ENVELOPE CONSISTENCY
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8ResponseContractAndStructure:
+    def test_dashboard_summary_envelope_structure(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res = owner_client.get(f"/api/v1/dashboard/summary/?gym_id={gym.id}")
+        assert res.status_code == status.HTTP_200_OK
+        data = res.data
+
+        assert "gym_id" in data
+        assert "gym_name" in data
+        assert "generated_at" in data
+        assert "headline_metrics" in data
+
+        metrics = data["headline_metrics"]
+        expected_metric_keys = {
+            "total_members",
+            "total_active_members",
+            "expiring_memberships_next_7_days",
+            "expiring_memberships_next_30_days",
+            "new_leads_this_week",
+            "pending_next_moves_today",
+            "overdue_next_moves",
+            "todays_scheduled_trials",
+            "todays_revenue",
+            "current_month_revenue",
+        }
+        assert set(metrics.keys()) == expected_metric_keys
+        for k in expected_metric_keys:
+            assert isinstance(metrics[k], (int, float)), f"Metric {k} must be numeric, got {type(metrics[k])}"
+
+    def test_revenue_report_envelope_structure(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res = owner_client.get(f"/api/v1/reports/revenue/?gym_id={gym.id}")
+        assert res.status_code == status.HTTP_200_OK
+        data = res.data
+
+        expected_keys = {
+            "gym_id",
+            "start_date",
+            "end_date",
+            "total_revenue",
+            "total_transactions",
+            "average_transaction_value",
+            "payment_method_breakdown",
+            "plan_distribution",
+            "daily_breakdown",
+        }
+        assert set(data.keys()) == expected_keys
+        assert isinstance(data["total_revenue"], float)
+        assert isinstance(data["total_transactions"], int)
+        assert isinstance(data["average_transaction_value"], float)
+        assert isinstance(data["payment_method_breakdown"], list)
+        assert isinstance(data["plan_distribution"], list)
+        assert isinstance(data["daily_breakdown"], list)
+
+    def test_membership_growth_envelope_structure(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res = owner_client.get(f"/api/v1/reports/membership-growth/?gym_id={gym.id}")
+        assert res.status_code == status.HTTP_200_OK
+        data = res.data
+
+        expected_keys = {
+            "gym_id",
+            "start_date",
+            "end_date",
+            "total_members",
+            "active_subscriptions",
+            "new_members_in_period",
+            "new_subscriptions_in_period",
+            "cancelled_subscriptions_in_period",
+            "net_growth",
+            "churn_rate_percentage",
+            "status_breakdown",
+            "plan_breakdown",
+        }
+        assert set(data.keys()) == expected_keys
+        assert isinstance(data["churn_rate_percentage"], float)
+
+    def test_leads_funnel_envelope_structure(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res = owner_client.get(f"/api/v1/reports/leads-funnel/?gym_id={gym.id}")
+        assert res.status_code == status.HTTP_200_OK
+        data = res.data
+
+        expected_keys = {
+            "gym_id",
+            "start_date",
+            "end_date",
+            "total_leads",
+            "funnel_stages",
+            "conversion_rates",
+            "stage_breakdown",
+            "lost_reason_distribution",
+            "source_breakdown",
+        }
+        assert set(data.keys()) == expected_keys
+        assert set(data["funnel_stages"].keys()) == {"new", "contacted", "trial_booked", "joined", "lost"}
+        assert set(data["conversion_rates"].keys()) == {
+            "trial_booking_rate_percentage",
+            "trial_to_join_rate_percentage",
+            "overall_conversion_rate_percentage",
+            "drop_off_rate_percentage",
+        }
+
+    def test_trainer_workload_envelope_structure(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res = owner_client.get(f"/api/v1/reports/trainer-workload/?gym_id={gym.id}")
+        assert res.status_code == status.HTTP_200_OK
+        data = res.data
+
+        expected_keys = {
+            "gym_id",
+            "gym_name",
+            "total_active_staff",
+            "total_assigned_members",
+            "total_active_routines",
+            "average_members_per_trainer",
+            "trainers",
+        }
+        assert set(data.keys()) == expected_keys
+        assert isinstance(data["trainers"], list)
+
+
+# ==============================================================================
+# 15. REGRESSION & BUG FIX VERIFICATION
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestPhase8BugFixRegression:
+    def test_year_0001_subtraction_overflow_handled_gracefully(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        for ep in [
+            "/api/v1/reports/revenue/",
+            "/api/v1/reports/membership-growth/",
+            "/api/v1/reports/leads-funnel/",
+        ]:
+            res = owner_client.get(f"{ep}?gym_id={gym.id}&end_date=0001-01-01")
+            assert res.status_code == status.HTTP_400_BAD_REQUEST
+            assert res.status_code != status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "out of valid bounds" in str(res.data)
+
+    def test_nonexistent_report_subpath_returns_404(self, report_gym_setup):
+        gym = report_gym_setup["gym"]
+        owner_client = report_gym_setup["owner_client"]
+
+        res = owner_client.get(f"/api/v1/reports/nonexistent-report/?gym_id={gym.id}")
+        assert res.status_code == status.HTTP_404_NOT_FOUND

@@ -35,20 +35,29 @@ def parse_and_validate_date_range(
     end_str = query_params.get("end_date")
 
     if end_str:
+        s_end = str(end_str).strip()
+        if len(s_end) != 10 or s_end[4] != '-' or s_end[7] != '-':
+            raise DomainValidationError("Invalid date format for 'end_date'. Expected YYYY-MM-DD.")
         try:
-            end_date = datetime.strptime(str(end_str).strip(), "%Y-%m-%d").date()
+            end_date = datetime.strptime(s_end, "%Y-%m-%d").date()
         except (ValueError, TypeError, AttributeError):
             raise DomainValidationError("Invalid date format for 'end_date'. Expected YYYY-MM-DD.")
     else:
         end_date = today
 
     if start_str:
+        s_start = str(start_str).strip()
+        if len(s_start) != 10 or s_start[4] != '-' or s_start[7] != '-':
+            raise DomainValidationError("Invalid date format for 'start_date'. Expected YYYY-MM-DD.")
         try:
-            start_date = datetime.strptime(str(start_str).strip(), "%Y-%m-%d").date()
+            start_date = datetime.strptime(s_start, "%Y-%m-%d").date()
         except (ValueError, TypeError, AttributeError):
             raise DomainValidationError("Invalid date format for 'start_date'. Expected YYYY-MM-DD.")
     else:
-        start_date = end_date - timedelta(days=default_days)
+        try:
+            start_date = end_date - timedelta(days=default_days)
+        except (OverflowError, ValueError):
+            raise DomainValidationError("Calculated date range is out of valid bounds.")
 
     if start_date > end_date:
         raise DomainValidationError("'start_date' cannot be after 'end_date'.")

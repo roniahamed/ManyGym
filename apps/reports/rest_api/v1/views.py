@@ -22,7 +22,7 @@ from apps.reports.rest_api.v1.serializers import (
     LeadFunnelReportSerializer,
     TrainerWorkloadReportSerializer,
 )
-from common.enums import StaffStatus
+from common.enums import StaffStatus, UserStatus
 from common.exceptions import (
     DomainValidationError,
     ResourceNotFoundError,
@@ -58,6 +58,9 @@ def check_report_permission(request, gym: Gym) -> None:
     user = getattr(request, "user", None)
     if not user or not user.is_authenticated:
         raise PermissionDeniedError("Authentication credentials were not provided.")
+
+    if getattr(user, "status", None) != UserStatus.ACTIVE or not user.is_active:
+        raise PermissionDeniedError("Your account is currently inactive or suspended.")
 
     if gym.owner_user_id == user.id or user.is_superuser:
         return
