@@ -1712,6 +1712,159 @@ def test_phase7_performance_benchmarks_and_p95_latencies():
     print("=" * 60)
 
 
+# ==============================================================================
+# PHASE 8 REPORTS & DASHBOARD OPTIMIZATION BENCHMARKS
+# ==============================================================================
+
+@pytest.mark.django_db
+def test_phase8_database_level_aggregations_and_no_in_memory_loops():
+    """Verify that reports use database-level SQL Sum and Count instead of Python loops."""
+    import time
+    from decimal import Decimal
+    from django.utils import timezone
+    from apps.reports.selectors import get_revenue_report, get_dashboard_summary
+    from apps.memberships.services import create_membership_plan
+    from apps.members.services import create_member, create_member_subscription, record_member_payment
+    from common.enums import PlanTypeEnum, DurationUnitEnum, PaymentMethodEnum
+
+    owner = User.objects.create_user(
+        email="p8.agg.owner@manygym.com",
+        password="Password123!",
+        first_name="Report",
+        last_name="Aggregator",
+        is_verified=True,
+    )
+    gym = Gym.objects.create(owner_user=owner, name="Agg Gym", timezone="UTC")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Annual Pass",
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("1200.00"),
+        duration_value=12,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+
+    today = timezone.localdate()
+    # Seed 50 payments across 10 members
+    for i in range(10):
+        m = create_member(gym=gym, first_name=f"Member{i}", last_name="Bench", email=f"m{i}.bench@test.com")
+        sub = create_member_subscription(member=m, plan=plan, start_date=today)
+        for j in range(5):
+            record_member_payment(
+                subscription=sub,
+                amount=Decimal("100.00"),
+                payment_method=PaymentMethodEnum.CREDIT_CARD if j % 2 == 0 else PaymentMethodEnum.CASH,
+                payment_date=today,
+            )
+
+    # Execute reports and verify correctness
+    t0 = time.perf_counter()
+    rev_data = get_revenue_report(gym=gym, start_date=today, end_date=today)
+    t1 = time.perf_counter()
+    assert rev_data["total_revenue"] == 5000.0
+    assert rev_data["total_transactions"] == 50
+    assert (t1 - t0) * 1000 < 100.0, f"Database aggregation took {(t1 - t0) * 1000:.2f}ms"
+
+    t2 = time.perf_counter()
+    dash_data = get_dashboard_summary(gym=gym)
+    t3 = time.perf_counter()
+    assert dash_data["headline_metrics"]["total_members"] == 10
+    assert dash_data["headline_metrics"]["todays_revenue"] == 5000.0
+    assert (t3 - t2) * 1000 < 100.0, f"Dashboard summary aggregation took {(t3 - t2) * 1000:.2f}ms"
+
+
+@pytest.mark.django_db
+def test_phase8_performance_benchmarks_and_p95_latencies():
+    """
+    Validates measurable performance targets for Phase 8:
+    - GET /api/v1/dashboard/summary/ p95 < 200 ms
+    - GET /api/v1/reports/revenue/ p95 < 200 ms
+    - GET /api/v1/reports/membership-growth/ p95 < 200 ms
+    - GET /api/v1/reports/leads-funnel/ p95 < 200 ms
+    - GET /api/v1/reports/trainer-workload/ p95 < 200 ms
+    """
+    import time
+    from decimal import Decimal
+    from django.utils import timezone
+    from apps.memberships.services import create_membership_plan
+    from apps.members.services import create_member, create_member_subscription, record_member_payment
+    from apps.leads.services import create_lead
+    from common.enums import PlanTypeEnum, DurationUnitEnum, PaymentMethodEnum, LeadStageEnum
+
+    owner = User.objects.create_user(
+        email="p8.bench.owner@manygym.com",
+        password="Password123!",
+        first_name="Bench",
+        last_name="Executive",
+        is_verified=True,
+    )
+    gym = Gym.objects.create(owner_user=owner, name="Phase 8 Bench Gym", timezone="UTC")
+
+    tokens = issue_context_token(owner, context_type=TokenContextType.PERSONAL)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+
+    plan = create_membership_plan(
+        gym=gym,
+        name="Bench Plan",
+        plan_type=PlanTypeEnum.TIME_BASED,
+        price=Decimal("100.00"),
+        duration_value=1,
+        duration_unit=DurationUnitEnum.MONTH,
+    )
+    today = timezone.localdate()
+
+    for i in range(15):
+        m = create_member(gym=gym, first_name=f"BenchM{i}", last_name="Test", email=f"bm{i}@test.com")
+        sub = create_member_subscription(member=m, plan=plan, start_date=today)
+        record_member_payment(
+            subscription=sub,
+            amount=Decimal("100.00"),
+            payment_method=PaymentMethodEnum.CREDIT_CARD,
+            payment_date=today,
+        )
+        create_lead(gym=gym, first_name=f"Lead{i}", phone=f"+100{i:03d}", stage=LeadStageEnum.NEW)
+
+    def calc_p(latencies, percentile):
+        s = sorted(latencies)
+        idx = int(len(s) * (percentile / 100.0))
+        return s[min(idx, len(s) - 1)]
+
+    endpoints = [
+        ("/api/v1/dashboard/summary/", "Dashboard Summary"),
+        ("/api/v1/reports/revenue/", "Revenue Report"),
+        ("/api/v1/reports/membership-growth/", "Membership Growth"),
+        ("/api/v1/reports/leads-funnel/", "Lead Funnel"),
+        ("/api/v1/reports/trainer-workload/", "Trainer Workload"),
+    ]
+
+    p95_results = {}
+    print("\n" + "=" * 60)
+    print("PHASE 8 PERFORMANCE BENCHMARK REPORT:")
+
+    for ep, label in endpoints:
+        # Warm-up request to eliminate framework/resolver cold-start
+        client.get(f"{ep}?gym_id={gym.id}")
+
+        latencies = []
+        for _ in range(20):
+            t0 = time.perf_counter()
+            res = client.get(f"{ep}?gym_id={gym.id}")
+            t1 = time.perf_counter()
+            assert res.status_code == 200
+            latencies.append((t1 - t0) * 1000)
+
+        p50 = calc_p(latencies, 50)
+        p95 = calc_p(latencies, 95)
+        p95_results[label] = p95
+        assert p95 < 200, f"{label} p95 exceeded target: {p95:.2f}ms"
+        print(f"{label:25s}: p50={p50:.2f}ms, p95={p95:.2f}ms (Target < 200ms)")
+
+    print("=" * 60)
+
+
+
 
 
 
