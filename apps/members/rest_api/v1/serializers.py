@@ -241,7 +241,11 @@ class MemberCreateSerializer(serializers.Serializer):
     email = serializers.EmailField(max_length=255, required=True)
     phone = StrictCharField(max_length=50, required=False, allow_blank=True, allow_null=True)
     profile_photo_url = StrictCharField(max_length=1000, required=False, allow_blank=True, allow_null=True)
-    profile_photo = serializers.FileField(required=False, allow_null=True, help_text="Direct profile photo image upload (multipart/form-data)")
+    profile_photo = serializers.FileField(
+        required=False,
+        allow_null=True,
+        help_text="Direct profile photo image upload (multipart/form-data). Max size: 10MB. Formats: JPEG, PNG, WebP, BMP, GIF, HEIC, TIFF. Automatically corrects orientation and converts directly to WebP.",
+    )
     address = StrictCharField(max_length=500, required=False, allow_blank=True, allow_null=True)
     city = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     country = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
@@ -293,7 +297,11 @@ class MemberUpdateSerializer(serializers.Serializer):
     email = serializers.EmailField(max_length=255, required=False)
     phone = StrictCharField(max_length=50, required=False, allow_blank=True, allow_null=True)
     profile_photo_url = StrictCharField(max_length=1000, required=False, allow_blank=True, allow_null=True)
-    profile_photo = serializers.FileField(required=False, allow_null=True, help_text="Direct profile photo image upload (multipart/form-data)")
+    profile_photo = serializers.FileField(
+        required=False,
+        allow_null=True,
+        help_text="Direct profile photo image upload (multipart/form-data). Max size: 10MB. Formats: JPEG, PNG, WebP, BMP, GIF, HEIC, TIFF. Automatically corrects orientation and converts directly to WebP.",
+    )
     address = StrictCharField(max_length=500, required=False, allow_blank=True, allow_null=True)
     city = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     country = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)

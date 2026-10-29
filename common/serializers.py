@@ -1,4 +1,6 @@
 import uuid
+from pathlib import Path
+from typing import Any
 from rest_framework import serializers
 
 
@@ -42,22 +44,35 @@ class StrictDecimalField(serializers.DecimalField):
         return super().to_internal_value(data)
 
 
-def validate_uploaded_image(file, max_size_mb: int = 10, field_name: str = "image"):
+def validate_uploaded_image(
+    file: Any,
+    max_size_mb: int = 10,
+    field_name: str | None = "image",
+) -> None:
     """
     Common reusable serializer validator for uploaded image files.
+    Validates file size limit and ensures only safe image formats are accepted.
+    Works both in object-level validate() and as a field-level validator.
     """
     if not file:
         return
-    from pathlib import Path
-    if getattr(file, "size", 0) > max_size_mb * 1024 * 1024:
-        raise serializers.ValidationError({field_name: f"Image file cannot exceed {max_size_mb}MB."})
+
+    # 1. Size validation
+    max_bytes = max_size_mb * 1024 * 1024
+    if getattr(file, "size", 0) > max_bytes:
+        msg = f"Image file cannot exceed {max_size_mb}MB."
+        if field_name:
+            raise serializers.ValidationError({field_name: msg})
+        raise serializers.ValidationError(msg)
+
+    # 2. Format validation (prevents executable/script uploads with spoofed headers)
     ext = Path(getattr(file, "name", "")).suffix.lower()
-    valid_exts = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp", ".gif", ".tiff", ".jfif", ".avif"]
-    ctype = getattr(file, "content_type", "")
-    if ext not in valid_exts and not ctype.startswith("image/"):
-        raise serializers.ValidationError({
-            field_name: f"Image must be a valid image file ({', '.join(valid_exts[:5])}, etc.)."
-        })
+    valid_exts = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp", ".gif", ".tiff", ".jfif", ".avif"}
+    if ext not in valid_exts:
+        msg = f"Image must be a valid image file ({', '.join(sorted(valid_exts)[:5])}, etc.)."
+        if field_name:
+            raise serializers.ValidationError({field_name: msg})
+        raise serializers.ValidationError(msg)
 
 
 class ErrorDetailSerializer(serializers.Serializer):

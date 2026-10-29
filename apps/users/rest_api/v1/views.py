@@ -592,6 +592,13 @@ Retrieves personal profile data, current active token context, and the full list
 ### Summary
 Updates mutable personal profile attributes (first_name, last_name, phone, address, city, country, avatar, sex, date_of_birth, nationality).
 
+### File Upload Specifications (`avatar`)
+- **Supported Content-Types**: `multipart/form-data` or `application/json`.
+- **Accepted Formats**: `.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.bmp`, `.gif`, `.tiff`, `.jfif`, `.avif`.
+- **Maximum File Size**: 10MB.
+- **Processing Behavior**: Synchronous. Camera/smartphone EXIF orientation is automatically corrected (prevents rotated/sideways photos), and the image is converted directly to optimized WebP (`.webp`) format.
+- **Alternative**: An existing external image URL can be passed via `avatar_url`.
+
 ### Authentication & Authorization
 - **Authentication**: Required (`Bearer <JWT>`).
         """,

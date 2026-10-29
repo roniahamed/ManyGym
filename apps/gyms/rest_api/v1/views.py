@@ -80,6 +80,13 @@ class GymCreateView(APIView):
 ### Summary
 Creates a new gym workspace entity, sets the creator as the Owner, provisions the initial primary location, seeds the default 7-day operating hours, and grants the Administrator role.
 
+### File Upload Specifications (`profile_picture`, `cover_photo`)
+- **Supported Content-Types**: `multipart/form-data` or `application/json`.
+- **Accepted Formats**: `.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.bmp`, `.gif`, `.tiff`, `.jfif`, `.avif`.
+- **Maximum File Size**: 10MB per image.
+- **Processing Behavior**: Synchronous. Camera/smartphone EXIF orientation is automatically corrected (prevents rotated/sideways photos), and images are directly converted to standardized WebP (`.webp`) format.
+- **Alternative**: Existing external image URLs can be passed via `profile_picture_url` and `cover_photo_url`.
+
 ### Authentication & Authorization
 - **Authentication**: Required (`Bearer <JWT>`).
 - Any authenticated user can create a new gym.
@@ -168,6 +175,12 @@ Retrieves complete gym profile overview including physical location, operating h
         description="""
 ### Summary
 Updates core overview attributes: name, types (primary & secondary), description (min 120 chars), age restriction (1-99), gender requirements, and branding photos.
+
+### File Upload Specifications (`profile_picture`, `cover_photo`)
+- **Supported Content-Types**: `multipart/form-data` or `application/json`.
+- **Accepted Formats**: `.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.bmp`, `.gif`, `.tiff`, `.jfif`, `.avif`.
+- **Maximum File Size**: 10MB per image.
+- **Processing Behavior**: Synchronous. Automatically corrects EXIF orientation and converts directly to WebP (`.webp`) format.
 
 ### Authorization
 - Requires Gym Ownership or `gym_profile:edit` scope.

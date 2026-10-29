@@ -159,7 +159,17 @@ class MemberListCreateView(APIView):
     @extend_schema(
         tags=["Members & Lifecycle"],
         summary="Create / Onboard Member",
-        description="Creates a new member profile, dispatches onboarding invitation email, and sets up initial subscription/payment.",
+        description="""
+### Summary
+Creates a new member profile, dispatches onboarding invitation email, and sets up initial subscription/payment.
+
+### File Upload Specifications (`profile_photo`)
+- **Supported Content-Types**: `multipart/form-data` or `application/json`.
+- **Accepted Formats**: `.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.bmp`, `.gif`, `.tiff`, `.jfif`, `.avif`.
+- **Maximum File Size**: 10MB.
+- **Processing Behavior**: Synchronous. Camera/smartphone EXIF orientation is automatically corrected (prevents rotated/sideways photos), and the image is converted directly to optimized WebP (`.webp`) format with an accompanying thumbnail.
+- **Alternative**: An existing external image URL can be passed via `profile_photo_url`.
+        """,
         request=MemberCreateSerializer,
         responses={
             status.HTTP_201_CREATED: MemberDetailSerializer,
@@ -242,7 +252,16 @@ class MemberDetailView(APIView):
     @extend_schema(
         tags=["Members & Lifecycle"],
         summary="Update Member Details",
-        description="Partially updates demographic information, emergency contact, or assigned trainer.",
+        description="""
+### Summary
+Partially updates demographic information, emergency contact, assigned trainer, or profile photo.
+
+### File Upload Specifications (`profile_photo`)
+- **Supported Content-Types**: `multipart/form-data` or `application/json`.
+- **Accepted Formats**: `.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.bmp`, `.gif`, `.tiff`, `.jfif`, `.avif`.
+- **Maximum File Size**: 10MB.
+- **Processing Behavior**: Automatically corrects EXIF orientation and converts directly to WebP (`.webp`) format.
+        """,
         request=MemberUpdateSerializer,
         responses={
             status.HTTP_200_OK: MemberDetailSerializer,

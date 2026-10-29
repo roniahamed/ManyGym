@@ -151,9 +151,17 @@ class GymCreateSerializer(serializers.Serializer):
         min_length=120,
     )
     profile_picture_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
-    profile_picture = serializers.FileField(required=False, allow_null=True, help_text="Direct profile picture upload via multipart/form-data")
+    profile_picture = serializers.FileField(
+        required=False,
+        allow_null=True,
+        help_text="Direct profile picture upload (multipart/form-data). Max size: 10MB. Formats: JPEG, PNG, WebP, BMP, GIF, HEIC, TIFF. Automatically corrects orientation and converts directly to WebP.",
+    )
     cover_photo_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
-    cover_photo = serializers.FileField(required=False, allow_null=True, help_text="Direct cover photo upload via multipart/form-data")
+    cover_photo = serializers.FileField(
+        required=False,
+        allow_null=True,
+        help_text="Direct cover photo upload (multipart/form-data). Max size: 10MB. Formats: JPEG, PNG, WebP, BMP, GIF, HEIC, TIFF. Automatically corrects orientation and converts directly to WebP.",
+    )
     gender_required = serializers.ChoiceField(
         choices=GymGenderRequired.choices,
         default=GymGenderRequired.EVERYONE,
@@ -179,9 +187,17 @@ class GymOverviewUpdateSerializer(serializers.Serializer):
     secondary_type = serializers.ChoiceField(choices=GymTypeEnum.choices, required=False, allow_null=True)
     short_description = StrictCharField(required=False, min_length=120)
     profile_picture_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
-    profile_picture = serializers.FileField(required=False, allow_null=True, help_text="Direct profile picture upload via multipart/form-data")
+    profile_picture = serializers.FileField(
+        required=False,
+        allow_null=True,
+        help_text="Direct profile picture upload (multipart/form-data). Max size: 10MB. Formats: JPEG, PNG, WebP, BMP, GIF, HEIC, TIFF. Automatically corrects orientation and converts directly to WebP.",
+    )
     cover_photo_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
-    cover_photo = serializers.FileField(required=False, allow_null=True, help_text="Direct cover photo upload via multipart/form-data")
+    cover_photo = serializers.FileField(
+        required=False,
+        allow_null=True,
+        help_text="Direct cover photo upload (multipart/form-data). Max size: 10MB. Formats: JPEG, PNG, WebP, BMP, GIF, HEIC, TIFF. Automatically corrects orientation and converts directly to WebP.",
+    )
     gender_required = serializers.ChoiceField(choices=GymGenderRequired.choices, required=False)
     min_age = serializers.IntegerField(required=False, min_value=1, max_value=99)
     timezone = StrictCharField(required=False, max_length=100)

@@ -81,7 +81,11 @@ class UpdateProfileSerializer(serializers.Serializer):
     last_name = StrictCharField(required=False, max_length=100)
     phone = StrictCharField(required=False, allow_blank=True, max_length=50)
     avatar_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
-    avatar = serializers.FileField(required=False, allow_null=True, help_text="Direct avatar image upload via multipart/form-data")
+    avatar = serializers.FileField(
+        required=False,
+        allow_null=True,
+        help_text="Direct avatar image upload (multipart/form-data). Max size: 10MB. Formats: JPEG, PNG, WebP, BMP, GIF, HEIC, TIFF. Automatically corrects orientation and converts directly to WebP.",
+    )
     address = StrictCharField(required=False, allow_blank=True, max_length=500)
     city = StrictCharField(required=False, allow_blank=True, max_length=100)
     country = StrictCharField(required=False, allow_blank=True, max_length=100)
