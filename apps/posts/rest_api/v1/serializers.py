@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 from apps.posts.models import GymPost, GymPostMedia
 from common.enums import PostPrivacyEnum, MediaTypeEnum
+from common.serializers import validate_uploaded_image
 
 
 class StrictCharField(serializers.CharField):
@@ -124,4 +125,11 @@ class GymPostUpdateSerializer(serializers.Serializer):
 
 
 class CustomVideoThumbnailSerializer(serializers.Serializer):
-    thumbnail_image = serializers.FileField(required=True)
+    thumbnail_image = serializers.FileField(
+        required=True,
+        help_text="Custom video poster image (multipart/form-data). Max size: 10MB. Formats: JPEG, PNG, WebP, BMP, GIF, HEIC, TIFF. Automatically corrects orientation and converts directly to WebP.",
+    )
+
+    def validate(self, attrs):
+        validate_uploaded_image(attrs.get("thumbnail_image"), field_name="thumbnail_image")
+        return attrs
