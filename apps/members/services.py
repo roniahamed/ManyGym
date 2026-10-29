@@ -47,44 +47,16 @@ def process_member_profile_photo(
     photo_url: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Saves and optimizes member profile photo if uploaded via multipart/form-data,
-    or falls back to direct URL string if provided.
+    Saves and optimizes member profile photo using central MediaOptimizerService.
     """
-    if photo_file:
-        from pathlib import Path
-        from common.media import MediaOptimizerService
-
-        # Size check (10MB)
-        if getattr(photo_file, "size", 0) > 10 * 1024 * 1024:
-            raise DomainValidationError("Profile photo cannot exceed 10MB.")
-
-        filename = getattr(photo_file, "name", "photo.jpg")
-        ext = Path(filename).suffix.lower()
-        valid_extensions = [".jpg", ".jpeg", ".png", ".webp", ".heic"]
-        content_type = getattr(photo_file, "content_type", "")
-        if ext not in valid_extensions and not content_type.startswith("image/"):
-            raise DomainValidationError("Profile photo must be a valid image file (.jpg, .jpeg, .png, .webp).")
-
-        src_path, public_url = MediaOptimizerService.save_uploaded_file(
-            file=photo_file,
-            subfolder="members/profiles/original",
-        )
-        try:
-            opt_meta = MediaOptimizerService.optimize_image(
-                src_path=src_path,
-                subfolder="members/profiles",
-                max_dims=(800, 800),
-                thumb_dims=(200, 200),
-            )
-            return opt_meta.get("optimized_url") or public_url
-        except Exception as e:
-            logger.warning(f"Could not optimize member profile photo: {e}, falling back to original upload")
-            return public_url
-
-    if photo_url and photo_url.strip():
-        return photo_url.strip()
-
-    return None
+    from common.media import MediaOptimizerService
+    return MediaOptimizerService.process_image_upload(
+        file=photo_file,
+        url=photo_url,
+        subfolder="members/profiles",
+        max_dims=(800, 800),
+        thumb_dims=(200, 200),
+    )
 
 
 @transaction.atomic

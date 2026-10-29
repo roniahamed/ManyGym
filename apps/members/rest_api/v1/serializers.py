@@ -21,6 +21,7 @@ from common.serializers import (
     StrictUUIDField,
     StrictIntegerField,
     StrictDecimalField,
+    validate_uploaded_image,
 )
 
 
@@ -267,18 +268,7 @@ class MemberCreateSerializer(serializers.Serializer):
     initial_payment_notes = StrictCharField(required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
-        photo = attrs.get("profile_photo")
-        if photo:
-            from pathlib import Path
-            if getattr(photo, "size", 0) > 10 * 1024 * 1024:
-                raise serializers.ValidationError({"profile_photo": "Profile photo cannot exceed 10MB."})
-            ext = Path(getattr(photo, "name", "")).suffix.lower()
-            valid_exts = [".jpg", ".jpeg", ".png", ".webp", ".heic"]
-            ctype = getattr(photo, "content_type", "")
-            if ext not in valid_exts and not ctype.startswith("image/"):
-                raise serializers.ValidationError({
-                    "profile_photo": "Profile photo must be a valid image file (.jpg, .jpeg, .png, .webp)."
-                })
+        validate_uploaded_image(attrs.get("profile_photo"), field_name="profile_photo")
 
         start = attrs.get("start_date") or timezone.now().date()
         end = attrs.get("end_date")
@@ -318,18 +308,7 @@ class MemberUpdateSerializer(serializers.Serializer):
     internal_notes = StrictCharField(required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
-        photo = attrs.get("profile_photo")
-        if photo:
-            from pathlib import Path
-            if getattr(photo, "size", 0) > 10 * 1024 * 1024:
-                raise serializers.ValidationError({"profile_photo": "Profile photo cannot exceed 10MB."})
-            ext = Path(getattr(photo, "name", "")).suffix.lower()
-            valid_exts = [".jpg", ".jpeg", ".png", ".webp", ".heic"]
-            ctype = getattr(photo, "content_type", "")
-            if ext not in valid_exts and not ctype.startswith("image/"):
-                raise serializers.ValidationError({
-                    "profile_photo": "Profile photo must be a valid image file (.jpg, .jpeg, .png, .webp)."
-                })
+        validate_uploaded_image(attrs.get("profile_photo"), field_name="profile_photo")
         return attrs
 
 

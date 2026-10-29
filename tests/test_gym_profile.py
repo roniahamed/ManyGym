@@ -230,3 +230,71 @@ class TestGymProfileFlow:
             format="json",
         )
         assert res.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_gym_create_and_patch_multipart_images(self, auth_client, test_user):
+        """
+        Tests creating a gym and patching overview with direct profile_picture and cover_photo files via multipart/form-data.
+        """
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        def make_image(filename="test.jpg"):
+            bio = io.BytesIO()
+            img = Image.new("RGB", (300, 300), color=(120, 180, 240))
+            img.save(bio, format="JPEG")
+            bio.seek(0)
+            return SimpleUploadedFile(filename, bio.read(), content_type="image/jpeg")
+
+        url = reverse("gyms_v1:gym-create")
+        payload = {
+            "name": "Multipart Gym Brand",
+            "address": "789 Muscle Way",
+            "city": "Dallas",
+            "postal_code": "75001",
+            "country": "USA",
+            "latitude": "32.77670000",
+            "longitude": "-96.79700000",
+            "profile_picture": make_image("gym_logo.jpg"),
+            "cover_photo": make_image("gym_cover.jpg"),
+        }
+        res = auth_client.post(url, payload, format="multipart")
+        assert res.status_code == status.HTTP_201_CREATED, res.data
+        gym_id = res.data["id"]
+        gym = Gym.objects.get(id=gym_id)
+        assert gym.profile_picture_url is not None
+        assert "gyms/profiles" in gym.profile_picture_url
+        assert gym.cover_photo_url is not None
+        assert "gyms/covers" in gym.cover_photo_url
+
+        # Now PATCH overview with a new profile picture file
+        overview_url = f"{reverse('gyms_v1:gym-profile-overview')}?gym_id={gym_id}"
+        patch_res = auth_client.patch(
+            overview_url,
+            {"profile_picture": make_image("new_gym_logo.jpg")},
+            format="multipart",
+        )
+        assert patch_res.status_code == status.HTTP_200_OK, patch_res.data
+        gym.refresh_from_db()
+        assert "gyms/profiles" in gym.profile_picture_url
+
+    def test_user_profile_avatar_multipart_upload(self, auth_client, test_user):
+        """
+        Tests updating user personal profile avatar using direct multipart file upload.
+        """
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        bio = io.BytesIO()
+        img = Image.new("RGB", (150, 150), color=(200, 50, 80))
+        img.save(bio, format="JPEG")
+        bio.seek(0)
+        avatar_file = SimpleUploadedFile("my_avatar.jpg", bio.read(), content_type="image/jpeg")
+
+        url = reverse("me")
+        res = auth_client.patch(url, {"avatar": avatar_file}, format="multipart")
+        assert res.status_code == status.HTTP_200_OK, res.data
+        test_user.profile.refresh_from_db()
+        assert test_user.profile.avatar_url is not None
+        assert "avatars" in test_user.profile.avatar_url

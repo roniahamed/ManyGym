@@ -202,3 +202,107 @@ class TestMediaOptimizationPipeline:
         assert result["optimized_size_bytes"] > 0
         assert result["size_bytes"] > 0
 
+    def test_direct_webp_conversion_various_formats(self):
+        """
+        Verify that any image format (PNG, BMP, GIF, JPEG) uploaded to process_image_upload
+        is directly converted and saved as .webp.
+        """
+        from common.media import MediaOptimizerService
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        formats = [
+            ("png", "image/png", "sample.png"),
+            ("bmp", "image/bmp", "sample.bmp"),
+            ("gif", "image/gif", "sample.gif"),
+            ("jpeg", "image/jpeg", "sample.jpg"),
+        ]
+
+        for fmt, ctype, fname in formats:
+            buf = io.BytesIO()
+            img = Image.new("RGB", (300, 200), color=(100, 150, 200))
+            img.save(buf, format=fmt)
+            buf.seek(0)
+            upload_file = SimpleUploadedFile(fname, buf.read(), content_type=ctype)
+
+            webp_url = MediaOptimizerService.process_image_upload(
+                file=upload_file,
+                subfolder="tests/converted",
+            )
+            assert webp_url is not None
+            assert webp_url.endswith(".webp")
+
+            # Verify saved file is truly WebP format on disk
+            abs_path = MediaOptimizerService.get_absolute_path(webp_url)
+            assert abs_path.exists()
+            with Image.open(abs_path) as verified_img:
+                assert verified_img.format == "WEBP"
+
+    def test_exif_orientation_correction_prevents_rotated_photos(self):
+        """
+        Verify that an image with EXIF orientation metadata (e.g. orientation=6 from mobile phones)
+        is automatically transposed upright and does not appear rotated sideways.
+        """
+        from common.media import MediaOptimizerService
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        # Create landscape image (400x200) with EXIF Orientation=6 (indicating portrait orientation taken by sensor)
+        raw_img = Image.new("RGB", (400, 200), color=(50, 200, 50))
+        exif = raw_img.getexif()
+        exif[0x0112] = 6  # Rotated 90 degrees CW
+
+        buf = io.BytesIO()
+        raw_img.save(buf, format="JPEG", exif=exif)
+        buf.seek(0)
+
+        upload_file = SimpleUploadedFile("mobile_camera.jpg", buf.read(), content_type="image/jpeg")
+
+        webp_url = MediaOptimizerService.process_image_upload(
+            file=upload_file,
+            subfolder="tests/orientation",
+        )
+        assert webp_url.endswith(".webp")
+
+        abs_path = MediaOptimizerService.get_absolute_path(webp_url)
+        assert abs_path.exists()
+
+        with Image.open(abs_path) as saved_img:
+            # Orientation 6 transposes 400x200 to 200x400 (upright!)
+            assert saved_img.size == (200, 400)
+            # EXIF orientation tag must be stripped so viewers never double-rotate
+            saved_exif = saved_img.getexif() if hasattr(saved_img, "getexif") else None
+            assert saved_exif.get(0x0112) is None
+
+    def test_cmyk_and_palette_conversion_to_webp(self):
+        """
+        Verify that CMYK and Palette images are smoothly normalized and converted to WebP.
+        """
+        from common.media import MediaOptimizerService
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        # 1. CMYK image
+        cmyk_buf = io.BytesIO()
+        cmyk_img = Image.new("CMYK", (100, 100), color=(0, 255, 255, 0))
+        cmyk_img.save(cmyk_buf, format="JPEG")
+        cmyk_buf.seek(0)
+        cmyk_file = SimpleUploadedFile("cmyk.jpg", cmyk_buf.read(), content_type="image/jpeg")
+
+        cmyk_url = MediaOptimizerService.process_image_upload(file=cmyk_file, subfolder="tests/cmyk")
+        assert cmyk_url.endswith(".webp")
+
+        # 2. Palette (P) image
+        p_buf = io.BytesIO()
+        p_img = Image.new("P", (100, 100))
+        p_img.save(p_buf, format="PNG")
+        p_buf.seek(0)
+        p_file = SimpleUploadedFile("palette.png", p_buf.read(), content_type="image/png")
+
+        p_url = MediaOptimizerService.process_image_upload(file=p_file, subfolder="tests/palette")
+        assert p_url.endswith(".webp")
+
+

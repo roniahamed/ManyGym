@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from apps.gyms.models import Gym, GymLocation, GymOpeningHours, GymGallery
-from common.serializers import StrictCharField, StrictBooleanField
+from common.serializers import StrictCharField, StrictBooleanField, validate_uploaded_image
 from common.enums import (
     GymTypeEnum,
     GymGenderRequired,
@@ -151,7 +151,9 @@ class GymCreateSerializer(serializers.Serializer):
         min_length=120,
     )
     profile_picture_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
+    profile_picture = serializers.FileField(required=False, allow_null=True, help_text="Direct profile picture upload via multipart/form-data")
     cover_photo_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
+    cover_photo = serializers.FileField(required=False, allow_null=True, help_text="Direct cover photo upload via multipart/form-data")
     gender_required = serializers.ChoiceField(
         choices=GymGenderRequired.choices,
         default=GymGenderRequired.EVERYONE,
@@ -165,6 +167,11 @@ class GymCreateSerializer(serializers.Serializer):
     country = StrictCharField(required=False, allow_blank=True, max_length=100)
     postal_code = StrictCharField(required=False, allow_blank=True, max_length=30)
 
+    def validate(self, attrs):
+        validate_uploaded_image(attrs.get("profile_picture"), field_name="profile_picture")
+        validate_uploaded_image(attrs.get("cover_photo"), field_name="cover_photo")
+        return attrs
+
 
 class GymOverviewUpdateSerializer(serializers.Serializer):
     name = StrictCharField(max_length=255, required=False)
@@ -172,10 +179,17 @@ class GymOverviewUpdateSerializer(serializers.Serializer):
     secondary_type = serializers.ChoiceField(choices=GymTypeEnum.choices, required=False, allow_null=True)
     short_description = StrictCharField(required=False, min_length=120)
     profile_picture_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
+    profile_picture = serializers.FileField(required=False, allow_null=True, help_text="Direct profile picture upload via multipart/form-data")
     cover_photo_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
+    cover_photo = serializers.FileField(required=False, allow_null=True, help_text="Direct cover photo upload via multipart/form-data")
     gender_required = serializers.ChoiceField(choices=GymGenderRequired.choices, required=False)
     min_age = serializers.IntegerField(required=False, min_value=1, max_value=99)
     timezone = StrictCharField(required=False, max_length=100)
+
+    def validate(self, attrs):
+        validate_uploaded_image(attrs.get("profile_picture"), field_name="profile_picture")
+        validate_uploaded_image(attrs.get("cover_photo"), field_name="cover_photo")
+        return attrs
 
 
 class GymLocationUpdateSerializer(serializers.Serializer):

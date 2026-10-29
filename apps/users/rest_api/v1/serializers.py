@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from apps.users.models import User, UserProfile
-from common.serializers import StrictCharField
+from common.serializers import StrictCharField, validate_uploaded_image
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -81,12 +81,17 @@ class UpdateProfileSerializer(serializers.Serializer):
     last_name = StrictCharField(required=False, max_length=100)
     phone = StrictCharField(required=False, allow_blank=True, max_length=50)
     avatar_url = StrictCharField(required=False, allow_blank=True, max_length=1000)
+    avatar = serializers.FileField(required=False, allow_null=True, help_text="Direct avatar image upload via multipart/form-data")
     address = StrictCharField(required=False, allow_blank=True, max_length=500)
     city = StrictCharField(required=False, allow_blank=True, max_length=100)
     country = StrictCharField(required=False, allow_blank=True, max_length=100)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     sex = StrictCharField(required=False, allow_blank=True, max_length=20)
     nationality = StrictCharField(required=False, allow_blank=True, max_length=100)
+
+    def validate(self, attrs):
+        validate_uploaded_image(attrs.get("avatar"), field_name="avatar")
+        return attrs
 
 
 

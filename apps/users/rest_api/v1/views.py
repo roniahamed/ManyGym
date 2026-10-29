@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiExample
 
 from apps.users.rest_api.v1.serializers import (
@@ -423,6 +424,7 @@ Resets the account password to the provided `new_password` after re-verifying th
 
 class UserProfileMeView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(
         tags=["User Profile"],
@@ -626,7 +628,11 @@ Updates mutable personal profile attributes (first_name, last_name, phone, addre
     def patch(self, request):
         serializer = UpdateProfileSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        updated_user = update_user_profile(user=request.user, **serializer.validated_data)
+        validated_data = dict(serializer.validated_data)
+        avatar = request.FILES.get("avatar") or request.FILES.get("avatar_file") or validated_data.get("avatar")
+        if avatar:
+            validated_data["avatar"] = avatar
+        updated_user = update_user_profile(user=request.user, **validated_data)
         return Response(
             {
                 "message": "Profile updated successfully.",

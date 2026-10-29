@@ -42,6 +42,24 @@ class StrictDecimalField(serializers.DecimalField):
         return super().to_internal_value(data)
 
 
+def validate_uploaded_image(file, max_size_mb: int = 10, field_name: str = "image"):
+    """
+    Common reusable serializer validator for uploaded image files.
+    """
+    if not file:
+        return
+    from pathlib import Path
+    if getattr(file, "size", 0) > max_size_mb * 1024 * 1024:
+        raise serializers.ValidationError({field_name: f"Image file cannot exceed {max_size_mb}MB."})
+    ext = Path(getattr(file, "name", "")).suffix.lower()
+    valid_exts = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp", ".gif", ".tiff", ".jfif", ".avif"]
+    ctype = getattr(file, "content_type", "")
+    if ext not in valid_exts and not ctype.startswith("image/"):
+        raise serializers.ValidationError({
+            field_name: f"Image must be a valid image file ({', '.join(valid_exts[:5])}, etc.)."
+        })
+
+
 class ErrorDetailSerializer(serializers.Serializer):
     code = serializers.CharField(help_text="Machine-readable error code", default="VALIDATION_ERROR")
     message = serializers.CharField(help_text="Human-readable explanation of the error")

@@ -279,8 +279,22 @@ def update_user_profile(user: User, **profile_data) -> User:
     user.save()
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    if "avatar" in profile_data or "avatar_url" in profile_data:
+        from common.media import MediaOptimizerService
+        avatar_file = profile_data.pop("avatar", None)
+        avatar_url = profile_data.pop("avatar_url", None)
+        resolved_avatar = MediaOptimizerService.process_image_upload(
+            file=avatar_file,
+            url=avatar_url,
+            subfolder="avatars",
+            max_dims=(400, 400),
+            thumb_dims=(150, 150),
+        )
+        if resolved_avatar is not None or avatar_file is not None or avatar_url is not None:
+            profile.avatar_url = resolved_avatar
+
     profile_allowed = [
-        "avatar_url",
         "address",
         "city",
         "country",

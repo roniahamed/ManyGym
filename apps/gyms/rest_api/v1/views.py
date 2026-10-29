@@ -71,6 +71,7 @@ def check_gym_permission(request, gym: Gym, required_scope: str = None) -> None:
 
 class GymCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(
         tags=["Gym Profile & Multi-Location"],
@@ -111,15 +112,23 @@ Creates a new gym workspace entity, sets the creator as the Owner, provisions th
     def post(self, request):
         serializer = GymCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        profile_picture = request.FILES.get("profile_picture") or data.get("profile_picture")
+        if profile_picture:
+            data["profile_picture"] = profile_picture
+        cover_photo = request.FILES.get("cover_photo") or data.get("cover_photo")
+        if cover_photo:
+            data["cover_photo"] = cover_photo
         gym = create_gym(
             owner_user=request.user,
-            **serializer.validated_data,
+            **data,
         )
         return Response(GymDetailSerializer(gym).data, status=status.HTTP_201_CREATED)
 
 
 class GymProfileOverviewView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(
         tags=["Gym Profile & Multi-Location"],
@@ -179,7 +188,14 @@ Updates core overview attributes: name, types (primary & secondary), description
 
         serializer = GymOverviewUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        updated_gym = update_gym_overview(gym, **serializer.validated_data)
+        data = dict(serializer.validated_data)
+        profile_picture = request.FILES.get("profile_picture") or data.get("profile_picture")
+        if profile_picture:
+            data["profile_picture"] = profile_picture
+        cover_photo = request.FILES.get("cover_photo") or data.get("cover_photo")
+        if cover_photo:
+            data["cover_photo"] = cover_photo
+        updated_gym = update_gym_overview(gym, **data)
         return Response(GymDetailSerializer(updated_gym).data, status=status.HTTP_200_OK)
 
 

@@ -30,7 +30,9 @@ def create_gym(
     secondary_type: str = None,
     short_description: str = None,
     profile_picture_url: str = None,
+    profile_picture=None,
     cover_photo_url: str = None,
+    cover_photo=None,
     gender_required: str = GymGenderRequired.EVERYONE,
     min_age: int = 1,
     timezone: str = "UTC",
@@ -51,14 +53,30 @@ def create_gym(
     if min_age < 1 or min_age > 99:
         raise DomainValidationError("Minimum age must be an integer between 1 and 99.")
 
+    from common.media import MediaOptimizerService
+    resolved_profile_pic = MediaOptimizerService.process_image_upload(
+        file=profile_picture,
+        url=profile_picture_url,
+        subfolder="gyms/profiles",
+        max_dims=(800, 800),
+        thumb_dims=(200, 200),
+    )
+    resolved_cover = MediaOptimizerService.process_image_upload(
+        file=cover_photo,
+        url=cover_photo_url,
+        subfolder="gyms/covers",
+        max_dims=(1920, 1080),
+        thumb_dims=(400, 225),
+    )
+
     gym = Gym.objects.create(
         owner_user=owner_user,
         name=name.strip(),
         primary_type=primary_type,
         secondary_type=secondary_type,
         short_description=short_description.strip() if short_description else None,
-        profile_picture_url=profile_picture_url,
-        cover_photo_url=cover_photo_url,
+        profile_picture_url=resolved_profile_pic,
+        cover_photo_url=resolved_cover,
         gender_required=gender_required,
         min_age=min_age,
         timezone=timezone,
@@ -125,9 +143,36 @@ def update_gym_overview(gym: Gym, **data) -> Gym:
             raise DomainValidationError("Minimum age must be an integer between 1 and 99.")
         gym.min_age = data["min_age"]
 
+    from common.media import MediaOptimizerService
+
+    if "profile_picture" in data or "profile_picture_url" in data:
+        pic_file = data.pop("profile_picture", None)
+        pic_url = data.pop("profile_picture_url", None)
+        resolved_pic = MediaOptimizerService.process_image_upload(
+            file=pic_file,
+            url=pic_url,
+            subfolder="gyms/profiles",
+            max_dims=(800, 800),
+            thumb_dims=(200, 200),
+        )
+        if resolved_pic is not None or pic_file is not None or pic_url is not None:
+            gym.profile_picture_url = resolved_pic
+
+    if "cover_photo" in data or "cover_photo_url" in data:
+        cover_file = data.pop("cover_photo", None)
+        cover_url = data.pop("cover_photo_url", None)
+        resolved_cov = MediaOptimizerService.process_image_upload(
+            file=cover_file,
+            url=cover_url,
+            subfolder="gyms/covers",
+            max_dims=(1920, 1080),
+            thumb_dims=(400, 225),
+        )
+        if resolved_cov is not None or cover_file is not None or cover_url is not None:
+            gym.cover_photo_url = resolved_cov
+
     fields_to_update = [
-        "name", "profile_picture_url", "cover_photo_url",
-        "primary_type", "secondary_type", "gender_required", "timezone",
+        "name", "primary_type", "secondary_type", "gender_required", "timezone",
     ]
     for f in fields_to_update:
         if f in data and data[f] is not None:
