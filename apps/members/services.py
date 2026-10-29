@@ -42,6 +42,51 @@ from common.exceptions import (
 )
 
 
+def process_member_profile_photo(
+    photo_file: Optional[Any] = None,
+    photo_url: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Saves and optimizes member profile photo if uploaded via multipart/form-data,
+    or falls back to direct URL string if provided.
+    """
+    if photo_file:
+        from pathlib import Path
+        from common.media import MediaOptimizerService
+
+        # Size check (10MB)
+        if getattr(photo_file, "size", 0) > 10 * 1024 * 1024:
+            raise DomainValidationError("Profile photo cannot exceed 10MB.")
+
+        filename = getattr(photo_file, "name", "photo.jpg")
+        ext = Path(filename).suffix.lower()
+        valid_extensions = [".jpg", ".jpeg", ".png", ".webp", ".heic"]
+        content_type = getattr(photo_file, "content_type", "")
+        if ext not in valid_extensions and not content_type.startswith("image/"):
+            raise DomainValidationError("Profile photo must be a valid image file (.jpg, .jpeg, .png, .webp).")
+
+        src_path, public_url = MediaOptimizerService.save_uploaded_file(
+            file=photo_file,
+            subfolder="members/profiles/original",
+        )
+        try:
+            opt_meta = MediaOptimizerService.optimize_image(
+                src_path=src_path,
+                subfolder="members/profiles",
+                max_dims=(800, 800),
+                thumb_dims=(200, 200),
+            )
+            return opt_meta.get("optimized_url") or public_url
+        except Exception as e:
+            logger.warning(f"Could not optimize member profile photo: {e}, falling back to original upload")
+            return public_url
+
+    if photo_url and photo_url.strip():
+        return photo_url.strip()
+
+    return None
+
+
 @transaction.atomic
 def create_member(
     gym: Gym,
@@ -50,6 +95,7 @@ def create_member(
     email: str,
     phone: Optional[str] = None,
     profile_photo_url: Optional[str] = None,
+    profile_photo: Optional[Any] = None,
     address: Optional[str] = None,
     city: Optional[str] = None,
     country: Optional[str] = None,
@@ -102,13 +148,18 @@ def create_member(
     # 3. Generate onboarding invitation token
     invitation_token = secrets.token_urlsafe(32)
 
+    resolved_photo_url = process_member_profile_photo(
+        photo_file=profile_photo,
+        photo_url=profile_photo_url,
+    )
+
     member = Member(
         gym=gym,
         first_name=fn_clean,
         last_name=ln_clean,
         email=email_clean,
         phone=phone.strip() if phone else None,
-        profile_photo_url=profile_photo_url.strip() if profile_photo_url else None,
+        profile_photo_url=resolved_photo_url,
         address=address.strip() if address else None,
         city=city.strip() if city else None,
         country=country.strip() if country else None,
@@ -234,6 +285,16 @@ def update_member_profile(
         member = Member.objects.get(id=member_id, gym=gym)
     except Member.DoesNotExist:
         raise ResourceNotFoundError(f"Member '{member_id}' not found.")
+
+    if "profile_photo" in update_fields or "profile_photo_url" in update_fields:
+        photo_file = update_fields.pop("profile_photo", None)
+        photo_url = update_fields.pop("profile_photo_url", None)
+        resolved_photo_url = process_member_profile_photo(
+            photo_file=photo_file,
+            photo_url=photo_url,
+        )
+        if resolved_photo_url is not None or photo_file is not None or photo_url is not None:
+            member.profile_photo_url = resolved_photo_url
 
     if "assigned_trainer_id" in update_fields:
         trainer_id = update_fields.pop("assigned_trainer_id")

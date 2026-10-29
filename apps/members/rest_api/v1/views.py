@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 
 from apps.gyms.models import Gym
@@ -98,6 +99,7 @@ class MemberListCreateView(APIView):
     List members and onboard new members.
     """
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(
         tags=["Members & Lifecycle"],
@@ -173,6 +175,12 @@ class MemberListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        profile_photo = (
+            data.get("profile_photo")
+            or request.FILES.get("profile_photo")
+            or request.FILES.get("photo")
+        )
+
         member = create_member(
             gym=gym,
             first_name=data["first_name"],
@@ -180,6 +188,7 @@ class MemberListCreateView(APIView):
             email=data["email"],
             phone=data.get("phone"),
             profile_photo_url=data.get("profile_photo_url"),
+            profile_photo=profile_photo,
             address=data.get("address"),
             city=data.get("city"),
             country=data.get("country"),
@@ -212,6 +221,7 @@ class MemberDetailView(APIView):
     Retrieve, update, or remove a member.
     """
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(
         tags=["Members & Lifecycle"],
@@ -246,12 +256,23 @@ class MemberDetailView(APIView):
 
         serializer = MemberUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        validated_data = dict(serializer.validated_data)
+
+        profile_photo = (
+            validated_data.get("profile_photo")
+            or request.FILES.get("profile_photo")
+            or request.FILES.get("photo")
+        )
+        if profile_photo:
+            validated_data["profile_photo"] = profile_photo
 
         member = update_member_profile(
             member_id=member_id,
             gym=gym,
-            **serializer.validated_data,
+            **validated_data,
         )
+        detailed_member = get_member_detail(member.id, gym)
+        return Response(MemberDetailSerializer(detailed_member).data, status=status.HTTP_200_OK)
         detailed_member = get_member_detail(member.id, gym)
         return Response(MemberDetailSerializer(detailed_member).data, status=status.HTTP_200_OK)
 

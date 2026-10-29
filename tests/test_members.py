@@ -422,3 +422,77 @@ def test_stream_gym_members_iterator():
     members = list(stream)
     assert len(members) == 12
     assert members[0].first_name == "Stream11"  # ordered by -created_at
+
+
+@pytest.mark.django_db
+def test_member_create_and_patch_multipart_profile_photo():
+    """
+    Tests creating and updating a member with a direct image file upload via multipart/form-data.
+    """
+    import io
+    from PIL import Image
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    def make_test_image(filename="photo.jpg"):
+        bio = io.BytesIO()
+        img = Image.new("RGB", (200, 200), color=(100, 150, 200))
+        img.save(bio, format="JPEG")
+        bio.seek(0)
+        return SimpleUploadedFile(filename, bio.read(), content_type="image/jpeg")
+
+    owner = User.objects.create_user(email="multipart.owner@manygym.com", password="Password123!", is_verified=True)
+    gym = Gym.objects.create(owner_user=owner, name="Multipart Gym")
+    client, _ = get_auth_client(owner, context_type=TokenContextType.GYM, gym=gym)
+
+    create_url = reverse("member-list-create")
+    upload_file = make_test_image("initial_avatar.jpg")
+
+    payload = {
+        "first_name": "Multipart",
+        "last_name": "User",
+        "email": "multipart.user@example.com",
+        "profile_photo": upload_file,
+    }
+
+    res = client.post(create_url, payload, format="multipart")
+    assert res.status_code == status.HTTP_201_CREATED, res.json()
+    data = res.json()
+    assert data["first_name"] == "Multipart"
+    assert data["profile_photo_url"] is not None
+    assert "members/profiles" in data["profile_photo_url"]
+    member_id = data["id"]
+
+    # Now update photo via PATCH multipart
+    detail_url = reverse("member-detail", kwargs={"member_id": member_id})
+    new_photo = make_test_image("updated_avatar.jpg")
+    patch_res = client.patch(detail_url, {"profile_photo": new_photo}, format="multipart")
+    assert patch_res.status_code == status.HTTP_200_OK, patch_res.json()
+    patch_data = patch_res.json()
+    assert patch_data["profile_photo_url"] is not None
+    assert "members/profiles" in patch_data["profile_photo_url"]
+
+
+@pytest.mark.django_db
+def test_member_create_multipart_invalid_file_rejected():
+    """
+    Tests that non-image file formats uploaded to profile_photo are rejected with 400.
+    """
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    owner = User.objects.create_user(email="badfile.owner@manygym.com", password="Password123!", is_verified=True)
+    gym = Gym.objects.create(owner_user=owner, name="Bad File Gym")
+    client, _ = get_auth_client(owner, context_type=TokenContextType.GYM, gym=gym)
+
+    create_url = reverse("member-list-create")
+    fake_exe = SimpleUploadedFile("malware.exe", b"fake binary content", content_type="application/octet-stream")
+
+    payload = {
+        "first_name": "Hacker",
+        "last_name": "User",
+        "email": "hacker@example.com",
+        "profile_photo": fake_exe,
+    }
+
+    res = client.post(create_url, payload, format="multipart")
+    assert res.status_code == status.HTTP_400_BAD_REQUEST
+    assert "profile_photo" in str(res.json())

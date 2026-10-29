@@ -240,6 +240,7 @@ class MemberCreateSerializer(serializers.Serializer):
     email = serializers.EmailField(max_length=255, required=True)
     phone = StrictCharField(max_length=50, required=False, allow_blank=True, allow_null=True)
     profile_photo_url = StrictCharField(max_length=1000, required=False, allow_blank=True, allow_null=True)
+    profile_photo = serializers.FileField(required=False, allow_null=True, help_text="Direct profile photo image upload (multipart/form-data)")
     address = StrictCharField(max_length=500, required=False, allow_blank=True, allow_null=True)
     city = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     country = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
@@ -266,6 +267,19 @@ class MemberCreateSerializer(serializers.Serializer):
     initial_payment_notes = StrictCharField(required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
+        photo = attrs.get("profile_photo")
+        if photo:
+            from pathlib import Path
+            if getattr(photo, "size", 0) > 10 * 1024 * 1024:
+                raise serializers.ValidationError({"profile_photo": "Profile photo cannot exceed 10MB."})
+            ext = Path(getattr(photo, "name", "")).suffix.lower()
+            valid_exts = [".jpg", ".jpeg", ".png", ".webp", ".heic"]
+            ctype = getattr(photo, "content_type", "")
+            if ext not in valid_exts and not ctype.startswith("image/"):
+                raise serializers.ValidationError({
+                    "profile_photo": "Profile photo must be a valid image file (.jpg, .jpeg, .png, .webp)."
+                })
+
         start = attrs.get("start_date") or timezone.now().date()
         end = attrs.get("end_date")
         if end and end < start:
@@ -289,6 +303,7 @@ class MemberUpdateSerializer(serializers.Serializer):
     email = serializers.EmailField(max_length=255, required=False)
     phone = StrictCharField(max_length=50, required=False, allow_blank=True, allow_null=True)
     profile_photo_url = StrictCharField(max_length=1000, required=False, allow_blank=True, allow_null=True)
+    profile_photo = serializers.FileField(required=False, allow_null=True, help_text="Direct profile photo image upload (multipart/form-data)")
     address = StrictCharField(max_length=500, required=False, allow_blank=True, allow_null=True)
     city = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     country = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
@@ -301,6 +316,21 @@ class MemberUpdateSerializer(serializers.Serializer):
     emergency_contact_relationship = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     assigned_trainer_id = StrictUUIDField(required=False, allow_null=True)
     internal_notes = StrictCharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
+        photo = attrs.get("profile_photo")
+        if photo:
+            from pathlib import Path
+            if getattr(photo, "size", 0) > 10 * 1024 * 1024:
+                raise serializers.ValidationError({"profile_photo": "Profile photo cannot exceed 10MB."})
+            ext = Path(getattr(photo, "name", "")).suffix.lower()
+            valid_exts = [".jpg", ".jpeg", ".png", ".webp", ".heic"]
+            ctype = getattr(photo, "content_type", "")
+            if ext not in valid_exts and not ctype.startswith("image/"):
+                raise serializers.ValidationError({
+                    "profile_photo": "Profile photo must be a valid image file (.jpg, .jpeg, .png, .webp)."
+                })
+        return attrs
 
 
 class MemberAcceptInvitationSerializer(serializers.Serializer):
