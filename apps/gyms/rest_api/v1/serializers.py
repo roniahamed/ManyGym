@@ -8,7 +8,7 @@ from apps.gyms.models import (
     GymBlockedUser,
 )
 from apps.users.models import User
-from common.serializers import StrictCharField, StrictBooleanField, validate_uploaded_image
+from common.serializers import StrictCharField, StrictBooleanField, StrictUUIDField, validate_uploaded_image
 from common.enums import (
     GymTypeEnum,
     GymGenderRequired,
@@ -373,7 +373,7 @@ class GymBlockedUserSerializer(serializers.ModelSerializer):
 
 
 class GymBlockUserCreateSerializer(serializers.Serializer):
-    user_id = serializers.UUIDField(required=True)
+    user_id = StrictUUIDField(required=True)
     reason = StrictCharField(required=False, allow_blank=True, max_length=255)
 
 
