@@ -34,6 +34,8 @@ urlpatterns = [
     # Phase 8: Gym Studio Reports, Analytics & Executive Dashboard
     path("api/v1/dashboard/", include("apps.reports.rest_api.v1.dashboard_urls")),
     path("api/v1/reports/", include("apps.reports.rest_api.v1.reports_urls")),
+    # Phase 9: Real-time End-to-End Encrypted Messaging (User-to-User, User-to-Gym, Gym-to-Gym)
+    path("api/v1/messaging/", include("apps.messaging.rest_api.v1.urls")),
     # OpenAPI Schema & API Documentation
 
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),

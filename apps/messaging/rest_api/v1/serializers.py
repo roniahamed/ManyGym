@@ -1,0 +1,245 @@
+from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from apps.messaging.models import (
+    UserDeviceKey,
+    GymDeviceKey,
+    Conversation,
+    ConversationParticipant,
+    EncryptedMessage,
+)
+from apps.users.models import User
+from apps.gyms.models import Gym
+from common.enums import (
+    ConversationTypeEnum,
+    MessageSenderTypeEnum,
+    MessageDeliveryStatusEnum,
+    KeyAlgorithmEnum,
+)
+
+
+class UserDeviceKeyRegisterSerializer(serializers.Serializer):
+    device_id = serializers.CharField(max_length=100)
+    device_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+    identity_key = serializers.CharField()
+    signed_prekey = serializers.CharField()
+    signed_prekey_signature = serializers.CharField(required=False, allow_blank=True, default="")
+    one_time_prekeys = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+    )
+
+
+class GymDeviceKeyRegisterSerializer(serializers.Serializer):
+    gym_id = serializers.UUIDField()
+    device_id = serializers.CharField(max_length=100)
+    device_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+    identity_key = serializers.CharField()
+    signed_prekey = serializers.CharField()
+    signed_prekey_signature = serializers.CharField(required=False, allow_blank=True, default="")
+    one_time_prekeys = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+    )
+
+
+class PublicKeyBundleSerializer(serializers.Serializer):
+    device_id = serializers.CharField()
+    device_name = serializers.CharField()
+    algorithm = serializers.CharField()
+    identity_key = serializers.CharField()
+    signed_prekey = serializers.CharField()
+    signed_prekey_signature = serializers.CharField()
+    one_time_prekeys = serializers.ListField(child=serializers.CharField())
+
+
+class ConversationParticipantSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_full_name = serializers.SerializerMethodField()
+    user_id = serializers.UUIDField(source="user.id", read_only=True)
+    profile_id = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
+    gym_name = serializers.CharField(source="gym.name", read_only=True)
+
+    class Meta:
+        model = ConversationParticipant
+        fields = [
+            "id",
+            "participant_type",
+            "user",
+            "user_id",
+            "profile_id",
+            "user_email",
+            "user_full_name",
+            "avatar_url",
+            "gym",
+            "gym_name",
+            "unread_count",
+            "last_read_at",
+            "is_muted",
+        ]
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_user_full_name(self, obj):
+        if obj.user:
+            return f"{obj.user.first_name} {obj.user.last_name}".strip()
+        return None
+
+    @extend_schema_field(serializers.UUIDField(allow_null=True))
+    def get_profile_id(self, obj):
+        if obj.user and hasattr(obj.user, "profile") and obj.user.profile:
+            return obj.user.profile.id
+        return None
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_avatar_url(self, obj):
+        if obj.user and hasattr(obj.user, "profile") and obj.user.profile:
+            return obj.user.profile.avatar_url
+        return None
+
+
+class ConversationListSerializer(serializers.ModelSerializer):
+    participants = ConversationParticipantSerializer(many=True, read_only=True)
+    other_party = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Conversation
+        fields = [
+            "id",
+            "conversation_type",
+            "user_a",
+            "user_b",
+            "gym_a",
+            "gym_b",
+            "participants",
+            "other_party",
+            "last_message_at",
+            "last_message_preview",
+            "created_at",
+        ]
+
+    def get_other_party(self, obj):
+        """Helper for frontend UI displaying the other entity's name and type."""
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        gym = getattr(request, "gym", None)
+
+        if obj.conversation_type == ConversationTypeEnum.USER_TO_USER and user:
+            other_user = obj.user_b if obj.user_a_id == user.id else obj.user_a
+            if other_user:
+                profile = getattr(other_user, "profile", None)
+                return {
+                    "type": "user",
+                    "id": str(other_user.id),
+                    "user_id": str(other_user.id),
+                    "profile_id": str(profile.id) if profile else None,
+                    "avatar_url": profile.avatar_url if profile else None,
+                    "name": f"{other_user.first_name} {other_user.last_name}".strip(),
+                    "email": other_user.email,
+                }
+        elif obj.conversation_type == ConversationTypeEnum.USER_TO_GYM:
+            if gym and obj.gym_a_id == gym.id:
+                # Gym viewing user
+                profile = getattr(obj.user_a, "profile", None)
+                return {
+                    "type": "user",
+                    "id": str(obj.user_a.id),
+                    "user_id": str(obj.user_a.id),
+                    "profile_id": str(profile.id) if profile else None,
+                    "avatar_url": profile.avatar_url if profile else None,
+                    "name": f"{obj.user_a.first_name} {obj.user_a.last_name}".strip(),
+                    "email": obj.user_a.email,
+                }
+            else:
+                # User viewing gym
+                return {
+                    "type": "gym",
+                    "id": str(obj.gym_a.id),
+                    "name": obj.gym_a.name,
+                    "profile_picture_url": obj.gym_a.profile_picture_url,
+                }
+        elif obj.conversation_type == ConversationTypeEnum.GYM_TO_GYM and gym:
+            other_gym = obj.gym_b if obj.gym_a_id == gym.id else obj.gym_a
+            if other_gym:
+                return {
+                    "type": "gym",
+                    "id": str(other_gym.id),
+                    "name": other_gym.name,
+                    "profile_picture_url": other_gym.profile_picture_url,
+                }
+        return None
+
+
+class ConversationCreateSerializer(serializers.Serializer):
+    conversation_type = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Optional: 'user_to_user', 'user_to_gym', 'gym_to_user', 'gym_to_gym'. Auto-detected if omitted.",
+    )
+    target_user_id = serializers.UUIDField(required=False, allow_null=True)
+    target_gym_id = serializers.UUIDField(required=False, allow_null=True)
+    source_gym_id = serializers.UUIDField(required=False, allow_null=True)
+
+    def validate_conversation_type(self, value):
+        if not value:
+            return ""
+        val = value.strip().lower()
+        if val in ("user_to_gym", "gym_to_user"):
+            return ConversationTypeEnum.USER_TO_GYM
+        if val in ("user_to_user", "gym_to_gym"):
+            return val
+        raise serializers.ValidationError(f"Invalid conversation_type '{value}'.")
+
+
+class SendMessageSerializer(serializers.Serializer):
+    ciphertext = serializers.CharField(help_text="Base64 ciphertext string")
+    nonce = serializers.CharField(max_length=255, help_text="Base64 nonce / IV")
+    ephemeral_public_key = serializers.CharField(required=False, allow_blank=True, default="")
+    recipient_key_fingerprint = serializers.CharField(required=False, allow_blank=True, default="")
+    sender_device_id = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    encrypted_keys = serializers.DictField(required=False, default=dict)
+    sender_type = serializers.ChoiceField(
+        choices=MessageSenderTypeEnum.choices,
+        default=MessageSenderTypeEnum.USER,
+    )
+    sender_gym_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+class EncryptedMessageSerializer(serializers.ModelSerializer):
+    sender_gym_name = serializers.CharField(source="sender_gym.name", read_only=True)
+    sender_user_full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EncryptedMessage
+        fields = [
+            "id",
+            "conversation_id",
+            "sender_type",
+            "sender_user_id",
+            "sender_user_full_name",
+            "sender_gym_id",
+            "sender_gym_name",
+            "sender_device_id",
+            "ciphertext",
+            "nonce",
+            "ephemeral_public_key",
+            "recipient_key_fingerprint",
+            "encrypted_keys",
+            "delivery_status",
+            "sent_at",
+            "delivered_at",
+            "read_at",
+        ]
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_sender_user_full_name(self, obj):
+        if obj.sender_user:
+            return f"{obj.sender_user.first_name} {obj.sender_user.last_name}".strip()
+        return None
+
+
+class MarkReadSerializer(serializers.Serializer):
+    gym_id = serializers.UUIDField(required=False, allow_null=True)
+    up_to_message_id = serializers.UUIDField(required=False, allow_null=True)

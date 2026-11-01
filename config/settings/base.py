@@ -24,6 +24,7 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
 
 # Application definition
 DJANGO_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -38,6 +39,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
     "drf_spectacular",
     "django_celery_beat",
+    "channels",
 ]
 
 LOCAL_APPS = [
@@ -53,6 +55,7 @@ LOCAL_APPS = [
     "apps.routines",
     "apps.posts",
     "apps.reports",
+    "apps.messaging",
 ]
 
 
@@ -117,6 +120,19 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_CACHE_URL,
     }
+}
+
+# Realtime & Channels Layer Configuration
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": env(
+            "CHANNEL_LAYER_BACKEND",
+            default="channels_redis.core.RedisChannelLayer",
+        ),
+        "CONFIG": {
+            "hosts": [f"redis://{REDIS_HOST}:{REDIS_PORT}/2"],
+        },
+    },
 }
 
 # Password validation

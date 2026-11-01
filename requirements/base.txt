@@ -22,3 +22,12 @@ python-magic>=0.4.27
 
 # Production Server
 gunicorn>=23.0.0
+daphne>=4.1.0
+
+# Realtime WebSockets & Channels
+channels>=4.2.0
+channels-redis>=4.2.0
+
+# Cryptography & E2EE
+cryptography>=42.0.0
+pynacl>=1.5.0

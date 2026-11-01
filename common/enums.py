@@ -207,3 +207,29 @@ class PostsAgeRestrictionEnum(models.TextChoices):
     AGE_18_PLUS = "18_plus", "18 and + age"
     AGE_19_PLUS = "19_plus", "19 and + age"
     AGE_20_PLUS = "20_plus", "20 and + age"
+
+
+class ConversationTypeEnum(models.TextChoices):
+    """Supported end-to-end messaging conversation channels."""
+    USER_TO_USER = "user_to_user", "User to User"
+    USER_TO_GYM = "user_to_gym", "User to Gym"
+    GYM_TO_GYM = "gym_to_gym", "Gym to Gym"
+
+
+class MessageSenderTypeEnum(models.TextChoices):
+    """Identifies whether a message was authored as an individual user or under a gym identity."""
+    USER = "user", "User"
+    GYM = "gym", "Gym"
+
+
+class MessageDeliveryStatusEnum(models.TextChoices):
+    """Message lifecycle status for privacy and delivery tracking."""
+    SENT = "sent", "Sent"
+    DELIVERED = "delivered", "Delivered"
+    READ = "read", "Read"
+
+
+class KeyAlgorithmEnum(models.TextChoices):
+    """Asymmetric cryptography key algorithms supported for E2EE."""
+    X25519 = "x25519", "Curve25519 / X25519 (ECDH)"
+    ED25519 = "ed25519", "Ed25519 (Digital Signatures)"

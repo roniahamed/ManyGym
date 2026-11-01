@@ -53,6 +53,10 @@ DEFAULT_PERMISSIONS_DEFINITION = [
     # Topic 10: Community Posts & Feed
     {"topic": "Community", "scope_code": "posts:read", "name": "View Community Posts", "description": "Access to view gym community feed and posts."},
     {"topic": "Community", "scope_code": "posts:manage", "name": "Manage Community Posts", "description": "Create, edit, or delete gym community posts and media."},
+
+    # Topic 11: Messaging & Direct Communication
+    {"topic": "Messaging", "scope_code": "messaging:read", "name": "View Gym Messages", "description": "Access to view gym conversations and messages."},
+    {"topic": "Messaging", "scope_code": "messaging:send", "name": "Send Gym Messages", "description": "Ability to send messages on behalf of the gym."},
 ]
 
 
