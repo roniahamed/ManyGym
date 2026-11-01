@@ -1,11 +1,24 @@
 from rest_framework import serializers
-from apps.gyms.models import Gym, GymLocation, GymOpeningHours, GymGallery
+from apps.gyms.models import (
+    Gym,
+    GymLocation,
+    GymOpeningHours,
+    GymGallery,
+    GymSetting,
+    GymBlockedUser,
+)
+from apps.users.models import User
 from common.serializers import StrictCharField, StrictBooleanField, validate_uploaded_image
 from common.enums import (
     GymTypeEnum,
     GymGenderRequired,
     GalleryCategoryEnum,
     MediaTypeEnum,
+    AudienceMessagingEnum,
+    AudienceJoiningRequestEnum,
+    AudienceMembersVisibilityEnum,
+    AudienceFollowingVisibilityEnum,
+    PostsAgeRestrictionEnum,
 )
 
 
@@ -263,3 +276,136 @@ class GymDetailSerializer(serializers.ModelSerializer):
         if count is not None:
             return count
         return obj.gallery_items.count()
+
+
+class GymSettingSerializer(serializers.ModelSerializer):
+    gym_id = serializers.UUIDField(source="gym.id", read_only=True)
+
+    class Meta:
+        model = GymSetting
+        fields = [
+            "id",
+            "gym_id",
+            # Preference -> Display
+            "language",
+            "video_autoplay",
+            "dark_mode",
+            # Privacy and Sharing -> Alerts
+            "admin_logs_alerts",
+            "issues_alerts",
+            # Privacy and Sharing -> Audience
+            "who_can_message",
+            "who_can_send_joining_request",
+            "who_can_see_members",
+            "who_can_see_following",
+            "posts_age_restriction",
+            # Visibility -> Access & Control
+            "is_deactivated",
+            "deactivated_at",
+            "is_published",
+            "unpublished_at",
+            "is_deleted",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "gym_id",
+            "deactivated_at",
+            "unpublished_at",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class GymSettingUpdateSerializer(serializers.Serializer):
+    # Preference -> Display
+    language = StrictCharField(required=False, max_length=20)
+    video_autoplay = StrictBooleanField(required=False)
+    dark_mode = StrictBooleanField(required=False)
+
+    # Privacy and Sharing -> Alerts
+    admin_logs_alerts = StrictBooleanField(required=False)
+    issues_alerts = StrictBooleanField(required=False)
+
+    # Privacy and Sharing -> Audience
+    who_can_message = serializers.ChoiceField(choices=AudienceMessagingEnum.choices, required=False)
+    who_can_send_joining_request = serializers.ChoiceField(choices=AudienceJoiningRequestEnum.choices, required=False)
+    who_can_see_members = serializers.ChoiceField(choices=AudienceMembersVisibilityEnum.choices, required=False)
+    who_can_see_following = serializers.ChoiceField(choices=AudienceFollowingVisibilityEnum.choices, required=False)
+    posts_age_restriction = serializers.ChoiceField(choices=PostsAgeRestrictionEnum.choices, required=False)
+
+    # Visibility -> Access & Control
+    is_deactivated = StrictBooleanField(required=False)
+    is_published = StrictBooleanField(required=False)
+    is_deleted = StrictBooleanField(required=False)
+
+
+class GymBlockedUserSerializer(serializers.ModelSerializer):
+    user_id = serializers.UUIDField(source="user.id", read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
+    first_name = serializers.CharField(source="user.first_name", read_only=True)
+    last_name = serializers.CharField(source="user.last_name", read_only=True)
+    avatar_url = serializers.SerializerMethodField()
+    blocked_by_email = serializers.EmailField(source="blocked_by.email", read_only=True, default=None)
+
+    class Meta:
+        model = GymBlockedUser
+        fields = [
+            "id",
+            "user_id",
+            "email",
+            "first_name",
+            "last_name",
+            "avatar_url",
+            "blocked_by_email",
+            "reason",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_avatar_url(self, obj):
+        if hasattr(obj.user, "profile") and obj.user.profile:
+            return obj.user.profile.avatar_url
+        return None
+
+
+class GymBlockUserCreateSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField(required=True)
+    reason = StrictCharField(required=False, allow_blank=True, max_length=255)
+
+
+class GymUserSearchToBlockSerializer(serializers.ModelSerializer):
+    avatar_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "avatar_url",
+        ]
+        read_only_fields = fields
+
+    def get_avatar_url(self, obj):
+        if hasattr(obj, "profile") and obj.profile:
+            return obj.profile.avatar_url
+        return None
+
+
+class GymAccessControlActionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(
+        choices=[
+            "deactivate",
+            "reactivate",
+            "unpublish",
+            "publish",
+            "delete",
+            "restore",
+        ],
+        required=True,
+    )

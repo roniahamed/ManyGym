@@ -7,6 +7,11 @@ from apps.gyms.rest_api.v1.views import (
     GymGalleryListView,
     GymGalleryReorderView,
     GymGalleryDetailView,
+    GymSettingsView,
+    GymBlockedUsersListView,
+    GymBlockedUserDetailView,
+    GymSearchUsersToBlockView,
+    GymAccessControlActionView,
 )
 
 app_name = "gyms_v1"
@@ -20,4 +25,9 @@ urlpatterns = [
     path("gallery/", GymGalleryListView.as_view(), name="gym-gallery-list"),
     path("gallery/reorder/", GymGalleryReorderView.as_view(), name="gym-gallery-reorder"),
     path("gallery/<uuid:item_id>/", GymGalleryDetailView.as_view(), name="gym-gallery-detail"),
+    path("settings/", GymSettingsView.as_view(), name="gym-settings"),
+    path("settings/blocked-users/", GymBlockedUsersListView.as_view(), name="gym-settings-blocked-users"),
+    path("settings/blocked-users/<uuid:user_id>/", GymBlockedUserDetailView.as_view(), name="gym-settings-blocked-user-detail"),
+    path("settings/blocked-users/search/", GymSearchUsersToBlockView.as_view(), name="gym-settings-blocked-users-search"),
+    path("settings/access-control/", GymAccessControlActionView.as_view(), name="gym-settings-access-control"),
 ]

@@ -7,6 +7,11 @@ from common.enums import (
     GalleryCategoryEnum,
     MediaTypeEnum,
     ProcessingStatus,
+    AudienceMessagingEnum,
+    AudienceJoiningRequestEnum,
+    AudienceMembersVisibilityEnum,
+    AudienceFollowingVisibilityEnum,
+    PostsAgeRestrictionEnum,
 )
 from common.models import OptimizedMediaMixin
 
@@ -51,6 +56,10 @@ class Gym(models.Model):
 
     def __str__(self):
         return f"{self.name} (Owner: {self.owner_user.email})"
+
+    def get_settings(self):
+        settings_obj, _ = GymSetting.objects.get_or_create(gym=self)
+        return settings_obj
 
 
 class GymLocation(models.Model):
@@ -152,3 +161,145 @@ class GymGallery(OptimizedMediaMixin, models.Model):
 
     def __str__(self):
         return f"{self.gym.name} Gallery ({self.category}) - #{self.order_index} [{self.processing_status}]"
+
+
+class GymSetting(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    gym = models.OneToOneField(
+        Gym,
+        on_delete=models.CASCADE,
+        related_name="settings",
+    )
+
+    # --- Preference -> Display ---
+    language = models.CharField(
+        max_length=20,
+        default="en",
+        help_text="Display language (e.g. en, bn)."
+    )
+    video_autoplay = models.BooleanField(
+        default=True,
+        help_text="Video Autoplay (ON/OFF)."
+    )
+    dark_mode = models.BooleanField(
+        default=False,
+        help_text="Dark Mode (ON/OFF)."
+    )
+
+    # --- Privacy and Sharing -> Alerts ---
+    admin_logs_alerts = models.BooleanField(
+        default=True,
+        help_text="Admin Logs alert notifications enabled (ON/OFF)."
+    )
+    issues_alerts = models.BooleanField(
+        default=True,
+        help_text="Issues alert notifications enabled (ON/OFF)."
+    )
+
+    # --- Privacy and Sharing -> Audience ---
+    who_can_message = models.CharField(
+        max_length=50,
+        choices=AudienceMessagingEnum.choices,
+        default=AudienceMessagingEnum.EVERYONE,
+        help_text="Who can send you messages? (Everyone, Followers & Members, Members only)"
+    )
+    who_can_send_joining_request = models.CharField(
+        max_length=50,
+        choices=AudienceJoiningRequestEnum.choices,
+        default=AudienceJoiningRequestEnum.EVERYONE,
+        help_text="Who can send you a Member joining request? (Everyone, No one)"
+    )
+    who_can_see_members = models.CharField(
+        max_length=50,
+        choices=AudienceMembersVisibilityEnum.choices,
+        default=AudienceMembersVisibilityEnum.EVERYONE,
+        help_text="Who can see your Gym’s Members? (Everyone, Only Members)"
+    )
+    who_can_see_following = models.CharField(
+        max_length=50,
+        choices=AudienceFollowingVisibilityEnum.choices,
+        default=AudienceFollowingVisibilityEnum.EVERYONE,
+        help_text="Who can see the people and pages you follow? (Everyone, Only members, Private)"
+    )
+    posts_age_restriction = models.CharField(
+        max_length=50,
+        choices=PostsAgeRestrictionEnum.choices,
+        default=PostsAgeRestrictionEnum.ANY_AGE,
+        help_text="Age restriction for your Gym’s posts (Any age, 17+, 18+, 19+, 20+)"
+    )
+
+    # --- Visibility -> Access & Control ---
+    is_deactivated = models.BooleanField(
+        default=False,
+        help_text="Whether the gym is deactivated."
+    )
+    deactivated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the gym was deactivated."
+    )
+    is_published = models.BooleanField(
+        default=True,
+        help_text="Whether the gym is published."
+    )
+    unpublished_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the gym was unpublished."
+    )
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Soft-delete flag for gym."
+    )
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the gym was deleted."
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "gym_settings"
+        verbose_name = "Gym Setting"
+        verbose_name_plural = "Gym Settings"
+
+    def __str__(self):
+        return f"Settings of {self.gym.name}"
+
+
+class GymBlockedUser(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    gym = models.ForeignKey(
+        Gym,
+        on_delete=models.CASCADE,
+        related_name="blocked_users",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="blocked_by_gyms",
+    )
+    blocked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="gym_blocks_initiated",
+    )
+    reason = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "gym_blocked_users"
+        verbose_name = "Gym Blocked User"
+        verbose_name_plural = "Gym Blocked Users"
+        unique_together = (("gym", "user"),)
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["gym", "user"]),
+        ]
+
+    def __str__(self):
+        return f"{self.gym.name} blocked {self.user.email}"

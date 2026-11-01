@@ -4,7 +4,8 @@ from datetime import time
 from typing import List, Dict, Any
 from django.db import transaction
 from django.conf import settings
-from apps.gyms.models import Gym, GymLocation, GymOpeningHours, GymGallery
+from django.utils import timezone
+from apps.gyms.models import Gym, GymLocation, GymOpeningHours, GymGallery, GymSetting, GymBlockedUser
 from apps.access_control.models import Role, GymStaffAssignment
 from apps.users.models import User
 from common.exceptions import (
@@ -19,6 +20,11 @@ from common.enums import (
     MediaTypeEnum,
     ProcessingStatus,
     StaffStatus,
+    AudienceMessagingEnum,
+    AudienceJoiningRequestEnum,
+    AudienceMembersVisibilityEnum,
+    AudienceFollowingVisibilityEnum,
+    PostsAgeRestrictionEnum,
 )
 
 
@@ -122,6 +128,9 @@ def create_gym(
             role=admin_role,
             defaults={"status": StaffStatus.ACTIVE},
         )
+
+    # Seed default gym settings
+    GymSetting.objects.get_or_create(gym=gym)
 
     return gym
 
@@ -386,3 +395,132 @@ def delete_gallery_item(gym: Gym, item_id: str) -> None:
     if not item:
         raise ResourceNotFoundError("Gallery item not found.")
     item.delete()
+
+
+def get_or_create_gym_settings(gym: Gym) -> GymSetting:
+    settings_obj, _ = GymSetting.objects.get_or_create(gym=gym)
+    return settings_obj
+
+
+@transaction.atomic
+def update_gym_settings(gym: Gym, **data) -> GymSetting:
+    settings_obj = get_or_create_gym_settings(gym)
+
+    allowed_fields = {
+        "language",
+        "video_autoplay",
+        "dark_mode",
+        "admin_logs_alerts",
+        "issues_alerts",
+        "who_can_message",
+        "who_can_send_joining_request",
+        "who_can_see_members",
+        "who_can_see_following",
+        "posts_age_restriction",
+        "is_deactivated",
+        "is_published",
+        "is_deleted",
+    }
+
+    for field, val in data.items():
+        if field not in allowed_fields or val is None:
+            continue
+
+        if field == "is_deactivated":
+            if val and not settings_obj.is_deactivated:
+                settings_obj.deactivated_at = timezone.now()
+            elif not val and settings_obj.is_deactivated:
+                settings_obj.deactivated_at = None
+            settings_obj.is_deactivated = val
+        elif field == "is_published":
+            if not val and settings_obj.is_published:
+                settings_obj.unpublished_at = timezone.now()
+            elif val and not settings_obj.is_published:
+                settings_obj.unpublished_at = None
+            settings_obj.is_published = val
+        elif field == "is_deleted":
+            if val and not settings_obj.is_deleted:
+                settings_obj.deleted_at = timezone.now()
+            elif not val and settings_obj.is_deleted:
+                settings_obj.deleted_at = None
+            settings_obj.is_deleted = val
+        else:
+            setattr(settings_obj, field, val)
+
+    settings_obj.save()
+    return settings_obj
+
+
+@transaction.atomic
+def block_user_for_gym(
+    gym: Gym,
+    user_id: str,
+    blocked_by_user: User = None,
+    reason: str = None,
+) -> GymBlockedUser:
+    import uuid
+    try:
+        uuid.UUID(str(user_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid user_id.")
+
+    target_user = User.objects.filter(id=user_id).first()
+    if not target_user:
+        raise ResourceNotFoundError("User to block not found.")
+
+    if target_user.id == gym.owner_user_id:
+        raise DomainValidationError("Gym owner cannot be blocked.")
+
+    blocked_obj, _ = GymBlockedUser.objects.get_or_create(
+        gym=gym,
+        user=target_user,
+        defaults={
+            "blocked_by": blocked_by_user,
+            "reason": reason.strip() if reason else None,
+        },
+    )
+    return blocked_obj
+
+
+@transaction.atomic
+def unblock_user_for_gym(gym: Gym, user_id: str) -> bool:
+    import uuid
+    try:
+        uuid.UUID(str(user_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid user_id.")
+
+    deleted_count, _ = GymBlockedUser.objects.filter(gym=gym, user_id=user_id).delete()
+    if deleted_count == 0:
+        raise ResourceNotFoundError("Blocked user not found for this gym.")
+    return True
+
+
+@transaction.atomic
+def apply_access_control_action(gym: Gym, action: str, user: User) -> GymSetting:
+    settings_obj = get_or_create_gym_settings(gym)
+    now = timezone.now()
+
+    if action == "deactivate":
+        settings_obj.is_deactivated = True
+        settings_obj.deactivated_at = now
+    elif action == "reactivate":
+        settings_obj.is_deactivated = False
+        settings_obj.deactivated_at = None
+    elif action == "unpublish":
+        settings_obj.is_published = False
+        settings_obj.unpublished_at = now
+    elif action == "publish":
+        settings_obj.is_published = True
+        settings_obj.unpublished_at = None
+    elif action == "delete":
+        settings_obj.is_deleted = True
+        settings_obj.deleted_at = now
+    elif action == "restore":
+        settings_obj.is_deleted = False
+        settings_obj.deleted_at = None
+    else:
+        raise DomainValidationError(f"Invalid access control action '{action}'.")
+
+    settings_obj.save()
+    return settings_obj

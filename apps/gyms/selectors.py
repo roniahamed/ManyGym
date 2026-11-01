@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional, Iterator
-from apps.gyms.models import Gym
+from apps.gyms.models import Gym, GymSetting, GymBlockedUser
 from apps.access_control.models import GymStaffAssignment
 
 
@@ -178,5 +178,76 @@ def list_gallery_items(gym_id: str, category: str = None):
     if category:
         queryset = queryset.filter(category=category)
     return queryset.order_by("order_index", "-created_at")
+
+
+def get_gym_settings(gym_id: str) -> Optional[GymSetting]:
+    """Retrieves gym settings, auto-creating default settings if not present."""
+    import uuid
+    from apps.gyms.models import GymSetting
+
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+    settings_obj = GymSetting.objects.select_related("gym").filter(gym_id=gym_id).first()
+    if not settings_obj:
+        gym = Gym.objects.filter(id=gym_id).first()
+        if gym:
+            settings_obj, _ = GymSetting.objects.get_or_create(gym=gym)
+    return settings_obj
+
+
+def list_blocked_users_for_gym(gym_id: str):
+    """Lists all users blocked by the given gym."""
+    import uuid
+    from apps.gyms.models import GymBlockedUser
+
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return GymBlockedUser.objects.none()
+
+    return (
+        GymBlockedUser.objects.filter(gym_id=gym_id)
+        .select_related("user", "user__profile", "blocked_by")
+        .order_by("-created_at")
+    )
+
+
+def search_users_to_block_for_gym(gym_id: str, query: str = None, limit: int = 20):
+    """Searches Manygym users who can be blocked (excluding gym owner and already blocked users)."""
+    import uuid
+    from django.db.models import Q
+    from apps.users.models import User
+    from apps.gyms.models import GymBlockedUser
+
+    try:
+        uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        return User.objects.none()
+
+    gym = Gym.objects.filter(id=gym_id).only("id", "owner_user_id").first()
+    if not gym:
+        return User.objects.none()
+
+    blocked_user_ids = GymBlockedUser.objects.filter(gym_id=gym_id).values_list("user_id", flat=True)
+
+    qs = (
+        User.objects.filter(is_active=True)
+        .exclude(id=gym.owner_user_id)
+        .exclude(id__in=blocked_user_ids)
+        .select_related("profile")
+    )
+
+    if query and query.strip():
+        q = query.strip()
+        qs = qs.filter(
+            Q(email__icontains=q)
+            | Q(first_name__icontains=q)
+            | Q(last_name__icontains=q)
+        )
+
+    return qs.order_by("first_name", "last_name", "email")[:limit]
 
 

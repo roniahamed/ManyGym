@@ -17,6 +17,12 @@ from apps.gyms.rest_api.v1.serializers import (
     GymGalleryItemSerializer,
     GymGalleryCreateSerializer,
     GymGalleryReorderSerializer,
+    GymSettingSerializer,
+    GymSettingUpdateSerializer,
+    GymBlockedUserSerializer,
+    GymBlockUserCreateSerializer,
+    GymUserSearchToBlockSerializer,
+    GymAccessControlActionSerializer,
 )
 from apps.gyms.services import (
     create_gym,
@@ -26,12 +32,20 @@ from apps.gyms.services import (
     add_gallery_item,
     reorder_gallery,
     delete_gallery_item,
+    get_or_create_gym_settings,
+    update_gym_settings,
+    block_user_for_gym,
+    unblock_user_for_gym,
+    apply_access_control_action,
 )
 from apps.gyms.selectors import (
     get_gym_overview,
     get_gym_location,
     get_opening_hours,
     list_gallery_items,
+    get_gym_settings,
+    list_blocked_users_for_gym,
+    search_users_to_block_for_gym,
 )
 from common.exceptions import (
     DomainValidationError,
@@ -438,3 +452,178 @@ class GymGalleryDetailView(APIView):
         check_gym_permission(request, gym, required_scope="gym_profile:edit")
         delete_gallery_item(gym, item_id=str(item_id))
         return Response({"message": "Gallery asset successfully removed."}, status=status.HTTP_200_OK)
+
+
+class GymSettingsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Settings"],
+        summary="Retrieve Gym Settings",
+        description="Retrieves current gym settings including Preference (Display), Privacy & Sharing (Alerts, Audience), and Visibility (Access & Control).",
+        parameters=[
+            OpenApiParameter(name="gym_id", description="Optional Gym UUID", required=False, type=str)
+        ],
+        responses={
+            200: OpenApiResponse(response=GymSettingSerializer, description="Gym settings details."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
+        },
+    )
+    def get(self, request):
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="gym_profile:read")
+        settings_obj = get_gym_settings(str(gym.id))
+        return Response(GymSettingSerializer(settings_obj).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Gym Settings"],
+        summary="Update Gym Settings",
+        description="Updates gym configuration fields across Display, Alerts, Audience, and Access & Control.",
+        parameters=[
+            OpenApiParameter(name="gym_id", description="Optional Gym UUID", required=False, type=str)
+        ],
+        request=GymSettingUpdateSerializer,
+        responses={
+            200: OpenApiResponse(response=GymSettingSerializer, description="Updated gym settings."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+        },
+    )
+    def patch(self, request):
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="gym_profile:edit")
+
+        serializer = GymSettingUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated_settings = update_gym_settings(gym, **serializer.validated_data)
+        return Response(GymSettingSerializer(updated_settings).data, status=status.HTTP_200_OK)
+
+
+class GymBlockedUsersListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Settings - Blocking"],
+        summary="List Blocked Users",
+        description="Retrieves the list of users blocked by this gym.",
+        parameters=[
+            OpenApiParameter(name="gym_id", description="Optional Gym UUID", required=False, type=str)
+        ],
+        responses={
+            200: OpenApiResponse(response=GymBlockedUserSerializer(many=True), description="List of blocked users."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+        },
+    )
+    def get(self, request):
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="gym_profile:read")
+        blocked_qs = list_blocked_users_for_gym(str(gym.id))
+        return Response(GymBlockedUserSerializer(blocked_qs, many=True).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Gym Settings - Blocking"],
+        summary="Block a User",
+        description="Blocks a user from interacting with this gym.",
+        parameters=[
+            OpenApiParameter(name="gym_id", description="Optional Gym UUID", required=False, type=str)
+        ],
+        request=GymBlockUserCreateSerializer,
+        responses={
+            201: OpenApiResponse(response=GymBlockedUserSerializer, description="User successfully blocked."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation error."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="User not found."),
+        },
+    )
+    def post(self, request):
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="gym_profile:edit")
+
+        serializer = GymBlockUserCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        blocked = block_user_for_gym(
+            gym=gym,
+            user_id=str(serializer.validated_data["user_id"]),
+            blocked_by_user=request.user,
+            reason=serializer.validated_data.get("reason"),
+        )
+        return Response(GymBlockedUserSerializer(blocked).data, status=status.HTTP_201_CREATED)
+
+
+class GymBlockedUserDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Settings - Blocking"],
+        summary="Unblock a User",
+        description="Removes a block on a user for this gym.",
+        parameters=[
+            OpenApiParameter(name="gym_id", description="Optional Gym UUID", required=False, type=str)
+        ],
+        responses={
+            200: OpenApiResponse(response=MessageResponseSerializer, description="User unblocked successfully."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Blocked user not found."),
+        },
+    )
+    def delete(self, request, user_id):
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="gym_profile:edit")
+        unblock_user_for_gym(gym=gym, user_id=str(user_id))
+        return Response({"message": "User unblocked successfully."}, status=status.HTTP_200_OK)
+
+
+class GymSearchUsersToBlockView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Settings - Blocking"],
+        summary="Search Users to Block",
+        description="Searches active Manygym users to block by name or email, excluding gym owner and already blocked users.",
+        parameters=[
+            OpenApiParameter(name="gym_id", description="Optional Gym UUID", required=False, type=str),
+            OpenApiParameter(name="q", description="Search query string", required=False, type=str),
+        ],
+        responses={
+            200: OpenApiResponse(response=GymUserSearchToBlockSerializer(many=True), description="Matching users."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+        },
+    )
+    def get(self, request):
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="gym_profile:read")
+        query = request.query_params.get("q", "")
+        users = search_users_to_block_for_gym(str(gym.id), query=query)
+        return Response(GymUserSearchToBlockSerializer(users, many=True).data, status=status.HTTP_200_OK)
+
+
+class GymAccessControlActionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Settings - Access & Control"],
+        summary="Perform Access & Control Action",
+        description="Executes gym lifecycle actions: deactivate, reactivate, unpublish, publish, delete, restore.",
+        parameters=[
+            OpenApiParameter(name="gym_id", description="Optional Gym UUID", required=False, type=str)
+        ],
+        request=GymAccessControlActionSerializer,
+        responses={
+            200: OpenApiResponse(response=GymSettingSerializer, description="Settings after action executed."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+        },
+    )
+    def post(self, request):
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="gym_profile:edit")
+
+        serializer = GymAccessControlActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated_settings = apply_access_control_action(
+            gym=gym,
+            action=serializer.validated_data["action"],
+            user=request.user,
+        )
+        return Response(GymSettingSerializer(updated_settings).data, status=status.HTTP_200_OK)
