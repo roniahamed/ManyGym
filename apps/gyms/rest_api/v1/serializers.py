@@ -279,7 +279,7 @@ class GymDetailSerializer(serializers.ModelSerializer):
 
 
 class GymSettingSerializer(serializers.ModelSerializer):
-    gym_id = serializers.UUIDField(source="gym.id", read_only=True)
+    gym_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = GymSetting
@@ -344,7 +344,7 @@ class GymSettingUpdateSerializer(serializers.Serializer):
 
 
 class GymBlockedUserSerializer(serializers.ModelSerializer):
-    user_id = serializers.UUIDField(source="user.id", read_only=True)
+    user_id = serializers.UUIDField(read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
     first_name = serializers.CharField(source="user.first_name", read_only=True)
     last_name = serializers.CharField(source="user.last_name", read_only=True)

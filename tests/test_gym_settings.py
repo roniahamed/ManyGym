@@ -233,3 +233,63 @@ class TestGymSettings:
 
         res_patch = client.patch(f"{url}?gym_id={test_gym.id}", {"dark_mode": True}, format="json")
         assert res_patch.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_gym_settings_endpoint_query_count(self, auth_client, test_gym, django_assert_num_queries):
+        """
+        Verify GET /api/v1/gyms/settings/ executes in bounded constant queries:
+        1. FastJWT authentication
+        2. resolve_gym_context (.only)
+        3. get_gym_settings (.only)
+        """
+        url = reverse("gyms_v1:gym-settings")
+        with django_assert_num_queries(3):
+            res = auth_client.get(f"{url}?gym_id={test_gym.id}")
+            assert res.status_code == status.HTTP_200_OK
+
+    def test_blocked_users_list_n_plus_one_elimination(self, auth_client, test_gym, django_assert_num_queries):
+        """
+        Verify that listing blocked users eliminates N+1 queries.
+        Even with multiple blocked users with profiles and blocking initiators,
+        it executes in a single select_related query (total 3 queries for endpoint).
+        """
+        from apps.users.models import UserProfile
+        from apps.gyms.services import block_user_for_gym
+
+        # Create 5 blocked users
+        for i in range(5):
+            u = User.objects.create_user(
+                email=f"spam.user{i}@example.com",
+                password="Password123!",
+                first_name=f"Spammer{i}",
+                last_name="Test",
+                is_verified=True,
+            )
+            UserProfile.objects.create(user=u, avatar_url=f"https://cdn.example.com/avatar_{i}.jpg")
+            block_user_for_gym(gym=test_gym, user_id=str(u.id), reason="Spamming")
+
+        url = reverse("gyms_v1:gym-settings-blocked-users")
+        with django_assert_num_queries(3):
+            res = auth_client.get(f"{url}?gym_id={test_gym.id}")
+            assert res.status_code == status.HTTP_200_OK
+            assert len(res.data) == 5
+            # Verify serialized data fields populated without lazy load queries
+            assert res.data[0]["avatar_url"] is not None
+
+    def test_search_users_to_block_query_count_and_latency(self, auth_client, test_gym, django_assert_num_queries):
+        """
+        Verify search users to block executes in constant queries and < 200ms latency:
+        1. FastJWT authentication
+        2. resolve_gym_context (.only)
+        3. values_list of blocked users
+        4. User search with select_related profile and only
+        """
+        import time
+
+        url = reverse("gyms_v1:gym-settings-blocked-users-search")
+        t0 = time.perf_counter()
+        with django_assert_num_queries(4):
+            res = auth_client.get(f"{url}?gym_id={test_gym.id}&q=spam")
+            assert res.status_code == status.HTTP_200_OK
+        latency_ms = (time.perf_counter() - t0) * 1000
+        assert latency_ms < 200, f"Latency {latency_ms:.2f}ms exceeded 200ms target"
+

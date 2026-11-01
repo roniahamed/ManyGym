@@ -181,7 +181,7 @@ def list_gallery_items(gym_id: str, category: str = None):
 
 
 def get_gym_settings(gym_id: str) -> Optional[GymSetting]:
-    """Retrieves gym settings, auto-creating default settings if not present."""
+    """Retrieves gym settings with field projections, auto-creating default settings if not present."""
     import uuid
     from apps.gyms.models import GymSetting
 
@@ -190,16 +190,41 @@ def get_gym_settings(gym_id: str) -> Optional[GymSetting]:
     except (ValueError, TypeError, AttributeError):
         return None
 
-    settings_obj = GymSetting.objects.select_related("gym").filter(gym_id=gym_id).first()
+    settings_obj = (
+        GymSetting.objects.filter(gym_id=gym_id)
+        .only(
+            "id",
+            "gym_id",
+            "language",
+            "video_autoplay",
+            "dark_mode",
+            "admin_logs_alerts",
+            "issues_alerts",
+            "who_can_message",
+            "who_can_send_joining_request",
+            "who_can_see_members",
+            "who_can_see_following",
+            "posts_age_restriction",
+            "is_deactivated",
+            "deactivated_at",
+            "is_published",
+            "unpublished_at",
+            "is_deleted",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        )
+        .first()
+    )
     if not settings_obj:
-        gym = Gym.objects.filter(id=gym_id).first()
+        gym = Gym.objects.filter(id=gym_id).only("id", "name").first()
         if gym:
             settings_obj, _ = GymSetting.objects.get_or_create(gym=gym)
     return settings_obj
 
 
 def list_blocked_users_for_gym(gym_id: str):
-    """Lists all users blocked by the given gym."""
+    """Lists all users blocked by the given gym with select_related and field projections."""
     import uuid
     from apps.gyms.models import GymBlockedUser
 
@@ -211,12 +236,28 @@ def list_blocked_users_for_gym(gym_id: str):
     return (
         GymBlockedUser.objects.filter(gym_id=gym_id)
         .select_related("user", "user__profile", "blocked_by")
+        .only(
+            "id",
+            "gym_id",
+            "user_id",
+            "reason",
+            "created_at",
+            "user__id",
+            "user__email",
+            "user__first_name",
+            "user__last_name",
+            "user__profile__id",
+            "user__profile__user_id",
+            "user__profile__avatar_url",
+            "blocked_by__id",
+            "blocked_by__email",
+        )
         .order_by("-created_at")
     )
 
 
 def search_users_to_block_for_gym(gym_id: str, query: str = None, limit: int = 20):
-    """Searches Manygym users who can be blocked (excluding gym owner and already blocked users)."""
+    """Searches Manygym users who can be blocked with field projections."""
     import uuid
     from django.db.models import Q
     from apps.users.models import User
@@ -238,6 +279,15 @@ def search_users_to_block_for_gym(gym_id: str, query: str = None, limit: int = 2
         .exclude(id=gym.owner_user_id)
         .exclude(id__in=blocked_user_ids)
         .select_related("profile")
+        .only(
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "profile__id",
+            "profile__user_id",
+            "profile__avatar_url",
+        )
     )
 
     if query and query.strip():
@@ -249,5 +299,6 @@ def search_users_to_block_for_gym(gym_id: str, query: str = None, limit: int = 2
         )
 
     return qs.order_by("first_name", "last_name", "email")[:limit]
+
 
 

@@ -299,6 +299,7 @@ class GymBlockedUser(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["gym", "user"]),
+            models.Index(fields=["gym", "-created_at"]),
         ]
 
     def __str__(self):
