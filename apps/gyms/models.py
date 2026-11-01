@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 from common.enums import (
     GymTypeEnum,
     GymGenderRequired,
@@ -57,7 +58,13 @@ class Gym(models.Model):
     def __str__(self):
         return f"{self.name} (Owner: {self.owner_user.email})"
 
-    def get_settings(self):
+    def get_settings(self) -> "GymSetting":
+        """
+        Retrieves gym settings instance or auto-creates default configuration.
+        Caches instance in reverse relation if available.
+        """
+        if hasattr(self, "settings"):
+            return self.settings
         settings_obj, _ = GymSetting.objects.get_or_create(gym=self)
         return settings_obj
 
@@ -164,6 +171,11 @@ class GymGallery(OptimizedMediaMixin, models.Model):
 
 
 class GymSetting(models.Model):
+    """
+    Configuration and administrative settings for a gym entity.
+    Encompasses Display Preferences, Alert Subscriptions, Audience Visibility Rules,
+    and Gym Lifecycle (Access & Control) States.
+    """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     gym = models.OneToOneField(
         Gym,
@@ -267,6 +279,36 @@ class GymSetting(models.Model):
 
     def __str__(self):
         return f"Settings of {self.gym.name}"
+
+    def deactivate(self) -> None:
+        """Transitions gym state to deactivated and records timestamp."""
+        self.is_deactivated = True
+        self.deactivated_at = timezone.now()
+
+    def reactivate(self) -> None:
+        """Reactivates gym and resets deactivated timestamp."""
+        self.is_deactivated = False
+        self.deactivated_at = None
+
+    def unpublish(self) -> None:
+        """Unpublishes gym from discovery feed and records timestamp."""
+        self.is_published = False
+        self.unpublished_at = timezone.now()
+
+    def publish(self) -> None:
+        """Publishes gym to discovery feed and resets unpublished timestamp."""
+        self.is_published = True
+        self.unpublished_at = None
+
+    def soft_delete(self) -> None:
+        """Marks gym as soft-deleted and records timestamp."""
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+
+    def restore(self) -> None:
+        """Restores soft-deleted gym and resets deleted timestamp."""
+        self.is_deleted = False
+        self.deleted_at = None
 
 
 class GymBlockedUser(models.Model):

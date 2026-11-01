@@ -279,6 +279,15 @@ class GymDetailSerializer(serializers.ModelSerializer):
 
 
 class GymSettingSerializer(serializers.ModelSerializer):
+    """
+    Read-only presentation serializer for complete Gym Configuration & Privacy Settings.
+
+    Exposes preferences across:
+    - Display (language, video autoplay, dark mode)
+    - Alerts (admin logs, issue reports)
+    - Audience & Sharing (messages, join requests, member visibility, followee visibility, age restrictions)
+    - Access & Control (deactivation, publishing, soft deletion lifecycle state)
+    """
     gym_id = serializers.UUIDField(read_only=True)
 
     class Meta:
@@ -321,6 +330,12 @@ class GymSettingSerializer(serializers.ModelSerializer):
 
 
 class GymSettingUpdateSerializer(serializers.Serializer):
+    """
+    Validation and deserialization serializer for updating Gym Settings.
+
+    Supports partial PATCH updates across Preference (Display), Privacy & Sharing (Alerts, Audience),
+    and Visibility (Access & Control).
+    """
     # Preference -> Display
     language = StrictCharField(required=False, max_length=20)
     video_autoplay = StrictBooleanField(required=False)
@@ -331,19 +346,51 @@ class GymSettingUpdateSerializer(serializers.Serializer):
     issues_alerts = StrictBooleanField(required=False)
 
     # Privacy and Sharing -> Audience
-    who_can_message = serializers.ChoiceField(choices=AudienceMessagingEnum.choices, required=False)
-    who_can_send_joining_request = serializers.ChoiceField(choices=AudienceJoiningRequestEnum.choices, required=False)
-    who_can_see_members = serializers.ChoiceField(choices=AudienceMembersVisibilityEnum.choices, required=False)
-    who_can_see_following = serializers.ChoiceField(choices=AudienceFollowingVisibilityEnum.choices, required=False)
-    posts_age_restriction = serializers.ChoiceField(choices=PostsAgeRestrictionEnum.choices, required=False)
+    who_can_message = serializers.ChoiceField(
+        choices=AudienceMessagingEnum.choices,
+        required=False,
+        help_text="Controls messaging permission: 'everyone', 'followers_and_members', 'members_only'",
+    )
+    who_can_send_joining_request = serializers.ChoiceField(
+        choices=AudienceJoiningRequestEnum.choices,
+        required=False,
+        help_text="Controls who can submit a membership request: 'everyone', 'no_one'",
+    )
+    who_can_see_members = serializers.ChoiceField(
+        choices=AudienceMembersVisibilityEnum.choices,
+        required=False,
+        help_text="Visibility of gym member roster: 'everyone', 'only_members'",
+    )
+    who_can_see_following = serializers.ChoiceField(
+        choices=AudienceFollowingVisibilityEnum.choices,
+        required=False,
+        help_text="Visibility of followed pages/people: 'everyone', 'only_members', 'private'",
+    )
+    posts_age_restriction = serializers.ChoiceField(
+        choices=PostsAgeRestrictionEnum.choices,
+        required=False,
+        help_text="Age restriction filter for gym posts: 'any_age', '17_plus', '18_plus', '19_plus', '20_plus'",
+    )
 
     # Visibility -> Access & Control
     is_deactivated = StrictBooleanField(required=False)
     is_published = StrictBooleanField(required=False)
     is_deleted = StrictBooleanField(required=False)
 
+    def validate_language(self, value: str) -> str:
+        """Sanitizes language code by stripping leading/trailing whitespace."""
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("Language code cannot be empty.")
+        return cleaned
+
 
 class GymBlockedUserSerializer(serializers.ModelSerializer):
+    """
+    Serializer representing a blocked user record within a gym's workspace context.
+
+    Includes user identity details, blocking staff identity, and optional blocking justification.
+    """
     user_id = serializers.UUIDField(read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
     first_name = serializers.CharField(source="user.first_name", read_only=True)
@@ -366,18 +413,39 @@ class GymBlockedUserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-    def get_avatar_url(self, obj):
+    def get_avatar_url(self, obj: GymBlockedUser) -> str | None:
         if hasattr(obj.user, "profile") and obj.user.profile:
             return obj.user.profile.avatar_url
         return None
 
 
 class GymBlockUserCreateSerializer(serializers.Serializer):
-    user_id = StrictUUIDField(required=True)
-    reason = StrictCharField(required=False, allow_blank=True, max_length=255)
+    """
+    Request serializer for blocking a user from a gym.
+
+    Strictly validates user_id as a UUID string, rejecting integers/floats/booleans.
+    """
+    user_id = StrictUUIDField(required=True, help_text="Valid UUID string of the user to block.")
+    reason = StrictCharField(
+        required=False,
+        allow_blank=True,
+        max_length=255,
+        help_text="Optional administrative rationale for blocking.",
+    )
+
+    def validate_reason(self, value: str | None) -> str:
+        """Strips surrounding whitespace from optional blocking reason."""
+        if value is None:
+            return ""
+        return value.strip()
 
 
 class GymUserSearchToBlockSerializer(serializers.ModelSerializer):
+    """
+    Lightweight projection serializer for searching active users to block.
+
+    Omits sensitive user profile fields and only returns minimal identity attributes.
+    """
     avatar_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -391,13 +459,24 @@ class GymUserSearchToBlockSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-    def get_avatar_url(self, obj):
+    def get_avatar_url(self, obj: User) -> str | None:
         if hasattr(obj, "profile") and obj.profile:
             return obj.profile.avatar_url
         return None
 
 
 class GymAccessControlActionSerializer(serializers.Serializer):
+    """
+    Request payload serializer for gym lifecycle state transitions.
+
+    Supported transitions:
+    - `deactivate`: Temporarily suspend gym activities.
+    - `reactivate`: Re-enable gym activities from suspended state.
+    - `unpublish`: Hide gym profile and listings from public discovery.
+    - `publish`: Make gym profile and listings visible to the public.
+    - `delete`: Soft-delete gym workspace.
+    - `restore`: Restore soft-deleted gym workspace.
+    """
     action = serializers.ChoiceField(
         choices=[
             "deactivate",
@@ -408,4 +487,5 @@ class GymAccessControlActionSerializer(serializers.Serializer):
             "restore",
         ],
         required=True,
+        help_text="Lifecycle state transition action.",
     )

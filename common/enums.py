@@ -175,31 +175,35 @@ class ProcessingStatus(models.TextChoices):
 
 
 class AudienceMessagingEnum(models.TextChoices):
+    """Audience visibility setting: Who can send direct messages to the gym."""
     EVERYONE = "everyone", "Everyone"
     FOLLOWERS_AND_MEMBERS = "followers_and_members", "Followers & Members"
     MEMBERS_ONLY = "members_only", "Members only"
 
 
 class AudienceJoiningRequestEnum(models.TextChoices):
+    """Audience visibility setting: Who can submit member joining requests to the gym."""
     EVERYONE = "everyone", "Everyone"
     NO_ONE = "no_one", "No one"
 
 
 class AudienceMembersVisibilityEnum(models.TextChoices):
+    """Audience visibility setting: Who can see the gym's member list."""
     EVERYONE = "everyone", "Everyone"
     ONLY_MEMBERS = "only_members", "Only Members"
 
 
 class AudienceFollowingVisibilityEnum(models.TextChoices):
+    """Audience visibility setting: Who can see the pages and people the gym follows."""
     EVERYONE = "everyone", "Everyone"
     ONLY_MEMBERS = "only_members", "Only members"
     PRIVATE = "private", "Private"
 
 
 class PostsAgeRestrictionEnum(models.TextChoices):
+    """Content filtering setting: Minimum age threshold required to view gym community posts."""
     ANY_AGE = "any_age", "Any age"
     AGE_17_PLUS = "17_plus", "17 and + age"
     AGE_18_PLUS = "18_plus", "18 and + age"
     AGE_19_PLUS = "19_plus", "19 and + age"
     AGE_20_PLUS = "20_plus", "20 and + age"
-

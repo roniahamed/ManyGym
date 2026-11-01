@@ -1,17 +1,22 @@
 import uuid
+import logging
 from pathlib import Path
 from datetime import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from django.db import transaction
-from django.conf import settings
-from django.utils import timezone
-from apps.gyms.models import Gym, GymLocation, GymOpeningHours, GymGallery, GymSetting, GymBlockedUser
+from apps.gyms.models import (
+    Gym,
+    GymLocation,
+    GymOpeningHours,
+    GymGallery,
+    GymSetting,
+    GymBlockedUser,
+)
 from apps.access_control.models import Role, GymStaffAssignment
 from apps.users.models import User
 from common.exceptions import (
     DomainValidationError,
     ResourceNotFoundError,
-    PermissionDeniedError,
 )
 from common.enums import (
     GymTypeEnum,
@@ -20,12 +25,9 @@ from common.enums import (
     MediaTypeEnum,
     ProcessingStatus,
     StaffStatus,
-    AudienceMessagingEnum,
-    AudienceJoiningRequestEnum,
-    AudienceMembersVisibilityEnum,
-    AudienceFollowingVisibilityEnum,
-    PostsAgeRestrictionEnum,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @transaction.atomic
@@ -398,12 +400,32 @@ def delete_gallery_item(gym: Gym, item_id: str) -> None:
 
 
 def get_or_create_gym_settings(gym: Gym) -> GymSetting:
+    """
+    Retrieves existing settings or auto-provisions default settings for the gym.
+
+    Args:
+        gym: Gym entity.
+
+    Returns:
+        GymSetting model instance.
+    """
     settings_obj, _ = GymSetting.objects.get_or_create(gym=gym)
     return settings_obj
 
 
 @transaction.atomic
-def update_gym_settings(gym: Gym, **data) -> GymSetting:
+def update_gym_settings(gym: Gym, **data: Any) -> GymSetting:
+    """
+    Updates gym configuration fields across Display, Alerts, Audience, and Access & Control.
+    Delegates lifecycle transitions to GymSetting domain methods.
+
+    Args:
+        gym: Target Gym entity.
+        **data: Attribute key-value pairs to update.
+
+    Returns:
+        Updated GymSetting model instance.
+    """
     settings_obj = get_or_create_gym_settings(gym)
 
     allowed_fields = {
@@ -427,27 +449,16 @@ def update_gym_settings(gym: Gym, **data) -> GymSetting:
             continue
 
         if field == "is_deactivated":
-            if val and not settings_obj.is_deactivated:
-                settings_obj.deactivated_at = timezone.now()
-            elif not val and settings_obj.is_deactivated:
-                settings_obj.deactivated_at = None
-            settings_obj.is_deactivated = val
+            settings_obj.deactivate() if val else settings_obj.reactivate()
         elif field == "is_published":
-            if not val and settings_obj.is_published:
-                settings_obj.unpublished_at = timezone.now()
-            elif val and not settings_obj.is_published:
-                settings_obj.unpublished_at = None
-            settings_obj.is_published = val
+            settings_obj.publish() if val else settings_obj.unpublish()
         elif field == "is_deleted":
-            if val and not settings_obj.is_deleted:
-                settings_obj.deleted_at = timezone.now()
-            elif not val and settings_obj.is_deleted:
-                settings_obj.deleted_at = None
-            settings_obj.is_deleted = val
+            settings_obj.soft_delete() if val else settings_obj.restore()
         else:
             setattr(settings_obj, field, val)
 
     settings_obj.save()
+    logger.info("Updated settings for gym %s (%s)", gym.name, gym.id)
     return settings_obj
 
 
@@ -455,10 +466,27 @@ def update_gym_settings(gym: Gym, **data) -> GymSetting:
 def block_user_for_gym(
     gym: Gym,
     user_id: str,
-    blocked_by_user: User = None,
-    reason: str = None,
+    blocked_by_user: Optional[User] = None,
+    reason: Optional[str] = None,
 ) -> GymBlockedUser:
-    import uuid
+    """
+    Blocks a user from interacting with the gym.
+    Validates user existence, enforces that the gym owner cannot be blocked,
+    and creates the block record idempotently.
+
+    Args:
+        gym: Gym imposing the block.
+        user_id: UUID string of the user being blocked.
+        blocked_by_user: Optional User initiating the block.
+        reason: Optional justification note for the block.
+
+    Returns:
+        GymBlockedUser model instance.
+
+    Raises:
+        DomainValidationError: If user_id is malformed or targets the gym owner.
+        ResourceNotFoundError: If the target user account does not exist.
+    """
     try:
         uuid.UUID(str(user_id))
     except (ValueError, TypeError, AttributeError):
@@ -471,7 +499,7 @@ def block_user_for_gym(
     if target_user.id == gym.owner_user_id:
         raise DomainValidationError("Gym owner cannot be blocked.")
 
-    blocked_obj, _ = GymBlockedUser.objects.get_or_create(
+    blocked_obj, created = GymBlockedUser.objects.get_or_create(
         gym=gym,
         user=target_user,
         defaults={
@@ -479,12 +507,27 @@ def block_user_for_gym(
             "reason": reason.strip() if reason else None,
         },
     )
+    if created:
+        logger.info("Blocked user %s on gym %s by %s", target_user.email, gym.name, blocked_by_user)
     return blocked_obj
 
 
 @transaction.atomic
 def unblock_user_for_gym(gym: Gym, user_id: str) -> bool:
-    import uuid
+    """
+    Unblocks a previously restricted user account from the gym.
+
+    Args:
+        gym: Gym lifting the block.
+        user_id: UUID string of the user to unblock.
+
+    Returns:
+        True upon successful removal.
+
+    Raises:
+        DomainValidationError: If user_id is malformed.
+        ResourceNotFoundError: If the user is not currently blocked by this gym.
+    """
     try:
         uuid.UUID(str(user_id))
     except (ValueError, TypeError, AttributeError):
@@ -493,34 +536,51 @@ def unblock_user_for_gym(gym: Gym, user_id: str) -> bool:
     deleted_count, _ = GymBlockedUser.objects.filter(gym=gym, user_id=user_id).delete()
     if deleted_count == 0:
         raise ResourceNotFoundError("Blocked user not found for this gym.")
+
+    logger.info("Unblocked user %s from gym %s", user_id, gym.name)
     return True
 
 
 @transaction.atomic
 def apply_access_control_action(gym: Gym, action: str, user: User) -> GymSetting:
-    settings_obj = get_or_create_gym_settings(gym)
-    now = timezone.now()
+    """
+    Applies an administrative lifecycle state transition to the gym.
 
-    if action == "deactivate":
-        settings_obj.is_deactivated = True
-        settings_obj.deactivated_at = now
-    elif action == "reactivate":
-        settings_obj.is_deactivated = False
-        settings_obj.deactivated_at = None
-    elif action == "unpublish":
-        settings_obj.is_published = False
-        settings_obj.unpublished_at = now
-    elif action == "publish":
-        settings_obj.is_published = True
-        settings_obj.unpublished_at = None
-    elif action == "delete":
-        settings_obj.is_deleted = True
-        settings_obj.deleted_at = now
-    elif action == "restore":
-        settings_obj.is_deleted = False
-        settings_obj.deleted_at = None
-    else:
+    Supported actions:
+        - deactivate: Suspend gym activities.
+        - reactivate: Restore active gym operations.
+        - unpublish: Hide gym profile from public discovery.
+        - publish: Make gym profile publicly visible.
+        - delete: Mark gym as soft-deleted.
+        - restore: Recover gym from soft-deleted status.
+
+    Args:
+        gym: Target Gym entity.
+        action: Lifecycle action code.
+        user: Authenticated staff member or owner executing the transition.
+
+    Returns:
+        Updated GymSetting model instance.
+
+    Raises:
+        DomainValidationError: If an unknown action is supplied.
+    """
+    settings_obj = get_or_create_gym_settings(gym)
+
+    action_handlers = {
+        "deactivate": settings_obj.deactivate,
+        "reactivate": settings_obj.reactivate,
+        "unpublish": settings_obj.unpublish,
+        "publish": settings_obj.publish,
+        "delete": settings_obj.soft_delete,
+        "restore": settings_obj.restore,
+    }
+
+    handler = action_handlers.get(action)
+    if not handler:
         raise DomainValidationError(f"Invalid access control action '{action}'.")
 
+    handler()
     settings_obj.save()
+    logger.info("Applied access control '%s' to gym %s by user %s", action, gym.name, user.email)
     return settings_obj

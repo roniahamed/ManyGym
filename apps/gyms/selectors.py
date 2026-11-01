@@ -1,6 +1,10 @@
+import uuid
 from typing import List, Dict, Any, Optional, Iterator
+from django.db import models
+from django.db.models import Q
 from apps.gyms.models import Gym, GymSetting, GymBlockedUser
 from apps.access_control.models import GymStaffAssignment
+from apps.users.models import User
 
 
 def stream_accessible_gyms_for_user(user) -> Iterator[Dict[str, Any]]:
@@ -181,10 +185,15 @@ def list_gallery_items(gym_id: str, category: str = None):
 
 
 def get_gym_settings(gym_id: str) -> Optional[GymSetting]:
-    """Retrieves gym settings with field projections, auto-creating default settings if not present."""
-    import uuid
-    from apps.gyms.models import GymSetting
+    """
+    Retrieves gym settings with field projections, auto-creating default settings if not present.
 
+    Args:
+        gym_id: Target gym UUID string.
+
+    Returns:
+        GymSetting model instance or None if gym_id is invalid.
+    """
     try:
         uuid.UUID(str(gym_id))
     except (ValueError, TypeError, AttributeError):
@@ -223,11 +232,16 @@ def get_gym_settings(gym_id: str) -> Optional[GymSetting]:
     return settings_obj
 
 
-def list_blocked_users_for_gym(gym_id: str):
-    """Lists all users blocked by the given gym with select_related and field projections."""
-    import uuid
-    from apps.gyms.models import GymBlockedUser
+def list_blocked_users_for_gym(gym_id: str) -> "models.QuerySet[GymBlockedUser]":
+    """
+    Lists all users blocked by the given gym with select_related and field projections.
 
+    Args:
+        gym_id: Target gym UUID string.
+
+    Returns:
+        QuerySet of GymBlockedUser entities with user and profile preloaded.
+    """
     try:
         uuid.UUID(str(gym_id))
     except (ValueError, TypeError, AttributeError):
@@ -256,13 +270,23 @@ def list_blocked_users_for_gym(gym_id: str):
     )
 
 
-def search_users_to_block_for_gym(gym_id: str, query: str = None, limit: int = 20):
-    """Searches Manygym users who can be blocked with field projections."""
-    import uuid
-    from django.db.models import Q
-    from apps.users.models import User
-    from apps.gyms.models import GymBlockedUser
+def search_users_to_block_for_gym(
+    gym_id: str,
+    query: Optional[str] = None,
+    limit: int = 20,
+) -> "models.QuerySet[User]":
+    """
+    Searches active Manygym users eligible for blocking.
+    Excludes the gym owner and already blocked accounts.
 
+    Args:
+        gym_id: Target gym UUID string.
+        query: Optional search keyword filtering name or email.
+        limit: Maximum results to retrieve (default: 20).
+
+    Returns:
+        QuerySet of matching User entities with profile preloaded.
+    """
     try:
         uuid.UUID(str(gym_id))
     except (ValueError, TypeError, AttributeError):
@@ -299,6 +323,3 @@ def search_users_to_block_for_gym(gym_id: str, query: str = None, limit: int = 2
         )
 
     return qs.order_by("first_name", "last_name", "email")[:limit]
-
-
-
