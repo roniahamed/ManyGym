@@ -3,11 +3,13 @@ Permission and policy enforcement for End-to-End Encrypted Messaging.
 Enforces gym privacy settings, blocked users list, and role-based gym staff access.
 """
 
+from typing import Optional
+
 from apps.gyms.models import Gym, GymBlockedUser, GymSetting
 from apps.access_control.models import GymStaffAssignment
 from apps.access_control.selectors import get_user_gym_scopes
 from apps.members.models import Member
-from common.enums import AudienceMessagingEnum, StaffStatus
+from common.enums import AudienceMessagingEnum, StaffStatus, ConversationTypeEnum
 from common.exceptions import (
     PermissionDeniedError,
     DomainValidationError,
@@ -49,7 +51,7 @@ def can_user_message_gym(user, gym: Gym) -> bool:
         # User is allowed if they are a member or if user is owner/staff
         if is_member or gym.owner_user_id == user.id:
             return True
-        # Future/extensible: check social follow relationship if implemented
+        # Extensible: check social follow relationship if implemented
         return True
 
     return True
@@ -85,18 +87,18 @@ def is_user_authorized_for_gym(user, gym: Gym, required_scope: str = "messaging:
     return True
 
 
-def assert_can_access_conversation(user, conversation, gym_context: Gym = None) -> bool:
+def assert_can_access_conversation(user, conversation, gym_context: Optional[Gym] = None) -> bool:
     """
     Validates that the user has legitimate access to view or interact with a conversation.
     """
     conv_type = conversation.conversation_type
 
-    if conv_type == "user_to_user":
+    if conv_type == ConversationTypeEnum.USER_TO_USER:
         if user.id not in (conversation.user_a_id, conversation.user_b_id):
             raise PermissionDeniedError("You are not a participant in this conversation.")
         return True
 
-    if conv_type == "user_to_gym":
+    if conv_type == ConversationTypeEnum.USER_TO_GYM:
         if user.id == conversation.user_a_id:
             return True
         # Otherwise user must be authorized for gym_a
@@ -104,7 +106,7 @@ def assert_can_access_conversation(user, conversation, gym_context: Gym = None) 
             return True
         raise PermissionDeniedError("You do not have permission to access this gym conversation.")
 
-    if conv_type == "gym_to_gym":
+    if conv_type == ConversationTypeEnum.GYM_TO_GYM:
         if is_user_authorized_for_gym(user, conversation.gym_a, "messaging:read"):
             return True
         if is_user_authorized_for_gym(user, conversation.gym_b, "messaging:read"):

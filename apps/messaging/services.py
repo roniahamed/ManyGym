@@ -231,6 +231,88 @@ def get_or_create_gym_to_gym_conversation(sender_user: User, gym_a: Gym, gym_b: 
 
 
 @transaction.atomic
+def initiate_conversation(
+    initiator_user: User,
+    validated_data: Dict[str, Any],
+    gym_context: Optional[Gym] = None,
+) -> Conversation:
+    """
+    Orchestrates conversation creation and entity channel resolution.
+    Supports user_to_user, user_to_gym, gym_to_user, and gym_to_gym channels.
+    Auto-detects channel type if omitted based on provided target identifiers.
+    """
+    from apps.messaging.selectors import resolve_user_instance
+
+    source_gym_id = validated_data.get("source_gym_id") or getattr(gym_context, "id", None)
+    target_user_id = validated_data.get("target_user_id")
+    target_gym_id = validated_data.get("target_gym_id")
+    conv_type = validated_data.get("conversation_type", "")
+
+    # Auto-detect conversation_type if omitted
+    if not conv_type:
+        if source_gym_id and target_gym_id:
+            conv_type = ConversationTypeEnum.GYM_TO_GYM
+        elif (source_gym_id and target_user_id) or target_gym_id:
+            conv_type = ConversationTypeEnum.USER_TO_GYM
+        elif target_user_id:
+            conv_type = ConversationTypeEnum.USER_TO_USER
+        else:
+            raise DomainValidationError("Please provide target_user_id or target_gym_id to start a conversation.")
+
+    if conv_type == ConversationTypeEnum.USER_TO_USER:
+        if not target_user_id:
+            raise DomainValidationError("target_user_id is required for User to User messaging.")
+        target_user = resolve_user_instance(target_user_id)
+        return get_or_create_user_to_user_conversation(initiator_user, target_user)
+
+    elif conv_type == ConversationTypeEnum.USER_TO_GYM:
+        if source_gym_id and target_user_id:
+            # Gym initiating chat with User (Gym -> User)
+            try:
+                source_gym = Gym.objects.get(id=source_gym_id)
+            except Gym.DoesNotExist:
+                raise ResourceNotFoundError("Gym not found.")
+            target_user = resolve_user_instance(target_user_id)
+            return get_or_create_user_to_gym_conversation(
+                user=target_user,
+                gym=source_gym,
+                initiated_by="gym",
+                initiator_user=initiator_user,
+            )
+        elif target_gym_id:
+            # User initiating chat with Gym (User -> Gym)
+            try:
+                target_gym = Gym.objects.get(id=target_gym_id)
+            except Gym.DoesNotExist:
+                raise ResourceNotFoundError("Target gym not found.")
+            return get_or_create_user_to_gym_conversation(
+                user=initiator_user,
+                gym=target_gym,
+                initiated_by="user",
+                initiator_user=initiator_user,
+            )
+        else:
+            raise DomainValidationError(
+                "Either 'target_gym_id' (for User -> Gym) or 'source_gym_id' with 'target_user_id' (for Gym -> User) must be provided."
+            )
+
+    elif conv_type == ConversationTypeEnum.GYM_TO_GYM:
+        if not source_gym_id or not target_gym_id:
+            raise DomainValidationError("source_gym_id and target_gym_id are required for Gym to Gym messaging.")
+
+        try:
+            source_gym = Gym.objects.get(id=source_gym_id)
+            target_gym = Gym.objects.get(id=target_gym_id)
+        except Gym.DoesNotExist:
+            raise ResourceNotFoundError("Gym not found.")
+
+        return get_or_create_gym_to_gym_conversation(initiator_user, source_gym, target_gym)
+
+    else:
+        raise DomainValidationError(f"Unsupported conversation type: {conv_type}")
+
+
+@transaction.atomic
 def send_encrypted_message(
     conversation: Conversation,
     sender_user: User,

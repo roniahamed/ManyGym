@@ -1,48 +1,47 @@
+"""
+API Views for End-to-End Encrypted (E2EE) Messaging.
+Adheres to thin-view architecture: authentication, input validation, service/selector delegation, and response serialization.
+"""
+
+from typing import Optional
 import uuid
-from rest_framework.views import APIView
-from rest_framework.response import Response
+
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from apps.users.models import User
 from apps.gyms.models import Gym
-from apps.messaging.services import (
-    register_user_device_key,
-    register_gym_device_key,
-    get_or_create_user_to_user_conversation,
-    get_or_create_user_to_gym_conversation,
-    get_or_create_gym_to_gym_conversation,
-    send_encrypted_message,
-    mark_conversation_as_read,
+from apps.messaging.rest_api.v1.serializers import (
+    ConversationCreateSerializer,
+    ConversationListSerializer,
+    EncryptedMessageSerializer,
+    GymDeviceKeyRegisterSerializer,
+    MarkReadSerializer,
+    PublicKeyBundleSerializer,
+    SendMessageSerializer,
+    UserDeviceKeyRegisterSerializer,
 )
 from apps.messaging.selectors import (
-    get_user_public_key_bundle,
-    get_gym_public_key_bundle,
-    list_conversations_for_entity,
     get_conversation_by_id,
+    get_gym_public_key_bundle,
+    get_user_public_key_bundle,
     list_conversation_messages,
-    resolve_user_instance,
+    list_conversations_for_entity,
 )
-from apps.messaging.rest_api.v1.serializers import (
-    UserDeviceKeyRegisterSerializer,
-    GymDeviceKeyRegisterSerializer,
-    PublicKeyBundleSerializer,
-    ConversationListSerializer,
-    ConversationCreateSerializer,
-    SendMessageSerializer,
-    EncryptedMessageSerializer,
-    MarkReadSerializer,
+from apps.messaging.services import (
+    initiate_conversation,
+    mark_conversation_as_read,
+    register_gym_device_key,
+    register_user_device_key,
+    send_encrypted_message,
 )
-from common.enums import ConversationTypeEnum, MessageSenderTypeEnum
-from common.exceptions import (
-    DomainValidationError,
-    ResourceNotFoundError,
-    PermissionDeniedError,
-)
+from common.enums import MessageSenderTypeEnum
+from common.exceptions import DomainValidationError, ResourceNotFoundError
 
 
-def resolve_gym_context(request) -> Gym | None:
+def resolve_gym_context(request) -> Optional[Gym]:
     """Helper to determine target gym from gym context header, query parameter, or request body."""
     gym_id = (
         request.query_params.get("gym_id")
@@ -66,10 +65,11 @@ class UserDeviceKeyRegisterView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Register User Device E2EE Key Bundle",
         description="Registers public Identity Key, Signed Prekey, and One-Time Prekeys for client-side E2EE.",
         request=UserDeviceKeyRegisterSerializer,
-        responses={200: UserDeviceKeyRegisterSerializer},
+        responses={200: OpenApiResponse(description="Device E2EE keys registered successfully.")},
     )
     def post(self, request):
         serializer = UserDeviceKeyRegisterSerializer(data=request.data)
@@ -104,10 +104,11 @@ class GymDeviceKeyRegisterView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Register Gym E2EE Key Bundle",
         description="Registers public cryptographic keys for a Gym entity to enable encrypted messaging with users and gyms.",
         request=GymDeviceKeyRegisterSerializer,
-        responses={200: GymDeviceKeyRegisterSerializer},
+        responses={200: OpenApiResponse(description="Gym E2EE keys registered successfully.")},
     )
     def post(self, request):
         serializer = GymDeviceKeyRegisterSerializer(data=request.data)
@@ -148,8 +149,12 @@ class UserPublicKeyBundleView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Get User E2EE Public Key Bundle",
         description="Fetches public keys for recipient user's registered devices.",
+        parameters=[
+            OpenApiParameter(name="user_id", description="Account UUID or Profile UUID of recipient user", required=True, type=str, location=OpenApiParameter.PATH),
+        ],
         responses={200: PublicKeyBundleSerializer(many=True)},
     )
     def get(self, request, user_id):
@@ -164,8 +169,12 @@ class GymPublicKeyBundleView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Get Gym E2EE Public Key Bundle",
         description="Fetches public keys for recipient gym.",
+        parameters=[
+            OpenApiParameter(name="gym_id", description="UUID of recipient Gym entity", required=True, type=str, location=OpenApiParameter.PATH),
+        ],
         responses={200: PublicKeyBundleSerializer(many=True)},
     )
     def get(self, request, gym_id):
@@ -179,15 +188,18 @@ class ConversationListCreateView(APIView):
     Supports:
     - User to User (user_to_user)
     - User to Gym (user_to_gym)
+    - Gym to User (gym_to_user)
     - Gym to Gym (gym_to_gym)
     """
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Messaging"],
         summary="List Conversations",
-        description="Lists active conversations for the authenticated user or active gym context.",
+        description="Lists active conversations for the authenticated user or active gym context with zero N+1 queries.",
         parameters=[
             OpenApiParameter(name="gym_id", description="Optional Gym context UUID", required=False, type=str),
+            OpenApiParameter(name="limit", description="Optional pagination limit (1-100)", required=False, type=int),
         ],
         responses={200: ConversationListSerializer(many=True)},
     )
@@ -202,6 +214,7 @@ class ConversationListCreateView(APIView):
                     limit = min(parsed, 100)
             except (ValueError, TypeError):
                 limit = None
+
         conversations = list_conversations_for_entity(request.user, gym=gym, limit=limit)
         serializer = ConversationListSerializer(
             conversations,
@@ -211,96 +224,26 @@ class ConversationListCreateView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Create / Get Conversation",
-        description="Initiates or retrieves a conversation across supported channel types.",
+        description="Initiates or retrieves an encrypted conversation across supported channel types.",
         request=ConversationCreateSerializer,
-        responses={200: ConversationListSerializer, 201: ConversationListSerializer},
+        responses={201: ConversationListSerializer},
     )
     def post(self, request):
         serializer = ConversationCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
 
-        source_gym_id = data.get("source_gym_id") or getattr(resolve_gym_context(request), "id", None)
-        target_user_id = data.get("target_user_id")
-        target_gym_id = data.get("target_gym_id")
-        conv_type = data.get("conversation_type", "")
-
-        # Auto-detect conversation_type if omitted by client
-        if not conv_type:
-            if source_gym_id and target_gym_id:
-                conv_type = ConversationTypeEnum.GYM_TO_GYM
-            elif (source_gym_id and target_user_id) or target_gym_id:
-                conv_type = ConversationTypeEnum.USER_TO_GYM
-            elif target_user_id:
-                conv_type = ConversationTypeEnum.USER_TO_USER
-            else:
-                raise DomainValidationError("Please provide target_user_id or target_gym_id to start a conversation.")
-
-        if conv_type == ConversationTypeEnum.USER_TO_USER:
-            target_user_id = data.get("target_user_id")
-            if not target_user_id:
-                raise DomainValidationError("target_user_id is required for User to User messaging.")
-            target_user = resolve_user_instance(target_user_id)
-            conversation = get_or_create_user_to_user_conversation(request.user, target_user)
-
-        elif conv_type == ConversationTypeEnum.USER_TO_GYM:
-            source_gym_id = data.get("source_gym_id") or getattr(resolve_gym_context(request), "id", None)
-            target_user_id = data.get("target_user_id")
-            target_gym_id = data.get("target_gym_id")
-
-            if source_gym_id and target_user_id:
-                # Gym initiating chat with User (Gym -> User)
-                try:
-                    source_gym = Gym.objects.get(id=source_gym_id)
-                except Gym.DoesNotExist:
-                    raise ResourceNotFoundError("Gym not found.")
-                target_user = resolve_user_instance(target_user_id)
-
-                conversation = get_or_create_user_to_gym_conversation(
-                    user=target_user,
-                    gym=source_gym,
-                    initiated_by="gym",
-                    initiator_user=request.user,
-                )
-            elif target_gym_id:
-                # User initiating chat with Gym (User -> Gym)
-                try:
-                    target_gym = Gym.objects.get(id=target_gym_id)
-                except Gym.DoesNotExist:
-                    raise ResourceNotFoundError("Target gym not found.")
-
-                conversation = get_or_create_user_to_gym_conversation(
-                    user=request.user,
-                    gym=target_gym,
-                    initiated_by="user",
-                    initiator_user=request.user,
-                )
-            else:
-                raise DomainValidationError(
-                    "Either 'target_gym_id' (for User -> Gym) or 'source_gym_id' with 'target_user_id' (for Gym -> User) must be provided."
-                )
-
-        elif conv_type == ConversationTypeEnum.GYM_TO_GYM:
-            source_gym_id = data.get("source_gym_id")
-            target_gym_id = data.get("target_gym_id")
-            if not source_gym_id or not target_gym_id:
-                raise DomainValidationError("source_gym_id and target_gym_id are required for Gym to Gym messaging.")
-
-            try:
-                source_gym = Gym.objects.get(id=source_gym_id)
-                target_gym = Gym.objects.get(id=target_gym_id)
-            except Gym.DoesNotExist:
-                raise ResourceNotFoundError("Gym not found.")
-
-            conversation = get_or_create_gym_to_gym_conversation(request.user, source_gym, target_gym)
-
-        else:
-            raise DomainValidationError(f"Unsupported conversation type: {conv_type}")
+        gym = resolve_gym_context(request)
+        conversation = initiate_conversation(
+            initiator_user=request.user,
+            validated_data=serializer.validated_data,
+            gym_context=gym,
+        )
 
         out_serializer = ConversationListSerializer(
             conversation,
-            context={"request": request, "gym": resolve_gym_context(request)},
+            context={"request": request, "gym": gym},
         )
         return Response(out_serializer.data, status=status.HTTP_201_CREATED)
 
@@ -312,12 +255,17 @@ class ConversationDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Get Conversation Detail",
+        parameters=[
+            OpenApiParameter(name="conversation_id", description="UUID of the conversation", required=True, type=str, location=OpenApiParameter.PATH),
+            OpenApiParameter(name="gym_id", description="Optional Gym context UUID", required=False, type=str),
+        ],
         responses={200: ConversationListSerializer},
     )
     def get(self, request, conversation_id):
         gym = resolve_gym_context(request)
-        conv = get_conversation_by_id(str(conversation_id), request.user, gym=gym)
+        conv = get_conversation_by_id(str(conversation_id), request.user, gym=gym, prefetch_participants=True)
         serializer = ConversationListSerializer(conv, context={"request": request, "gym": gym})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -329,8 +277,14 @@ class ConversationMessagesView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Get Encrypted Message History",
         description="Retrieves chronological encrypted messages for the conversation.",
+        parameters=[
+            OpenApiParameter(name="conversation_id", description="UUID of the conversation", required=True, type=str, location=OpenApiParameter.PATH),
+            OpenApiParameter(name="limit", description="Pagination limit for message history (max 100, default 50)", required=False, type=int),
+            OpenApiParameter(name="gym_id", description="Optional Gym context UUID", required=False, type=str),
+        ],
         responses={200: EncryptedMessageSerializer(many=True)},
     )
     def get(self, request, conversation_id):
@@ -349,8 +303,13 @@ class ConversationMessagesView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Send Encrypted Message",
         description="Sends an E2EE encrypted message to the conversation with real-time broadcast.",
+        parameters=[
+            OpenApiParameter(name="conversation_id", description="UUID of the conversation", required=True, type=str, location=OpenApiParameter.PATH),
+            OpenApiParameter(name="gym_id", description="Optional Gym context UUID", required=False, type=str),
+        ],
         request=SendMessageSerializer,
         responses={201: EncryptedMessageSerializer},
     )
@@ -396,7 +355,11 @@ class ConversationMarkReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Messaging"],
         summary="Mark Conversation Read",
+        parameters=[
+            OpenApiParameter(name="conversation_id", description="UUID of the conversation", required=True, type=str, location=OpenApiParameter.PATH),
+        ],
         request=MarkReadSerializer,
         responses={200: OpenApiResponse(description="Read count confirmed")},
     )

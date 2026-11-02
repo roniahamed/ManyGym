@@ -1,20 +1,20 @@
+"""
+Serializers for End-to-End Encrypted (E2EE) Messaging.
+Provides input validation, payload shaping, and response representations.
+"""
+
 import uuid
-from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
+from rest_framework import serializers
+
 from apps.messaging.models import (
-    UserDeviceKey,
-    GymDeviceKey,
     Conversation,
     ConversationParticipant,
     EncryptedMessage,
 )
-from apps.users.models import User
-from apps.gyms.models import Gym
 from common.enums import (
     ConversationTypeEnum,
     MessageSenderTypeEnum,
-    MessageDeliveryStatusEnum,
-    KeyAlgorithmEnum,
 )
 
 

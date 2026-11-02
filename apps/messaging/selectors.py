@@ -3,16 +3,18 @@ Read-side queries and selectors for End-to-End Encrypted Messaging.
 Provides optimized, N+1-safe queries for conversations, message histories, and public key bundles.
 """
 
+import uuid
 from typing import Optional, List, Dict, Any
+
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q, QuerySet
 
-from apps.users.models import User
+from apps.users.models import User, UserProfile
 from apps.gyms.models import Gym
 from apps.messaging.models import (
     UserDeviceKey,
     GymDeviceKey,
     Conversation,
-    ConversationParticipant,
     EncryptedMessage,
 )
 from apps.messaging.permissions import assert_can_access_conversation
@@ -25,9 +27,6 @@ def resolve_user_instance(identifier: str) -> User:
     - User.id (Account UUID)
     - UserProfile.id (Profile UUID)
     """
-    import uuid
-    from apps.users.models import UserProfile
-
     try:
         uuid_val = uuid.UUID(str(identifier))
     except (ValueError, TypeError, AttributeError):
@@ -72,9 +71,6 @@ def get_gym_public_key_bundle(gym_id: str) -> List[Dict[str, Any]]:
     Returns active public cryptographic key bundles for a gym entity.
     Validates UUID format and verifies gym existence.
     """
-    import uuid
-    from django.core.exceptions import ValidationError as DjangoValidationError
-
     try:
         uuid_val = uuid.UUID(str(gym_id))
     except (ValueError, TypeError, AttributeError):
@@ -149,9 +145,6 @@ def get_conversation_by_id(
     Handles UUID format validation safely.
     Allows skipping prefetching participants when only validating access or dispatching messages.
     """
-    import uuid
-    from django.core.exceptions import ValidationError as DjangoValidationError
-
     try:
         uuid_val = uuid.UUID(str(conversation_id))
     except (ValueError, TypeError, AttributeError):
