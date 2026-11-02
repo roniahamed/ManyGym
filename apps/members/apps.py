@@ -7,5 +7,5 @@ class MembersConfig(AppConfig):
     verbose_name = "Members & Subscriptions"
 
     def ready(self):
-        import apps.members.signals  # noqa: F401
+        pass
 

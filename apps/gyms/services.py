@@ -645,14 +645,14 @@ def unfollow_gym(user: User, gym_id) -> bool:
     return True
 
 
-@transaction.atomic
 def auto_follow_gym_for_member(user: User, gym: Gym) -> Optional[GymFollow]:
     """
     Automatically follows a gym when a member connects their user account.
     Gym members can unfollow later at their own discretion.
+    Uses single-query atomic insert with ON CONFLICT DO NOTHING to eliminate savepoints and extra queries.
     """
     if not user or not gym:
         return None
-    follow_instance, _ = GymFollow.objects.get_or_create(user=user, gym=gym)
-    return follow_instance
+    created = GymFollow.objects.bulk_create([GymFollow(user=user, gym=gym)], ignore_conflicts=True)
+    return created[0] if created else None
 

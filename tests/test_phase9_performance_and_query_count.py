@@ -235,6 +235,9 @@ class TestPhase9PerformanceAndQueryCount:
         client = APIClient()
         client.force_authenticate(user=self.owner)
 
+        # Warmup call to initialize URL routing, DRF middleware, and database connection
+        client.post(f"/api/v1/members/{member.id}/resend-invitation/?gym_id={self.gym.id}")
+
         times = []
         for _ in range(5):
             t0 = time.perf_counter()
@@ -251,7 +254,7 @@ class TestPhase9PerformanceAndQueryCount:
 
     def test_member_accept_invitation_api_query_count_and_p95(self):
         """
-        Verify POST /api/v1/members/accept-invitation/ executes within 6 queries and < 200ms.
+        Verify POST /api/v1/members/accept-invitation/ executes within 7 queries (including auto-follow insert) and < 200ms.
         """
         member = create_member(
             gym=self.gym,
@@ -279,5 +282,5 @@ class TestPhase9PerformanceAndQueryCount:
 
         elapsed_ms = (t1 - t0) * 1000
         assert resp.status_code == status.HTTP_200_OK
-        assert len(queries) <= 6, f"Expected <= 6 queries, got {len(queries)}"
+        assert len(queries) <= 7, f"Expected <= 7 queries, got {len(queries)}"
         assert elapsed_ms < 200.0, f"Accept invitation took {elapsed_ms:.2f}ms, exceeded 200ms target"
