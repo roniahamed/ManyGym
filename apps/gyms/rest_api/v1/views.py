@@ -23,6 +23,9 @@ from apps.gyms.rest_api.v1.serializers import (
     GymBlockUserCreateSerializer,
     GymUserSearchToBlockSerializer,
     GymAccessControlActionSerializer,
+    GymFollowerItemSerializer,
+    FollowedGymItemSerializer,
+    GymFollowActionResponseSerializer,
 )
 from apps.gyms.services import (
     create_gym,
@@ -37,6 +40,8 @@ from apps.gyms.services import (
     block_user_for_gym,
     unblock_user_for_gym,
     apply_access_control_action,
+    follow_gym,
+    unfollow_gym,
 )
 from apps.gyms.selectors import (
     get_gym_overview,
@@ -46,6 +51,8 @@ from apps.gyms.selectors import (
     get_gym_settings,
     list_blocked_users_for_gym,
     search_users_to_block_for_gym,
+    list_gym_followers,
+    list_user_followed_gyms,
 )
 from common.exceptions import (
     DomainValidationError,
@@ -792,3 +799,124 @@ Executes administrative lifecycle transitions on a gym workspace:
             user=request.user,
         )
         return Response(GymSettingSerializer(updated_settings).data, status=status.HTTP_200_OK)
+
+
+class GymFollowToggleView(APIView):
+    """
+    API endpoint for following or unfollowing a Gym.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Social & Follow"],
+        summary="Follow a Gym",
+        description="Follows a specified gym. Blocked users or inactive/deleted gyms are rejected.",
+        responses={
+            201: OpenApiResponse(response=GymFollowActionResponseSerializer, description="Successfully followed gym."),
+            200: OpenApiResponse(response=GymFollowActionResponseSerializer, description="Already following gym."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Gym is inactive or invalid ID."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="User is blocked from following this gym."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
+        },
+    )
+    def post(self, request, gym_id):
+        follow_obj, created = follow_gym(user=request.user, gym_id=gym_id)
+        status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        message = "Successfully followed gym." if created else "Already following gym."
+        return Response(
+            {
+                "message": message,
+                "is_following": True,
+                "gym_id": str(follow_obj.gym.id),
+                "gym_name": follow_obj.gym.name,
+            },
+            status=status_code,
+        )
+
+    @extend_schema(
+        tags=["Gym Social & Follow"],
+        summary="Unfollow a Gym",
+        description="Unfollows a specified gym.",
+        responses={
+            200: OpenApiResponse(response=GymFollowActionResponseSerializer, description="Successfully unfollowed gym."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Invalid gym ID."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Not currently following gym or gym not found."),
+        },
+    )
+    def delete(self, request, gym_id):
+        unfollow_gym(user=request.user, gym_id=gym_id)
+        return Response(
+            {
+                "message": "Successfully unfollowed gym.",
+                "is_following": False,
+                "gym_id": str(gym_id),
+                "gym_name": "",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class GymFollowersListView(APIView):
+    """
+    API endpoint for listing followers of a gym.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Social & Follow"],
+        summary="List Gym Followers",
+        description="Lists all users who follow the specified gym.",
+        responses={
+            200: OpenApiResponse(response=GymFollowerItemSerializer(many=True), description="List of gym followers."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
+        },
+    )
+    def get(self, request, gym_id):
+        followers_qs = list_gym_followers(gym_id=gym_id, requesting_user=request.user)
+        data = [
+            {
+                "user_id": f.user.id,
+                "email": f.user.email,
+                "first_name": f.user.first_name,
+                "last_name": f.user.last_name,
+                "full_name": f"{f.user.first_name} {f.user.last_name}".strip(),
+                "avatar_url": getattr(getattr(f.user, "profile", None), "avatar_url", None),
+                "followed_at": f.created_at,
+            }
+            for f in followers_qs
+        ]
+        return Response(GymFollowerItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
+
+
+class UserFollowedGymsListView(APIView):
+    """
+    API endpoint for listing gyms followed by the current user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Social & Follow"],
+        summary="List Gyms Followed by User",
+        description="Retrieves a list of all gyms followed by the authenticated user.",
+        responses={
+            200: OpenApiResponse(response=FollowedGymItemSerializer(many=True), description="List of followed gyms."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def get(self, request):
+        followed_qs = list_user_followed_gyms(user=request.user)
+        data = [
+            {
+                "gym_id": f.gym.id,
+                "name": f.gym.name,
+                "primary_type": f.gym.primary_type,
+                "profile_picture_url": f.gym.profile_picture_url,
+                "followed_at": f.created_at,
+            }
+            for f in followed_qs
+        ]
+        return Response(FollowedGymItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
+

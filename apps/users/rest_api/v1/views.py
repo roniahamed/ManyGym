@@ -18,6 +18,10 @@ from apps.users.rest_api.v1.serializers import (
     RegisterResponseSerializer,
     VerifySignupResponseSerializer,
     UserProfileMeResponseSerializer,
+    FollowUserItemSerializer,
+    UserFollowActionResponseSerializer,
+    FollowActionSerializer,
+    FollowActionResponseSerializer,
 )
 from apps.users.services import (
     register_user,
@@ -28,12 +32,28 @@ from apps.users.services import (
     reset_password,
     update_user_profile,
     change_password,
+    follow_user,
+    unfollow_user,
 )
-from apps.users.selectors import get_user_by_id
+from apps.gyms.services import (
+    follow_gym,
+    unfollow_gym,
+)
+from apps.users.selectors import (
+    get_user_by_id,
+    list_user_followers,
+    list_user_following,
+)
+import uuid
+
+from apps.gyms.models import Gym
+from apps.users.models import User
 from apps.authentication.services import issue_context_token
 from apps.gyms.selectors import get_accessible_gyms_for_user
 from common.enums import TokenContextType
+from common.exceptions import DomainValidationError, ResourceNotFoundError
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
+
 
 
 class RegisterView(APIView):
@@ -700,3 +720,294 @@ Allows an authenticated logged-in user to change their password by validating th
             {"message": "Password changed successfully."},
             status=status.HTTP_200_OK,
         )
+
+
+class UserFollowToggleView(APIView):
+    """
+    API endpoint for following or unfollowing a public user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Social & Follow"],
+        summary="Follow a User",
+        description="Follows a target user if the target user account is public and active.",
+        responses={
+            201: OpenApiResponse(response=UserFollowActionResponseSerializer, description="Successfully followed user."),
+            200: OpenApiResponse(response=UserFollowActionResponseSerializer, description="Already following user."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Invalid request (e.g. self-follow)."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Target user is private."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Target user not found."),
+        },
+    )
+    def post(self, request, user_id):
+        follow_obj, created = follow_user(follower=request.user, target_user_id=user_id)
+        status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        message = "Successfully followed user." if created else "Already following user."
+        return Response(
+            {
+                "message": message,
+                "is_following": True,
+                "target_user_id": str(user_id),
+            },
+            status=status_code,
+        )
+
+    @extend_schema(
+        tags=["User Social & Follow"],
+        summary="Unfollow a User",
+        description="Unfollows a target user that was previously followed.",
+        responses={
+            200: OpenApiResponse(response=UserFollowActionResponseSerializer, description="Successfully unfollowed user."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Invalid target user ID."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Not currently following user or user not found."),
+        },
+    )
+    def delete(self, request, user_id):
+        unfollow_user(follower=request.user, target_user_id=user_id)
+        return Response(
+            {
+                "message": "Successfully unfollowed user.",
+                "is_following": False,
+                "target_user_id": str(user_id),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class UserFollowersListView(APIView):
+    """
+    API endpoint for listing followers of a specific user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Social & Follow"],
+        summary="List User Followers",
+        description="Lists all users who follow the specified user. Restricted if the target user is private.",
+        responses={
+            200: OpenApiResponse(response=FollowUserItemSerializer(many=True), description="List of user followers."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="User account is private."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="User not found."),
+        },
+    )
+    def get(self, request, user_id):
+        followers_qs = list_user_followers(user_id=user_id, requesting_user=request.user)
+        data = [
+            {
+                "user_id": f.follower.id,
+                "email": f.follower.email,
+                "first_name": f.follower.first_name,
+                "last_name": f.follower.last_name,
+                "full_name": f"{f.follower.first_name} {f.follower.last_name}".strip(),
+                "avatar_url": getattr(getattr(f.follower, "profile", None), "avatar_url", None),
+                "is_private": getattr(getattr(f.follower, "profile", None), "is_private", False),
+                "followed_at": f.created_at,
+            }
+            for f in followers_qs
+        ]
+        return Response(FollowUserItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
+
+
+class UserFollowingListView(APIView):
+    """
+    API endpoint for listing accounts followed by a specific user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Social & Follow"],
+        summary="List User Following",
+        description="Lists all users that the specified user is following. Restricted if the target user is private.",
+        responses={
+            200: OpenApiResponse(response=FollowUserItemSerializer(many=True), description="List of users followed."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="User account is private."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="User not found."),
+        },
+    )
+    def get(self, request, user_id):
+        following_qs = list_user_following(user_id=user_id, requesting_user=request.user)
+        data = [
+            {
+                "user_id": f.followed_user.id,
+                "email": f.followed_user.email,
+                "first_name": f.followed_user.first_name,
+                "last_name": f.followed_user.last_name,
+                "full_name": f"{f.followed_user.first_name} {f.followed_user.last_name}".strip(),
+                "avatar_url": getattr(getattr(f.followed_user, "profile", None), "avatar_url", None),
+                "is_private": getattr(getattr(f.followed_user, "profile", None), "is_private", False),
+                "followed_at": f.created_at,
+            }
+            for f in following_qs
+        ]
+        return Response(FollowUserItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
+
+
+def resolve_target_entity(target_id, target_type=None) -> tuple[str, uuid.UUID]:
+    """
+    Validates target_id and auto-detects whether the entity is a Gym or a User.
+    """
+    try:
+        target_uuid = uuid.UUID(str(target_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid target ID format. Must be a valid UUID.")
+
+    resolved_type = (target_type or "").strip().lower()
+    if not resolved_type:
+        # Auto-detect whether target_id is a Gym or User from database
+        if Gym.objects.filter(id=target_uuid).exists():
+            resolved_type = "gym"
+        elif User.objects.filter(id=target_uuid).exists():
+            resolved_type = "user"
+        else:
+            raise ResourceNotFoundError("Target entity (User or Gym) not found.")
+
+    return resolved_type, target_uuid
+
+
+class UnifiedFollowView(APIView):
+    """
+    Unified API endpoint for following and unfollowing Users or Gyms.
+    Target entity type (user vs gym) is automatically detected if omitted.
+    Supports both POST (follow/unfollow) and DELETE (unfollow).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Unified Social Follow"],
+        summary="Follow or Unfollow a User or Gym",
+        description="""
+### Summary
+Unified single endpoint to follow or unfollow any public User or Gym.
+
+### Auto-Detection
+`target_type` is **automatically detected** from the database (whether UUID is a Gym or User).
+
+### Request
+- Pass `target_id` (or `id`) in JSON body (`{"target_id": "<uuid>"}`) or directly in URL path (`/api/v1/follows/<target_id>/`).
+- Optional `action`: `"follow"` (default) or `"unfollow"`.
+        """,
+        request=FollowActionSerializer,
+        responses={
+            201: OpenApiResponse(response=FollowActionResponseSerializer, description="Successfully followed target."),
+            200: OpenApiResponse(response=FollowActionResponseSerializer, description="Successfully unfollowed target or already following."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure or self-follow attempt."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Target user is private or user is blocked by gym."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Target entity not found."),
+        },
+    )
+    def post(self, request, target_id=None):
+        data = {}
+        if request.query_params:
+            data.update(request.query_params.dict())
+        if request.data and isinstance(request.data, dict):
+            data.update(request.data)
+        if target_id:
+            data["target_id"] = str(target_id)
+        serializer = FollowActionSerializer(data=data, context={"target_id": target_id})
+        serializer.is_valid(raise_exception=True)
+
+        raw_id = serializer.validated_data["target_id"]
+        raw_type = serializer.validated_data.get("target_type")
+        action = serializer.validated_data.get("action", "follow").lower()
+
+        target_type, resolved_id = resolve_target_entity(raw_id, raw_type)
+
+        if action == "unfollow":
+            return self._perform_unfollow(request.user, target_type, resolved_id)
+        return self._perform_follow(request.user, target_type, resolved_id)
+
+    @extend_schema(
+        tags=["Unified Social Follow"],
+        summary="Unfollow a User or Gym",
+        description="""
+### Summary
+Unfollows a previously followed User or Gym.
+
+### Auto-Detection
+`target_type` is **automatically detected**.
+
+### Parameters
+Parameters can be sent via:
+1. URL path: `/api/v1/follows/<target_id>/`
+2. JSON body: `{"target_id": "<uuid>"}`
+3. Query param: `?target_id=<uuid>`
+        """,
+        request=FollowActionSerializer,
+        responses={
+            200: OpenApiResponse(response=FollowActionResponseSerializer, description="Successfully unfollowed target."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Not currently following target or target not found."),
+        },
+    )
+    def delete(self, request, target_id=None):
+        data = {}
+        if request.query_params:
+            data.update(request.query_params.dict())
+        if request.data and isinstance(request.data, dict):
+            data.update(request.data)
+        if target_id:
+            data["target_id"] = str(target_id)
+        serializer = FollowActionSerializer(data=data, context={"target_id": target_id})
+        serializer.is_valid(raise_exception=True)
+
+        raw_id = serializer.validated_data["target_id"]
+        raw_type = serializer.validated_data.get("target_type")
+
+        target_type, resolved_id = resolve_target_entity(raw_id, raw_type)
+        return self._perform_unfollow(request.user, target_type, resolved_id)
+
+    def _perform_follow(self, user, target_type: str, target_id):
+        if target_type == "user":
+            follow_obj, created = follow_user(follower=user, target_user_id=target_id)
+            target_name = f"{follow_obj.followed_user.first_name} {follow_obj.followed_user.last_name}".strip()
+            status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            message = "Successfully followed user." if created else "Already following user."
+        elif target_type == "gym":
+            follow_obj, created = follow_gym(user=user, gym_id=target_id)
+            target_name = follow_obj.gym.name
+            status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            message = "Successfully followed gym." if created else "Already following gym."
+        else:
+            raise DomainValidationError(f"Invalid target_type '{target_type}'. Must be 'user' or 'gym'.")
+
+        return Response(
+            {
+                "message": message,
+                "is_following": True,
+                "target_type": target_type,
+                "target_id": str(target_id),
+                "target_name": target_name,
+            },
+            status=status_code,
+        )
+
+    def _perform_unfollow(self, user, target_type: str, target_id):
+        if target_type == "user":
+            unfollow_user(follower=user, target_user_id=target_id)
+            message = "Successfully unfollowed user."
+        elif target_type == "gym":
+            unfollow_gym(user=user, gym_id=target_id)
+            message = "Successfully unfollowed gym."
+        else:
+            raise DomainValidationError(f"Invalid target_type '{target_type}'. Must be 'user' or 'gym'.")
+
+        return Response(
+            {
+                "message": message,
+                "is_following": False,
+                "target_type": target_type,
+                "target_id": str(target_id),
+                "target_name": None,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+

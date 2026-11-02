@@ -241,6 +241,11 @@ def accept_member_invitation(token: str, user: User) -> Member:
     member.joining_status = MemberJoiningStatus.JOINED
     member.invitation_token = None
     member.save(update_fields=["user", "joining_status", "invitation_token", "updated_at"])
+
+    # Auto-follow connected gym by default (member can unfollow later)
+    from apps.gyms.services import auto_follow_gym_for_member
+    auto_follow_gym_for_member(user=user, gym=member.gym)
+
     return member
 
 

@@ -1,15 +1,17 @@
+import uuid
 import secrets
 from datetime import timedelta
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from apps.users.models import User, UserProfile, OTPVerification
+from apps.users.models import User, UserProfile, OTPVerification, UserFollow
 from apps.users.tasks import send_email_task
 from common.security import hash_otp
 from common.exceptions import (
     DomainValidationError,
     ResourceConflictError,
     ResourceNotFoundError,
+    PermissionDeniedError,
 )
 from common.enums import UserStatus
 
@@ -301,6 +303,7 @@ def update_user_profile(user: User, **profile_data) -> User:
         "date_of_birth",
         "sex",
         "nationality",
+        "is_private",
     ]
     for field in profile_allowed:
         if field in profile_data and profile_data[field] is not None:
@@ -322,3 +325,55 @@ def change_password(user: User, current_password: str, new_password: str) -> Non
         raise DomainValidationError("New password must be at least 8 characters long.")
     user.set_password(new_password)
     user.save(update_fields=["password"])
+
+
+@transaction.atomic
+def follow_user(follower: User, target_user_id) -> tuple[UserFollow, bool]:
+    """
+    Follows a target user if target user is active, not self, and not private.
+    Returns (UserFollow, created: bool).
+    """
+    try:
+        target_uuid = uuid.UUID(str(target_user_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid target user ID.")
+
+    if follower.id == target_uuid:
+        raise DomainValidationError("You cannot follow yourself.")
+
+    try:
+        target_user = User.objects.select_related("profile").get(id=target_uuid, is_active=True)
+    except User.DoesNotExist:
+        raise ResourceNotFoundError("Target user not found or is inactive.")
+
+    profile = getattr(target_user, "profile", None)
+    if profile and profile.is_private:
+        raise PermissionDeniedError("This user account is private.")
+
+    follow_instance, created = UserFollow.objects.get_or_create(
+        follower=follower,
+        followed_user=target_user,
+    )
+    return follow_instance, created
+
+
+@transaction.atomic
+def unfollow_user(follower: User, target_user_id) -> bool:
+    """
+    Unfollows a target user.
+    """
+    try:
+        target_uuid = uuid.UUID(str(target_user_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid target user ID.")
+
+    deleted_count, _ = UserFollow.objects.filter(
+        follower=follower,
+        followed_user_id=target_uuid,
+    ).delete()
+
+    if deleted_count == 0:
+        raise ResourceNotFoundError("You are not currently following this user.")
+
+    return True
+

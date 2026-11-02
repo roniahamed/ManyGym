@@ -11,12 +11,14 @@ from apps.gyms.models import (
     GymGallery,
     GymSetting,
     GymBlockedUser,
+    GymFollow,
 )
 from apps.access_control.models import Role, GymStaffAssignment
 from apps.users.models import User
 from common.exceptions import (
     DomainValidationError,
     ResourceNotFoundError,
+    PermissionDeniedError,
 )
 from common.enums import (
     GymTypeEnum,
@@ -584,3 +586,68 @@ def apply_access_control_action(gym: Gym, action: str, user: User) -> GymSetting
     settings_obj.save()
     logger.info("Applied access control '%s' to gym %s by user %s", action, gym.name, user.email)
     return settings_obj
+
+
+@transaction.atomic
+def follow_gym(user: User, gym_id) -> tuple[GymFollow, bool]:
+    """
+    Enables an authenticated user to follow a Gym entity.
+    Checks:
+    - Target gym exists, is not deleted, and is not deactivated.
+    - User is not blocked by the gym.
+    Returns:
+    - (GymFollow instance, created: bool)
+    """
+    try:
+        gym_uuid = uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid gym ID.")
+
+    try:
+        gym = Gym.objects.select_related("settings").get(id=gym_uuid)
+    except Gym.DoesNotExist:
+        raise ResourceNotFoundError("Gym not found.")
+
+    settings_obj = gym.get_settings()
+    if settings_obj.is_deleted or settings_obj.is_deactivated:
+        raise DomainValidationError("This gym is currently inactive or unavailable.")
+
+    # Check if user is blocked by gym
+    if GymBlockedUser.objects.filter(gym=gym, user=user).exists():
+        raise PermissionDeniedError("You are blocked from following this gym.")
+
+    follow_instance, created = GymFollow.objects.get_or_create(
+        user=user,
+        gym=gym,
+    )
+    return follow_instance, created
+
+
+@transaction.atomic
+def unfollow_gym(user: User, gym_id) -> bool:
+    """
+    Unfollows a gym previously followed by user.
+    """
+    try:
+        gym_uuid = uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid gym ID.")
+
+    deleted_count, _ = GymFollow.objects.filter(user=user, gym_id=gym_uuid).delete()
+    if deleted_count == 0:
+        raise ResourceNotFoundError("You are not currently following this gym.")
+
+    return True
+
+
+@transaction.atomic
+def auto_follow_gym_for_member(user: User, gym: Gym) -> Optional[GymFollow]:
+    """
+    Automatically follows a gym when a member connects their user account.
+    Gym members can unfollow later at their own discretion.
+    """
+    if not user or not gym:
+        return None
+    follow_instance, _ = GymFollow.objects.get_or_create(user=user, gym=gym)
+    return follow_instance
+

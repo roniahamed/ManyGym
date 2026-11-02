@@ -346,3 +346,36 @@ class GymBlockedUser(models.Model):
 
     def __str__(self):
         return f"{self.gym.name} blocked {self.user.email}"
+
+
+class GymFollow(models.Model):
+    """
+    Represents an intentional follow relationship from a user to a gym.
+    Gym members automatically follow their connected gyms by default, and can unfollow later.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="followed_gyms",
+    )
+    gym = models.ForeignKey(
+        Gym,
+        on_delete=models.CASCADE,
+        related_name="followers",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "gym_follows"
+        verbose_name = "Gym Follow"
+        verbose_name_plural = "Gym Follows"
+        unique_together = (("user", "gym"),)
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"], name="idx_gfollow_usr_created"),
+            models.Index(fields=["gym", "-created_at"], name="idx_gfollow_gym_created"),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} follows {self.gym.name}"

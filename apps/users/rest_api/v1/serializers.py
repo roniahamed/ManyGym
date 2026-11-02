@@ -14,6 +14,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "date_of_birth",
             "sex",
             "nationality",
+            "is_private",
             "created_at",
             "updated_at",
         ]
@@ -92,6 +93,7 @@ class UpdateProfileSerializer(serializers.Serializer):
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     sex = StrictCharField(required=False, allow_blank=True, max_length=20)
     nationality = StrictCharField(required=False, allow_blank=True, max_length=100)
+    is_private = serializers.BooleanField(required=False)
 
     def validate(self, attrs):
         validate_uploaded_image(attrs.get("avatar"), field_name="avatar")
@@ -140,4 +142,64 @@ class UserProfileMeResponseSerializer(serializers.Serializer):
     user = UserSerializer()
     current_context = CurrentContextSerializer()
     accessible_gyms = AccessibleGymItemSerializer(many=True)
+
+
+class FollowUserItemSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField(help_text="User unique identifier.")
+    email = serializers.EmailField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    full_name = serializers.CharField()
+    avatar_url = serializers.CharField(allow_null=True)
+    is_private = serializers.BooleanField()
+    followed_at = serializers.DateTimeField()
+
+
+class UserFollowActionResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    is_following = serializers.BooleanField()
+    target_user_id = serializers.UUIDField()
+
+
+class FollowActionSerializer(serializers.Serializer):
+    target_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text="UUID of target User or Gym. Auto-detected whether user or gym.",
+    )
+    id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text="Alias for target_id.",
+    )
+    target_type = serializers.ChoiceField(
+        choices=["user", "gym"],
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="Optional entity type ('user' or 'gym'). Auto-detected automatically if omitted.",
+    )
+    action = serializers.ChoiceField(
+        choices=["follow", "unfollow"],
+        default="follow",
+        required=False,
+        help_text="Action to perform: 'follow' (default) or 'unfollow'.",
+    )
+
+    def validate(self, attrs):
+        tid = attrs.get("target_id") or attrs.get("id") or self.context.get("target_id")
+        if not tid:
+            raise serializers.ValidationError("Please provide target_id (or id).")
+        attrs["target_id"] = tid
+        return attrs
+
+
+
+class FollowActionResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    is_following = serializers.BooleanField()
+    target_type = serializers.CharField()
+    target_id = serializers.UUIDField()
+    target_name = serializers.CharField(allow_null=True, required=False)
+
 

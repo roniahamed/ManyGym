@@ -75,6 +75,10 @@ class UserProfile(models.Model):
     date_of_birth = models.DateField(blank=True, null=True)
     sex = models.CharField(max_length=20, blank=True, null=True)
     nationality = models.CharField(max_length=100, blank=True, null=True)
+    is_private = models.BooleanField(
+        default=False,
+        help_text="If True, this user's profile is private and cannot be followed by other users.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -194,3 +198,44 @@ class OTPVerification(models.Model):
 
 
 OTPVerification.otp_code = OTPCodeDescriptor("otp_code")
+
+
+class UserFollow(models.Model):
+    """
+    Represents an intentional follow relationship from one user to another public user.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    follower = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="following_relations",
+    )
+    followed_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="follower_relations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "user_follows"
+        verbose_name = "User Follow"
+        verbose_name_plural = "User Follows"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["follower", "followed_user"],
+                name="unique_user_follow",
+            ),
+            models.CheckConstraint(
+                check=~models.Q(follower=models.F("followed_user")),
+                name="prevent_self_user_follow",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["follower", "-created_at"], name="idx_ufollow_flwr_created"),
+            models.Index(fields=["followed_user", "-created_at"], name="idx_ufollow_trgt_created"),
+        ]
+
+    def __str__(self):
+        return f"{self.follower.email} follows {self.followed_user.email}"

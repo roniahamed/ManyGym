@@ -8,6 +8,10 @@ from apps.users.rest_api.v1.views import (
     ResetPasswordView,
     UserProfileMeView,
     ChangePasswordView,
+    UserFollowToggleView,
+    UserFollowersListView,
+    UserFollowingListView,
+    UnifiedFollowView,
 )
 
 urlpatterns = [
@@ -19,4 +23,10 @@ urlpatterns = [
     path("reset-password/", ResetPasswordView.as_view(), name="reset-password"),
     path("me/", UserProfileMeView.as_view(), name="me"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
+    # Social follow routes
+    path("follow/", UnifiedFollowView.as_view(), name="user-unified-follow"),
+    path("<uuid:user_id>/follow/", UserFollowToggleView.as_view(), name="user-follow-toggle"),
+    path("<uuid:user_id>/followers/", UserFollowersListView.as_view(), name="user-followers-list"),
+    path("<uuid:user_id>/following/", UserFollowingListView.as_view(), name="user-following-list"),
 ]
+

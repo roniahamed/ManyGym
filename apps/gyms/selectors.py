@@ -2,9 +2,10 @@ import uuid
 from typing import List, Dict, Any, Optional, Iterator
 from django.db import models
 from django.db.models import Q
-from apps.gyms.models import Gym, GymSetting, GymBlockedUser
+from apps.gyms.models import Gym, GymSetting, GymBlockedUser, GymFollow
 from apps.access_control.models import GymStaffAssignment
 from apps.users.models import User
+from common.exceptions import DomainValidationError, ResourceNotFoundError
 
 
 def stream_accessible_gyms_for_user(user) -> Iterator[Dict[str, Any]]:
@@ -323,3 +324,43 @@ def search_users_to_block_for_gym(
         )
 
     return qs.order_by("first_name", "last_name", "email")[:limit]
+
+
+def list_gym_followers(gym_id, requesting_user: Optional[User] = None) -> models.QuerySet[GymFollow]:
+    """
+    Returns a QuerySet of GymFollow records representing users following this gym.
+    """
+    try:
+        gym_uuid = uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid gym ID.")
+
+    try:
+        gym = Gym.objects.only("id").get(id=gym_uuid)
+    except Gym.DoesNotExist:
+        raise ResourceNotFoundError("Gym not found.")
+
+    return (
+        GymFollow.objects.filter(gym=gym)
+        .select_related("user__profile")
+        .order_by("-created_at")
+    )
+
+
+def list_user_followed_gyms(user: User) -> models.QuerySet[GymFollow]:
+    """
+    Returns a QuerySet of GymFollow records representing gyms followed by the specified user.
+    """
+    return (
+        GymFollow.objects.filter(user=user)
+        .select_related("gym")
+        .order_by("-created_at")
+    )
+
+
+def is_following_gym(user: User, gym: Gym) -> bool:
+    """Returns True if user is actively following gym."""
+    if not user or not user.is_authenticated or not gym:
+        return False
+    return GymFollow.objects.filter(user=user, gym=gym).exists()
+

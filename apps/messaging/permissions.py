@@ -51,8 +51,10 @@ def can_user_message_gym(user, gym: Gym) -> bool:
         # User is allowed if they are a member or if user is owner/staff
         if is_member or gym.owner_user_id == user.id:
             return True
-        # Extensible: check social follow relationship if implemented
-        return True
+        from apps.gyms.models import GymFollow
+        if GymFollow.objects.filter(gym=gym, user=user).exists():
+            return True
+        raise DomainValidationError("This gym only accepts messages from followers and members.")
 
     return True
 

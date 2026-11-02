@@ -489,3 +489,29 @@ class GymAccessControlActionSerializer(serializers.Serializer):
         required=True,
         help_text="Lifecycle state transition action.",
     )
+
+
+class GymFollowerItemSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField(help_text="User unique identifier.")
+    email = serializers.EmailField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    full_name = serializers.CharField()
+    avatar_url = serializers.CharField(allow_null=True)
+    followed_at = serializers.DateTimeField()
+
+
+class FollowedGymItemSerializer(serializers.Serializer):
+    gym_id = serializers.UUIDField(help_text="Gym unique identifier.")
+    name = serializers.CharField()
+    primary_type = serializers.CharField()
+    profile_picture_url = serializers.CharField(allow_null=True)
+    followed_at = serializers.DateTimeField()
+
+
+class GymFollowActionResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    is_following = serializers.BooleanField()
+    gym_id = serializers.UUIDField()
+    gym_name = serializers.CharField()
+

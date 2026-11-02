@@ -7,6 +7,7 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
     SpectacularRedocView,
 )
+from apps.users.rest_api.v1.views import UnifiedFollowView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -36,6 +37,11 @@ urlpatterns = [
     path("api/v1/reports/", include("apps.reports.rest_api.v1.reports_urls")),
     # Phase 9: Real-time End-to-End Encrypted Messaging (User-to-User, User-to-Gym, Gym-to-Gym)
     path("api/v1/messaging/", include("apps.messaging.rest_api.v1.urls")),
+    # Unified Social Follow Endpoint (User & Gym Follow/Unfollow)
+    path("api/v1/follows/", UnifiedFollowView.as_view(), name="unified-follow"),
+    path("api/v1/follows/<uuid:target_id>/", UnifiedFollowView.as_view(), name="unified-follow-detail"),
+    path("api/v1/follow/", UnifiedFollowView.as_view(), name="unified-follow-alias"),
+    path("api/v1/follow/<uuid:target_id>/", UnifiedFollowView.as_view(), name="unified-follow-alias-detail"),
     # OpenAPI Schema & API Documentation
 
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),

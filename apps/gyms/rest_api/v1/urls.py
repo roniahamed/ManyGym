@@ -12,6 +12,9 @@ from apps.gyms.rest_api.v1.views import (
     GymBlockedUserDetailView,
     GymSearchUsersToBlockView,
     GymAccessControlActionView,
+    GymFollowToggleView,
+    GymFollowersListView,
+    UserFollowedGymsListView,
 )
 
 app_name = "gyms_v1"
@@ -30,4 +33,9 @@ urlpatterns = [
     path("settings/blocked-users/<uuid:user_id>/", GymBlockedUserDetailView.as_view(), name="gym-settings-blocked-user-detail"),
     path("settings/blocked-users/search/", GymSearchUsersToBlockView.as_view(), name="gym-settings-blocked-users-search"),
     path("settings/access-control/", GymAccessControlActionView.as_view(), name="gym-settings-access-control"),
+    # Social follow routes
+    path("followed/", UserFollowedGymsListView.as_view(), name="gym-followed-list"),
+    path("<uuid:gym_id>/follow/", GymFollowToggleView.as_view(), name="gym-follow-toggle"),
+    path("<uuid:gym_id>/followers/", GymFollowersListView.as_view(), name="gym-followers-list"),
 ]
+
