@@ -111,14 +111,16 @@ class ConversationParticipantSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.UUIDField(allow_null=True))
     def get_profile_id(self, obj):
-        if obj.user and hasattr(obj.user, "profile") and obj.user.profile:
-            return obj.user.profile.id
+        if obj.user:
+            profile = getattr(obj.user, "profile", None)
+            return profile.id if profile else None
         return None
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_avatar_url(self, obj):
-        if obj.user and hasattr(obj.user, "profile") and obj.user.profile:
-            return obj.user.profile.avatar_url
+        if obj.user:
+            profile = getattr(obj.user, "profile", None)
+            return profile.avatar_url if profile else None
         return None
 
 
@@ -146,7 +148,7 @@ class ConversationListSerializer(serializers.ModelSerializer):
         """Helper for frontend UI displaying the other entity's name and type."""
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        gym = getattr(request, "gym", None)
+        gym = self.context.get("gym") or getattr(request, "gym", None)
 
         if obj.conversation_type == ConversationTypeEnum.USER_TO_USER and user:
             other_user = obj.user_b if obj.user_a_id == user.id else obj.user_a

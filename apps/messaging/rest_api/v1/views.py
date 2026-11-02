@@ -193,7 +193,16 @@ class ConversationListCreateView(APIView):
     )
     def get(self, request):
         gym = resolve_gym_context(request)
-        conversations = list_conversations_for_entity(request.user, gym=gym)
+        limit_param = request.query_params.get("limit")
+        limit = None
+        if limit_param is not None:
+            try:
+                parsed = int(limit_param)
+                if parsed > 0:
+                    limit = min(parsed, 100)
+            except (ValueError, TypeError):
+                limit = None
+        conversations = list_conversations_for_entity(request.user, gym=gym, limit=limit)
         serializer = ConversationListSerializer(
             conversations,
             many=True,
@@ -351,7 +360,7 @@ class ConversationMessagesView(APIView):
         data = serializer.validated_data
 
         gym = resolve_gym_context(request)
-        conv = get_conversation_by_id(str(conversation_id), request.user, gym=gym)
+        conv = get_conversation_by_id(str(conversation_id), request.user, gym=gym, prefetch_participants=False)
 
         sender_gym = None
         if data.get("sender_type") == MessageSenderTypeEnum.GYM:
@@ -397,7 +406,7 @@ class ConversationMarkReadView(APIView):
         data = serializer.validated_data
 
         gym = resolve_gym_context(request)
-        conv = get_conversation_by_id(str(conversation_id), request.user, gym=gym)
+        conv = get_conversation_by_id(str(conversation_id), request.user, gym=gym, prefetch_participants=False)
 
         up_to_message_id = data.get("up_to_message_id")
         updated_count = mark_conversation_as_read(

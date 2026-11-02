@@ -98,38 +98,56 @@ def get_gym_public_key_bundle(gym_id: str) -> List[Dict[str, Any]]:
     return list(keys)
 
 
-def list_conversations_for_entity(user: User, gym: Optional[Gym] = None) -> QuerySet[Conversation]:
+def list_conversations_for_entity(
+    user: User,
+    gym: Optional[Gym] = None,
+    limit: Optional[int] = None,
+) -> QuerySet[Conversation]:
     """
-    Retrieves all conversations where either:
-    - In Personal mode: the user is user_a or user_b, or has a user participant record.
-    - In Gym mode: the gym is gym_a or gym_b, or has a gym participant record.
+    Retrieves all conversations for an entity with zero N+1 queries.
+    Uses select_related for 1-to-1 relationships (user profiles) and
+    prefetch_related for participants and their profiles.
     """
-    if gym:
-        return (
-            Conversation.objects.filter(
-                Q(gym_a=gym) | Q(gym_b=gym) | Q(participants__gym=gym)
-            )
-            .distinct()
-            .select_related("user_a", "user_b", "gym_a", "gym_b")
-            .prefetch_related("participants__user", "participants__gym")
-            .order_by("-last_message_at", "-created_at")
-        )
+    base_filter = (
+        Q(gym_a=gym) | Q(gym_b=gym) | Q(participants__gym=gym)
+        if gym
+        else Q(user_a=user) | Q(user_b=user) | Q(participants__user=user)
+    )
 
-    return (
-        Conversation.objects.filter(
-            Q(user_a=user) | Q(user_b=user) | Q(participants__user=user)
-        )
+    qs = (
+        Conversation.objects.filter(base_filter)
         .distinct()
-        .select_related("user_a", "user_b", "gym_a", "gym_b")
-        .prefetch_related("participants__user", "participants__gym")
+        .select_related(
+            "user_a",
+            "user_a__profile",
+            "user_b",
+            "user_b__profile",
+            "gym_a",
+            "gym_b",
+        )
+        .prefetch_related(
+            "participants__user__profile",
+            "participants__gym",
+        )
         .order_by("-last_message_at", "-created_at")
     )
 
+    if limit is not None and limit > 0:
+        qs = qs[:limit]
 
-def get_conversation_by_id(conversation_id: str, user: User, gym: Optional[Gym] = None) -> Conversation:
+    return qs
+
+
+def get_conversation_by_id(
+    conversation_id: str,
+    user: User,
+    gym: Optional[Gym] = None,
+    prefetch_participants: bool = True,
+) -> Conversation:
     """
     Retrieves a single conversation, verifying that the requesting user/gym has access.
     Handles UUID format validation safely.
+    Allows skipping prefetching participants when only validating access or dispatching messages.
     """
     import uuid
     from django.core.exceptions import ValidationError as DjangoValidationError
@@ -140,11 +158,21 @@ def get_conversation_by_id(conversation_id: str, user: User, gym: Optional[Gym] 
         raise ResourceNotFoundError("Conversation not found.")
 
     try:
-        conversation = (
-            Conversation.objects.select_related("user_a", "user_b", "gym_a", "gym_b")
-            .prefetch_related("participants__user", "participants__gym")
-            .get(id=uuid_val)
-        )
+        qs = Conversation.objects.select_related("gym_a", "gym_b")
+        if prefetch_participants:
+            qs = qs.select_related(
+                "user_a",
+                "user_a__profile",
+                "user_b",
+                "user_b__profile",
+            ).prefetch_related(
+                "participants__user__profile",
+                "participants__gym",
+            )
+        else:
+            qs = qs.only("id", "conversation_type", "user_a_id", "user_b_id", "gym_a_id", "gym_b_id")
+
+        conversation = qs.get(id=uuid_val)
     except (Conversation.DoesNotExist, DjangoValidationError, ValueError):
         raise ResourceNotFoundError("Conversation not found.")
 
@@ -160,11 +188,34 @@ def list_conversation_messages(
 ) -> QuerySet[EncryptedMessage]:
     """
     Retrieves encrypted messages for a conversation, ordered chronologically for client decryption.
+    Selects only needed fields and skips unneeded participant prefetching.
     """
-    conversation = get_conversation_by_id(conversation_id, user, gym=gym)
+    conversation = get_conversation_by_id(conversation_id, user, gym=gym, prefetch_participants=False)
 
     return (
         EncryptedMessage.objects.filter(conversation=conversation)
         .select_related("sender_user", "sender_gym")
+        .only(
+            "id",
+            "conversation_id",
+            "sender_type",
+            "sender_user_id",
+            "sender_user__id",
+            "sender_user__first_name",
+            "sender_user__last_name",
+            "sender_gym_id",
+            "sender_gym__id",
+            "sender_gym__name",
+            "sender_device_id",
+            "ciphertext",
+            "nonce",
+            "ephemeral_public_key",
+            "recipient_key_fingerprint",
+            "encrypted_keys",
+            "delivery_status",
+            "sent_at",
+            "delivered_at",
+            "read_at",
+        )
         .order_by("sent_at")[:limit]
     )

@@ -5,6 +5,7 @@ Orchestrates conversations, E2EE key registration, encrypted message dispatch, a
 
 from typing import Optional, Dict, Any, List
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -283,16 +284,15 @@ def send_encrypted_message(
     conversation.last_message_preview = "🔒 Encrypted Message"
     conversation.save(update_fields=["last_message_at", "last_message_preview", "updated_at"])
 
-    # Update unread count for other participants
-    other_participants = conversation.participants.all()
+    # Update unread count for other participants using atomic DB-level F expression
+    other_qs = ConversationParticipant.objects.filter(conversation=conversation)
     if sender_type == MessageSenderTypeEnum.USER:
-        other_participants = other_participants.exclude(user=sender_user)
+        other_qs = other_qs.exclude(user=sender_user)
     elif sender_type == MessageSenderTypeEnum.GYM:
-        other_participants = other_participants.exclude(gym=sender_gym)
+        other_qs = other_qs.exclude(gym=sender_gym)
 
-    for p in other_participants:
-        p.unread_count += 1
-        p.save(update_fields=["unread_count", "updated_at"])
+    other_targets = list(other_qs.values_list("user_id", "gym_id"))
+    other_qs.update(unread_count=F("unread_count") + 1, updated_at=timezone.now())
 
     # Real-time WebSockets dispatch payload
     payload = {
@@ -320,11 +320,11 @@ def send_encrypted_message(
     )
 
     # Also notify recipient personal/gym channels for push notifications / badge counts
-    for p in other_participants:
-        if p.user_id:
-            broadcast_realtime_event(f"chat_user_{p.user_id}", "chat_incoming", payload)
-        elif p.gym_id:
-            broadcast_realtime_event(f"chat_gym_{p.gym_id}", "chat_incoming", payload)
+    for user_id, gym_id in other_targets:
+        if user_id:
+            broadcast_realtime_event(f"chat_user_{user_id}", "chat_incoming", payload)
+        elif gym_id:
+            broadcast_realtime_event(f"chat_gym_{gym_id}", "chat_incoming", payload)
 
     return message
 
@@ -345,11 +345,11 @@ def mark_conversation_as_read(
 
     now = timezone.now()
 
-    # Find the participant record
+    # Find the participant record directly
     if gym:
-        participant = conversation.participants.filter(gym=gym).first()
+        participant = ConversationParticipant.objects.filter(conversation=conversation, gym=gym).first()
     else:
-        participant = conversation.participants.filter(user=user).first()
+        participant = ConversationParticipant.objects.filter(conversation=conversation, user=user).first()
 
     if participant:
         participant.unread_count = 0
