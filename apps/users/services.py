@@ -333,17 +333,27 @@ def follow_user(follower: User, target_user_id) -> tuple[UserFollow, bool]:
     Follows a target user if target user is active, not self, and not private.
     Returns (UserFollow, created: bool).
     """
-    try:
-        target_uuid = uuid.UUID(str(target_user_id))
-    except (ValueError, TypeError, AttributeError):
-        raise DomainValidationError("Invalid target user ID.")
+    if isinstance(target_user_id, User):
+        target_user = target_user_id
+        target_uuid = target_user.id
+    else:
+        try:
+            target_uuid = uuid.UUID(str(target_user_id))
+        except (ValueError, TypeError, AttributeError):
+            raise DomainValidationError("Invalid target user ID.")
+
+        if follower.id == target_uuid:
+            raise DomainValidationError("You cannot follow yourself.")
+
+        try:
+            target_user = User.objects.select_related("profile").get(id=target_uuid, is_active=True)
+        except User.DoesNotExist:
+            raise ResourceNotFoundError("Target user not found or is inactive.")
 
     if follower.id == target_uuid:
         raise DomainValidationError("You cannot follow yourself.")
 
-    try:
-        target_user = User.objects.select_related("profile").get(id=target_uuid, is_active=True)
-    except User.DoesNotExist:
+    if not getattr(target_user, "is_active", True):
         raise ResourceNotFoundError("Target user not found or is inactive.")
 
     profile = getattr(target_user, "profile", None)

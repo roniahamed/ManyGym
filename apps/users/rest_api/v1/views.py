@@ -60,6 +60,7 @@ from apps.gyms.rest_api.v1.serializers import GymFollowerItemSerializer
 from common.enums import TokenContextType
 from common.exceptions import DomainValidationError, ResourceNotFoundError, PermissionDeniedError
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
+from common.pagination import StandardResultsSetPagination
 
 
 
@@ -738,6 +739,7 @@ class UserFollowToggleView(APIView):
     @extend_schema(
         tags=["User Social & Follow"],
         summary="Follow a User",
+        request=None,
         description="Follows a target user if the target user account is public and active.",
         responses={
             201: OpenApiResponse(response=UserFollowActionResponseSerializer, description="Successfully followed user."),
@@ -802,7 +804,27 @@ class UserFollowersListView(APIView):
         },
     )
     def get(self, request, user_id):
-        followers_qs = list_user_followers(user_id=user_id, requesting_user=request.user)
+        target = request.user if str(user_id) == str(request.user.id) else user_id
+        followers_qs = list_user_followers(user_id=target, requesting_user=request.user)
+
+        if request.query_params.get("page") or request.query_params.get("page_size"):
+            paginator = StandardResultsSetPagination()
+            page_results = paginator.paginate_queryset(followers_qs, request)
+            data = [
+                {
+                    "user_id": f.follower.id,
+                    "email": f.follower.email,
+                    "first_name": f.follower.first_name,
+                    "last_name": f.follower.last_name,
+                    "full_name": f"{f.follower.first_name} {f.follower.last_name}".strip(),
+                    "avatar_url": getattr(getattr(f.follower, "profile", None), "avatar_url", None),
+                    "is_private": getattr(getattr(f.follower, "profile", None), "is_private", False),
+                    "followed_at": f.created_at,
+                }
+                for f in page_results
+            ]
+            return paginator.get_paginated_response(FollowUserItemSerializer(data, many=True).data)
+
         data = [
             {
                 "user_id": f.follower.id,
@@ -837,7 +859,27 @@ class UserFollowingListView(APIView):
         },
     )
     def get(self, request, user_id):
-        following_qs = list_user_following(user_id=user_id, requesting_user=request.user)
+        target = request.user if str(user_id) == str(request.user.id) else user_id
+        following_qs = list_user_following(user_id=target, requesting_user=request.user)
+
+        if request.query_params.get("page") or request.query_params.get("page_size"):
+            paginator = StandardResultsSetPagination()
+            page_results = paginator.paginate_queryset(following_qs, request)
+            data = [
+                {
+                    "user_id": f.followed_user.id,
+                    "email": f.followed_user.email,
+                    "first_name": f.followed_user.first_name,
+                    "last_name": f.followed_user.last_name,
+                    "full_name": f"{f.followed_user.first_name} {f.followed_user.last_name}".strip(),
+                    "avatar_url": getattr(getattr(f.followed_user, "profile", None), "avatar_url", None),
+                    "is_private": getattr(getattr(f.followed_user, "profile", None), "is_private", False),
+                    "followed_at": f.created_at,
+                }
+                for f in page_results
+            ]
+            return paginator.get_paginated_response(FollowUserItemSerializer(data, many=True).data)
+
         data = [
             {
                 "user_id": f.followed_user.id,
@@ -854,26 +896,111 @@ class UserFollowingListView(APIView):
         return Response(FollowUserItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
 
 
-def resolve_target_entity(target_id, target_type=None) -> tuple[str, uuid.UUID]:
+class ResolvedTarget(tuple):
+    """
+    Tuple subclass representing (target_type, target_uuid) while holding the loaded entity
+    to eliminate redundant subsequent database round-trips.
+    """
+    def __new__(cls, target_type, target_uuid, entity=None):
+        return super().__new__(cls, (target_type, target_uuid))
+
+    def __init__(self, target_type, target_uuid, entity=None):
+        self.target_type = target_type
+        self.target_uuid = target_uuid
+        self.entity = entity
+
+
+def resolve_target_entity(target_id, target_type=None) -> ResolvedTarget:
     """
     Validates target_id and auto-detects whether the entity is a Gym or a User.
+    Optimized with single query execution, field projections, and relationship prefetching.
     """
+    if isinstance(target_id, Gym):
+        return ResolvedTarget("gym", target_id.id, target_id)
+    if isinstance(target_id, User):
+        return ResolvedTarget("user", target_id.id, target_id)
+
     try:
         target_uuid = uuid.UUID(str(target_id))
     except (ValueError, TypeError, AttributeError):
         raise DomainValidationError("Invalid target ID format. Must be a valid UUID.")
 
     resolved_type = (target_type or "").strip().lower()
-    if not resolved_type:
-        # Auto-detect whether target_id is a Gym or User from database
-        if Gym.objects.filter(id=target_uuid).exists():
-            resolved_type = "gym"
-        elif User.objects.filter(id=target_uuid).exists():
-            resolved_type = "user"
-        else:
-            raise ResourceNotFoundError("Target entity (User or Gym) not found.")
 
-    return resolved_type, target_uuid
+    if resolved_type == "gym":
+        gym = (
+            Gym.objects.select_related("settings")
+            .only(
+                "id",
+                "name",
+                "owner_user_id",
+                "settings__id",
+                "settings__is_deleted",
+                "settings__is_deactivated",
+                "settings__who_can_see_followers",
+                "settings__who_can_see_following",
+            )
+            .filter(id=target_uuid)
+            .first()
+        )
+        if not gym:
+            raise ResourceNotFoundError("Target entity (Gym) not found.")
+        return ResolvedTarget("gym", target_uuid, gym)
+
+    if resolved_type == "user":
+        user = (
+            User.objects.select_related("profile")
+            .only(
+                "id",
+                "first_name",
+                "last_name",
+                "is_active",
+                "profile__id",
+                "profile__is_private",
+            )
+            .filter(id=target_uuid)
+            .first()
+        )
+        if not user:
+            raise ResourceNotFoundError("Target entity (User) not found.")
+        return ResolvedTarget("user", target_uuid, user)
+
+    # Auto-detect whether target_id is a Gym or User in minimal DB round-trips
+    gym = (
+        Gym.objects.select_related("settings")
+        .only(
+            "id",
+            "name",
+            "owner_user_id",
+            "settings__id",
+            "settings__is_deleted",
+            "settings__is_deactivated",
+            "settings__who_can_see_followers",
+            "settings__who_can_see_following",
+        )
+        .filter(id=target_uuid)
+        .first()
+    )
+    if gym:
+        return ResolvedTarget("gym", target_uuid, gym)
+
+    user = (
+        User.objects.select_related("profile")
+        .only(
+            "id",
+            "first_name",
+            "last_name",
+            "is_active",
+            "profile__id",
+            "profile__is_private",
+        )
+        .filter(id=target_uuid)
+        .first()
+    )
+    if user:
+        return ResolvedTarget("user", target_uuid, user)
+
+    raise ResourceNotFoundError("Target entity (User or Gym) not found.")
 
 
 class UnifiedFollowView(APIView):
@@ -923,11 +1050,13 @@ Unified single endpoint to follow or unfollow any public User or Gym.
         raw_type = serializer.validated_data.get("target_type")
         action = serializer.validated_data.get("action", "follow").lower()
 
-        target_type, resolved_id = resolve_target_entity(raw_id, raw_type)
+        target_info = resolve_target_entity(raw_id, raw_type)
+        target_type, resolved_id = target_info
+        entity = getattr(target_info, "entity", None)
 
         if action == "unfollow":
             return self._perform_unfollow(request.user, target_type, resolved_id)
-        return self._perform_follow(request.user, target_type, resolved_id)
+        return self._perform_follow(request.user, target_type, entity or resolved_id)
 
     @extend_schema(
         tags=["Unified Social Follow"],
@@ -967,7 +1096,8 @@ Parameters can be sent via:
         raw_id = serializer.validated_data["target_id"]
         raw_type = serializer.validated_data.get("target_type")
 
-        target_type, resolved_id = resolve_target_entity(raw_id, raw_type)
+        target_info = resolve_target_entity(raw_id, raw_type)
+        target_type, resolved_id = target_info
         return self._perform_unfollow(request.user, target_type, resolved_id)
 
     @extend_schema(
@@ -988,9 +1118,43 @@ Parameters can be sent via:
     def get(self, request, target_id=None):
         raw_id = target_id or request.query_params.get("target_id") or request.query_params.get("id")
         if not raw_id:
-            # Return current user's followed accounts
-            user_following_qs = list_user_following(user_id=request.user.id, requesting_user=request.user)
+            # Return current user's followed accounts (passing request.user eliminates extra DB query)
+            user_following_qs = list_user_following(user_id=request.user, requesting_user=request.user)
             followed_gyms_qs = list_user_followed_gyms(user=request.user)
+
+            if request.query_params.get("page") or request.query_params.get("page_size"):
+                paginator = StandardResultsSetPagination()
+                page_users = paginator.paginate_queryset(user_following_qs, request)
+                page_gyms = list(followed_gyms_qs[:paginator.get_page_size(request) or 20])
+                users_data = [
+                    {
+                        "user_id": f.followed_user.id,
+                        "email": f.followed_user.email,
+                        "first_name": f.followed_user.first_name,
+                        "last_name": f.followed_user.last_name,
+                        "full_name": f"{f.followed_user.first_name} {f.followed_user.last_name}".strip(),
+                        "avatar_url": getattr(getattr(f.followed_user, "profile", None), "avatar_url", None),
+                        "is_private": getattr(getattr(f.followed_user, "profile", None), "is_private", False),
+                        "followed_at": f.created_at,
+                    }
+                    for f in page_users
+                ]
+                gyms_data = [
+                    {
+                        "gym_id": f.gym.id,
+                        "name": f.gym.name,
+                        "primary_type": f.gym.primary_type,
+                        "profile_picture_url": f.gym.profile_picture_url,
+                        "followed_at": f.created_at,
+                    }
+                    for f in page_gyms
+                ]
+                return paginator.get_paginated_response({
+                    "followed_users": users_data,
+                    "followed_gyms": gyms_data,
+                    "total_followed_users": user_following_qs.count(),
+                    "total_followed_gyms": followed_gyms_qs.count(),
+                })
 
             users_data = [
                 {
@@ -1025,9 +1189,38 @@ Parameters can be sent via:
                 status=status.HTTP_200_OK,
             )
 
-        target_type, resolved_id = resolve_target_entity(raw_id)
+        target_info = resolve_target_entity(raw_id)
+        target_type, resolved_id = target_info
+        entity = getattr(target_info, "entity", None)
+
         if target_type == "user":
-            followers_qs = list_user_followers(user_id=resolved_id, requesting_user=request.user)
+            followers_qs = list_user_followers(user_id=entity or resolved_id, requesting_user=request.user)
+
+            if request.query_params.get("page") or request.query_params.get("page_size"):
+                paginator = StandardResultsSetPagination()
+                page_results = paginator.paginate_queryset(followers_qs, request)
+                data = [
+                    {
+                        "user_id": f.follower.id,
+                        "email": f.follower.email,
+                        "first_name": f.follower.first_name,
+                        "last_name": f.follower.last_name,
+                        "full_name": f"{f.follower.first_name} {f.follower.last_name}".strip(),
+                        "avatar_url": getattr(getattr(f.follower, "profile", None), "avatar_url", None),
+                        "is_private": getattr(getattr(f.follower, "profile", None), "is_private", False),
+                        "followed_at": f.created_at,
+                    }
+                    for f in page_results
+                ]
+                is_following = is_following_user(request.user, resolved_id)
+                return paginator.get_paginated_response({
+                    "target_type": "user",
+                    "target_id": str(resolved_id),
+                    "followers_count": paginator.page.paginator.count,
+                    "is_following": is_following,
+                    "followers": data,
+                })
+
             data = [
                 {
                     "user_id": f.follower.id,
@@ -1041,19 +1234,49 @@ Parameters can be sent via:
                 }
                 for f in followers_qs
             ]
+            if request.user.id == resolved_id:
+                is_following = False
+            else:
+                user_in_data = any(item["user_id"] == request.user.id for item in data)
+                is_following = True if user_in_data else is_following_user(request.user, resolved_id)
+
             return Response(
                 {
                     "target_type": "user",
                     "target_id": str(resolved_id),
                     "followers_count": len(data),
-                    "is_following": is_following_user(request.user, resolved_id),
+                    "is_following": is_following,
                     "followers": data,
                 },
                 status=status.HTTP_200_OK,
             )
 
         # target_type == "gym"
-        followers_qs = list_gym_followers(gym_id=resolved_id, requesting_user=request.user)
+        followers_qs = list_gym_followers(gym_id=entity or resolved_id, requesting_user=request.user)
+
+        if request.query_params.get("page") or request.query_params.get("page_size"):
+            paginator = StandardResultsSetPagination()
+            page_results = paginator.paginate_queryset(followers_qs, request)
+            data = [
+                {
+                    "user_id": f.user.id,
+                    "email": f.user.email,
+                    "first_name": f.user.first_name,
+                    "last_name": f.user.last_name,
+                    "full_name": f"{f.user.first_name} {f.user.last_name}".strip(),
+                    "avatar_url": getattr(getattr(f.user, "profile", None), "avatar_url", None),
+                    "followed_at": f.created_at,
+                }
+                for f in page_results
+            ]
+            return paginator.get_paginated_response({
+                "target_type": "gym",
+                "target_id": str(resolved_id),
+                "followers_count": paginator.page.paginator.count,
+                "is_following": is_following_gym(request.user, resolved_id),
+                "followers": data,
+            })
+
         data = [
             {
                 "user_id": f.user.id,
@@ -1066,12 +1289,15 @@ Parameters can be sent via:
             }
             for f in followers_qs
         ]
+        user_in_data = any(item["user_id"] == request.user.id for item in data)
+        is_following = True if user_in_data else is_following_gym(request.user, resolved_id)
+
         return Response(
             {
                 "target_type": "gym",
                 "target_id": str(resolved_id),
                 "followers_count": len(data),
-                "is_following": is_following_gym(request.user, resolved_id),
+                "is_following": is_following,
                 "followers": data,
             },
             status=status.HTTP_200_OK,
@@ -1096,18 +1322,19 @@ Parameters can be sent via:
                 "message": message,
                 "is_following": True,
                 "target_type": target_type,
-                "target_id": str(target_id),
+                "target_id": str(getattr(target_id, "id", target_id)),
                 "target_name": target_name,
             },
             status=status_code,
         )
 
     def _perform_unfollow(self, user, target_type: str, target_id):
+        resolved_uuid = getattr(target_id, "id", target_id)
         if target_type == "user":
-            unfollow_user(follower=user, target_user_id=target_id)
+            unfollow_user(follower=user, target_user_id=resolved_uuid)
             message = "Successfully unfollowed user."
         elif target_type == "gym":
-            unfollow_gym(user=user, gym_id=target_id)
+            unfollow_gym(user=user, gym_id=resolved_uuid)
             message = "Successfully unfollowed gym."
         else:
             raise DomainValidationError(f"Invalid target_type '{target_type}'. Must be 'user' or 'gym'.")
@@ -1117,7 +1344,7 @@ Parameters can be sent via:
                 "message": message,
                 "is_following": False,
                 "target_type": target_type,
-                "target_id": str(target_id),
+                "target_id": str(resolved_uuid),
                 "target_name": None,
             },
             status=status.HTTP_200_OK,

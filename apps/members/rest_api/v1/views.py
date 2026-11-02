@@ -322,6 +322,7 @@ class MemberResendInvitationView(APIView):
     @extend_schema(
         tags=["Members & Lifecycle"],
         summary="Resend Onboarding Invitation",
+        request=None,
         description="Regenerates an invitation token and sends onboarding confirmation email.",
         responses={
             status.HTTP_200_OK: MessageResponseSerializer,

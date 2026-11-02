@@ -336,16 +336,30 @@ def list_gym_followers(gym_id, requesting_user: Optional[User] = None) -> models
       - 'everyone': visible to all authenticated users.
       - 'only_members': visible only to gym members, active staff, or owner.
       - 'private': visible only to active gym staff or owner.
+    Optimized with field projection (only()) and eager relationship fetching.
     """
-    try:
-        gym_uuid = uuid.UUID(str(gym_id))
-    except (ValueError, TypeError, AttributeError):
-        raise DomainValidationError("Invalid gym ID.")
+    if isinstance(gym_id, Gym):
+        gym = gym_id
+    else:
+        try:
+            gym_uuid = uuid.UUID(str(gym_id))
+        except (ValueError, TypeError, AttributeError):
+            raise DomainValidationError("Invalid gym ID.")
 
-    try:
-        gym = Gym.objects.only("id", "owner_user_id").get(id=gym_uuid)
-    except Gym.DoesNotExist:
-        raise ResourceNotFoundError("Gym not found.")
+        try:
+            gym = (
+                Gym.objects.select_related("settings")
+                .only(
+                    "id",
+                    "owner_user_id",
+                    "settings__id",
+                    "settings__who_can_see_followers",
+                    "settings__who_can_see_following",
+                )
+                .get(id=gym_uuid)
+            )
+        except Gym.DoesNotExist:
+            raise ResourceNotFoundError("Gym not found.")
 
     setting = getattr(gym, "settings", None)
     if not setting:
@@ -383,6 +397,18 @@ def list_gym_followers(gym_id, requesting_user: Optional[User] = None) -> models
     return (
         GymFollow.objects.filter(gym=gym)
         .select_related("user__profile")
+        .only(
+            "id",
+            "created_at",
+            "gym_id",
+            "user__id",
+            "user__email",
+            "user__first_name",
+            "user__last_name",
+            "user__profile__id",
+            "user__profile__avatar_url",
+            "user__profile__is_private",
+        )
         .order_by("-created_at")
     )
 
@@ -390,10 +416,20 @@ def list_gym_followers(gym_id, requesting_user: Optional[User] = None) -> models
 def list_user_followed_gyms(user: User) -> models.QuerySet[GymFollow]:
     """
     Returns a QuerySet of GymFollow records representing gyms followed by the specified user.
+    Optimized with field projections (only()) and eager gym loading.
     """
     return (
         GymFollow.objects.filter(user=user)
         .select_related("gym")
+        .only(
+            "id",
+            "created_at",
+            "user_id",
+            "gym__id",
+            "gym__name",
+            "gym__primary_type",
+            "gym__profile_picture_url",
+        )
         .order_by("-created_at")
     )
 
@@ -411,16 +447,29 @@ def list_gym_following(gym_id, requesting_user: Optional[User] = None) -> list:
     """
     Returns list of people and pages followed by this gym.
     Respects gym setting: who_can_see_following (everyone, only_members, private).
+    Optimized with eager settings loading and instance passing.
     """
-    try:
-        gym_uuid = uuid.UUID(str(gym_id))
-    except (ValueError, TypeError, AttributeError):
-        raise DomainValidationError("Invalid gym ID.")
+    if isinstance(gym_id, Gym):
+        gym = gym_id
+    else:
+        try:
+            gym_uuid = uuid.UUID(str(gym_id))
+        except (ValueError, TypeError, AttributeError):
+            raise DomainValidationError("Invalid gym ID.")
 
-    try:
-        gym = Gym.objects.only("id", "owner_user_id").get(id=gym_uuid)
-    except Gym.DoesNotExist:
-        raise ResourceNotFoundError("Gym not found.")
+        try:
+            gym = (
+                Gym.objects.select_related("settings")
+                .only(
+                    "id",
+                    "owner_user_id",
+                    "settings__id",
+                    "settings__who_can_see_following",
+                )
+                .get(id=gym_uuid)
+            )
+        except Gym.DoesNotExist:
+            raise ResourceNotFoundError("Gym not found.")
 
     setting = getattr(gym, "settings", None)
     if not setting:

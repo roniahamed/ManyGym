@@ -42,15 +42,24 @@ def list_user_followers(user_id, requesting_user: Optional[User] = None) -> Quer
     """
     Returns QuerySet of UserFollow relations where user_id is followed_user.
     Respects privacy settings: if target user is private, only target user can view.
+    Optimized with field projections (only()) and eager relationship fetching.
     """
-    try:
-        target_uuid = uuid.UUID(str(user_id))
-    except (ValueError, TypeError, AttributeError):
-        raise DomainValidationError("Invalid user ID.")
+    if isinstance(user_id, User):
+        target_user = user_id
+    else:
+        try:
+            target_uuid = uuid.UUID(str(user_id))
+        except (ValueError, TypeError, AttributeError):
+            raise DomainValidationError("Invalid user ID.")
 
-    target_user = get_user_by_id(target_uuid)
-    if not target_user:
-        raise ResourceNotFoundError("User not found.")
+        target_user = (
+            User.objects.select_related("profile")
+            .only("id", "profile__id", "profile__is_private")
+            .filter(id=target_uuid)
+            .first()
+        )
+        if not target_user:
+            raise ResourceNotFoundError("User not found.")
 
     profile = getattr(target_user, "profile", None)
     if profile and profile.is_private:
@@ -60,6 +69,18 @@ def list_user_followers(user_id, requesting_user: Optional[User] = None) -> Quer
     return (
         UserFollow.objects.filter(followed_user=target_user)
         .select_related("follower__profile")
+        .only(
+            "id",
+            "created_at",
+            "followed_user_id",
+            "follower__id",
+            "follower__email",
+            "follower__first_name",
+            "follower__last_name",
+            "follower__profile__id",
+            "follower__profile__avatar_url",
+            "follower__profile__is_private",
+        )
         .order_by("-created_at")
     )
 
@@ -68,15 +89,24 @@ def list_user_following(user_id, requesting_user: Optional[User] = None) -> Quer
     """
     Returns QuerySet of UserFollow relations where user_id is follower.
     Respects privacy settings: if target user is private, only target user can view.
+    Optimized with field projections (only()) and eager relationship fetching.
     """
-    try:
-        target_uuid = uuid.UUID(str(user_id))
-    except (ValueError, TypeError, AttributeError):
-        raise DomainValidationError("Invalid user ID.")
+    if isinstance(user_id, User):
+        target_user = user_id
+    else:
+        try:
+            target_uuid = uuid.UUID(str(user_id))
+        except (ValueError, TypeError, AttributeError):
+            raise DomainValidationError("Invalid user ID.")
 
-    target_user = get_user_by_id(target_uuid)
-    if not target_user:
-        raise ResourceNotFoundError("User not found.")
+        target_user = (
+            User.objects.select_related("profile")
+            .only("id", "profile__id", "profile__is_private")
+            .filter(id=target_uuid)
+            .first()
+        )
+        if not target_user:
+            raise ResourceNotFoundError("User not found.")
 
     profile = getattr(target_user, "profile", None)
     if profile and profile.is_private:
@@ -86,6 +116,18 @@ def list_user_following(user_id, requesting_user: Optional[User] = None) -> Quer
     return (
         UserFollow.objects.filter(follower=target_user)
         .select_related("followed_user__profile")
+        .only(
+            "id",
+            "created_at",
+            "follower_id",
+            "followed_user__id",
+            "followed_user__email",
+            "followed_user__first_name",
+            "followed_user__last_name",
+            "followed_user__profile__id",
+            "followed_user__profile__avatar_url",
+            "followed_user__profile__is_private",
+        )
         .order_by("-created_at")
     )
 

@@ -599,15 +599,19 @@ def follow_gym(user: User, gym_id) -> tuple[GymFollow, bool]:
     Returns:
     - (GymFollow instance, created: bool)
     """
-    try:
-        gym_uuid = uuid.UUID(str(gym_id))
-    except (ValueError, TypeError, AttributeError):
-        raise DomainValidationError("Invalid gym ID.")
+    if isinstance(gym_id, Gym):
+        gym = gym_id
+        gym_uuid = gym.id
+    else:
+        try:
+            gym_uuid = uuid.UUID(str(gym_id))
+        except (ValueError, TypeError, AttributeError):
+            raise DomainValidationError("Invalid gym ID.")
 
-    try:
-        gym = Gym.objects.select_related("settings").get(id=gym_uuid)
-    except Gym.DoesNotExist:
-        raise ResourceNotFoundError("Gym not found.")
+        try:
+            gym = Gym.objects.select_related("settings").get(id=gym_uuid)
+        except Gym.DoesNotExist:
+            raise ResourceNotFoundError("Gym not found.")
 
     settings_obj = gym.get_settings()
     if settings_obj.is_deleted or settings_obj.is_deactivated:

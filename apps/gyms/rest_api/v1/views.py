@@ -61,6 +61,7 @@ from common.exceptions import (
     PermissionDeniedError,
 )
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
+from common.pagination import StandardResultsSetPagination
 
 
 def resolve_gym_context(request) -> Gym:
@@ -811,6 +812,7 @@ class GymFollowToggleView(APIView):
     @extend_schema(
         tags=["Gym Social & Follow"],
         summary="Follow a Gym",
+        request=None,
         description="Follows a specified gym. Blocked users or inactive/deleted gyms are rejected.",
         responses={
             201: OpenApiResponse(response=GymFollowActionResponseSerializer, description="Successfully followed gym."),
@@ -877,6 +879,24 @@ class GymFollowersListView(APIView):
     )
     def get(self, request, gym_id):
         followers_qs = list_gym_followers(gym_id=gym_id, requesting_user=request.user)
+
+        if request.query_params.get("page") or request.query_params.get("page_size"):
+            paginator = StandardResultsSetPagination()
+            page_results = paginator.paginate_queryset(followers_qs, request)
+            data = [
+                {
+                    "user_id": f.user.id,
+                    "email": f.user.email,
+                    "first_name": f.user.first_name,
+                    "last_name": f.user.last_name,
+                    "full_name": f"{f.user.first_name} {f.user.last_name}".strip(),
+                    "avatar_url": getattr(getattr(f.user, "profile", None), "avatar_url", None),
+                    "followed_at": f.created_at,
+                }
+                for f in page_results
+            ]
+            return paginator.get_paginated_response(GymFollowerItemSerializer(data, many=True).data)
+
         data = [
             {
                 "user_id": f.user.id,
@@ -909,6 +929,22 @@ class UserFollowedGymsListView(APIView):
     )
     def get(self, request):
         followed_qs = list_user_followed_gyms(user=request.user)
+
+        if request.query_params.get("page") or request.query_params.get("page_size"):
+            paginator = StandardResultsSetPagination()
+            page_results = paginator.paginate_queryset(followed_qs, request)
+            data = [
+                {
+                    "gym_id": f.gym.id,
+                    "name": f.gym.name,
+                    "primary_type": f.gym.primary_type,
+                    "profile_picture_url": f.gym.profile_picture_url,
+                    "followed_at": f.created_at,
+                }
+                for f in page_results
+            ]
+            return paginator.get_paginated_response(FollowedGymItemSerializer(data, many=True).data)
+
         data = [
             {
                 "gym_id": f.gym.id,
