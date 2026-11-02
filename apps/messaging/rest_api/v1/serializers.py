@@ -1,3 +1,4 @@
+import uuid
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from apps.messaging.models import (
@@ -17,28 +18,50 @@ from common.enums import (
 )
 
 
+class StrictCharField(serializers.CharField):
+    """
+    Strict CharField preventing type coercion / juggling.
+    Rejects integers, booleans, floats, lists, and dicts where strings are expected.
+    """
+    def to_internal_value(self, data):
+        if not isinstance(data, str):
+            raise serializers.ValidationError("Expected a string value, received unexpected data type.")
+        return super().to_internal_value(data)
+
+
+class StrictUUIDField(serializers.UUIDField):
+    """
+    Strict UUIDField preventing type coercion / juggling.
+    Requires string or uuid.UUID input and rejects raw integers, booleans, or lists.
+    """
+    def to_internal_value(self, data):
+        if not isinstance(data, (str, uuid.UUID)):
+            raise serializers.ValidationError("Expected a valid UUID string, received unexpected data type.")
+        return super().to_internal_value(data)
+
+
 class UserDeviceKeyRegisterSerializer(serializers.Serializer):
-    device_id = serializers.CharField(max_length=100)
-    device_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
-    identity_key = serializers.CharField()
-    signed_prekey = serializers.CharField()
-    signed_prekey_signature = serializers.CharField(required=False, allow_blank=True, default="")
+    device_id = StrictCharField(max_length=100, allow_blank=False)
+    device_name = StrictCharField(max_length=150, required=False, allow_blank=True, default="")
+    identity_key = StrictCharField(allow_blank=False)
+    signed_prekey = StrictCharField(allow_blank=False)
+    signed_prekey_signature = StrictCharField(required=False, allow_blank=True, default="")
     one_time_prekeys = serializers.ListField(
-        child=serializers.CharField(),
+        child=StrictCharField(allow_blank=False),
         required=False,
         default=list,
     )
 
 
 class GymDeviceKeyRegisterSerializer(serializers.Serializer):
-    gym_id = serializers.UUIDField()
-    device_id = serializers.CharField(max_length=100)
-    device_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
-    identity_key = serializers.CharField()
-    signed_prekey = serializers.CharField()
-    signed_prekey_signature = serializers.CharField(required=False, allow_blank=True, default="")
+    gym_id = StrictUUIDField()
+    device_id = StrictCharField(max_length=100, allow_blank=False)
+    device_name = StrictCharField(max_length=150, required=False, allow_blank=True, default="")
+    identity_key = StrictCharField(allow_blank=False)
+    signed_prekey = StrictCharField(allow_blank=False)
+    signed_prekey_signature = StrictCharField(required=False, allow_blank=True, default="")
     one_time_prekeys = serializers.ListField(
-        child=serializers.CharField(),
+        child=StrictCharField(allow_blank=False),
         required=False,
         default=list,
     )
@@ -172,15 +195,15 @@ class ConversationListSerializer(serializers.ModelSerializer):
 
 
 class ConversationCreateSerializer(serializers.Serializer):
-    conversation_type = serializers.CharField(
+    conversation_type = StrictCharField(
         required=False,
         allow_blank=True,
         default="",
         help_text="Optional: 'user_to_user', 'user_to_gym', 'gym_to_user', 'gym_to_gym'. Auto-detected if omitted.",
     )
-    target_user_id = serializers.UUIDField(required=False, allow_null=True)
-    target_gym_id = serializers.UUIDField(required=False, allow_null=True)
-    source_gym_id = serializers.UUIDField(required=False, allow_null=True)
+    target_user_id = StrictUUIDField(required=False, allow_null=True)
+    target_gym_id = StrictUUIDField(required=False, allow_null=True)
+    source_gym_id = StrictUUIDField(required=False, allow_null=True)
 
     def validate_conversation_type(self, value):
         if not value:
@@ -194,17 +217,17 @@ class ConversationCreateSerializer(serializers.Serializer):
 
 
 class SendMessageSerializer(serializers.Serializer):
-    ciphertext = serializers.CharField(help_text="Base64 ciphertext string")
-    nonce = serializers.CharField(max_length=255, help_text="Base64 nonce / IV")
-    ephemeral_public_key = serializers.CharField(required=False, allow_blank=True, default="")
-    recipient_key_fingerprint = serializers.CharField(required=False, allow_blank=True, default="")
-    sender_device_id = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    ciphertext = StrictCharField(allow_blank=False, help_text="Base64 ciphertext string")
+    nonce = StrictCharField(max_length=255, allow_blank=False, help_text="Base64 nonce / IV")
+    ephemeral_public_key = StrictCharField(required=False, allow_blank=True, default="")
+    recipient_key_fingerprint = StrictCharField(required=False, allow_blank=True, default="")
+    sender_device_id = StrictCharField(max_length=100, required=False, allow_blank=True, default="")
     encrypted_keys = serializers.DictField(required=False, default=dict)
     sender_type = serializers.ChoiceField(
         choices=MessageSenderTypeEnum.choices,
         default=MessageSenderTypeEnum.USER,
     )
-    sender_gym_id = serializers.UUIDField(required=False, allow_null=True)
+    sender_gym_id = StrictUUIDField(required=False, allow_null=True)
 
 
 class EncryptedMessageSerializer(serializers.ModelSerializer):
@@ -241,5 +264,5 @@ class EncryptedMessageSerializer(serializers.ModelSerializer):
 
 
 class MarkReadSerializer(serializers.Serializer):
-    gym_id = serializers.UUIDField(required=False, allow_null=True)
-    up_to_message_id = serializers.UUIDField(required=False, allow_null=True)
+    gym_id = StrictUUIDField(required=False, allow_null=True)
+    up_to_message_id = StrictUUIDField(required=False, allow_null=True)

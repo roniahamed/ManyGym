@@ -52,8 +52,9 @@ def resolve_gym_context(request) -> Gym | None:
     if not gym_id:
         return None
     try:
-        return Gym.objects.get(id=gym_id)
-    except (Gym.DoesNotExist, ValueError):
+        uuid_obj = uuid.UUID(str(gym_id))
+        return Gym.objects.filter(id=uuid_obj).first()
+    except (ValueError, TypeError, AttributeError):
         return None
 
 
@@ -325,7 +326,16 @@ class ConversationMessagesView(APIView):
     )
     def get(self, request, conversation_id):
         gym = resolve_gym_context(request)
-        messages = list_conversation_messages(str(conversation_id), request.user, gym=gym)
+        limit_param = request.query_params.get("limit")
+        limit = 50
+        if limit_param is not None:
+            try:
+                parsed = int(limit_param)
+                if parsed > 0:
+                    limit = min(parsed, 100)
+            except (ValueError, TypeError):
+                limit = 50
+        messages = list_conversation_messages(str(conversation_id), request.user, gym=gym, limit=limit)
         serializer = EncryptedMessageSerializer(messages, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -382,10 +392,14 @@ class ConversationMarkReadView(APIView):
         responses={200: OpenApiResponse(description="Read count confirmed")},
     )
     def post(self, request, conversation_id):
+        serializer = MarkReadSerializer(data=request.data if isinstance(request.data, dict) else {})
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
         gym = resolve_gym_context(request)
         conv = get_conversation_by_id(str(conversation_id), request.user, gym=gym)
 
-        up_to_message_id = request.data.get("up_to_message_id")
+        up_to_message_id = data.get("up_to_message_id")
         updated_count = mark_conversation_as_read(
             conversation=conv,
             user=request.user,

@@ -70,9 +70,21 @@ def get_user_public_key_bundle(user_identifier: str) -> List[Dict[str, Any]]:
 def get_gym_public_key_bundle(gym_id: str) -> List[Dict[str, Any]]:
     """
     Returns active public cryptographic key bundles for a gym entity.
+    Validates UUID format and verifies gym existence.
     """
+    import uuid
+    from django.core.exceptions import ValidationError as DjangoValidationError
+
+    try:
+        uuid_val = uuid.UUID(str(gym_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ResourceNotFoundError("Invalid gym identifier format.")
+
+    if not Gym.objects.filter(id=uuid_val).exists():
+        raise ResourceNotFoundError("Gym not found.")
+
     keys = GymDeviceKey.objects.filter(
-        gym_id=gym_id,
+        gym_id=uuid_val,
         is_active=True,
     ).values(
         "device_id",
@@ -117,14 +129,23 @@ def list_conversations_for_entity(user: User, gym: Optional[Gym] = None) -> Quer
 def get_conversation_by_id(conversation_id: str, user: User, gym: Optional[Gym] = None) -> Conversation:
     """
     Retrieves a single conversation, verifying that the requesting user/gym has access.
+    Handles UUID format validation safely.
     """
+    import uuid
+    from django.core.exceptions import ValidationError as DjangoValidationError
+
+    try:
+        uuid_val = uuid.UUID(str(conversation_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ResourceNotFoundError("Conversation not found.")
+
     try:
         conversation = (
             Conversation.objects.select_related("user_a", "user_b", "gym_a", "gym_b")
             .prefetch_related("participants__user", "participants__gym")
-            .get(id=conversation_id)
+            .get(id=uuid_val)
         )
-    except (Conversation.DoesNotExist, ValueError):
+    except (Conversation.DoesNotExist, DjangoValidationError, ValueError):
         raise ResourceNotFoundError("Conversation not found.")
 
     assert_can_access_conversation(user, conversation, gym_context=gym)
