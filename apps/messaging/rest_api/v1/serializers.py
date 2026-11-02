@@ -144,6 +144,7 @@ class ConversationListSerializer(serializers.ModelSerializer):
             "created_at",
         ]
 
+    @extend_schema_field(serializers.DictField(allow_null=True))
     def get_other_party(self, obj):
         """Helper for frontend UI displaying the other entity's name and type."""
         request = self.context.get("request")

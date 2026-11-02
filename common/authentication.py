@@ -28,3 +28,19 @@ class FastJWTAuthentication(JWTAuthentication):
             raise AuthenticationFailed(_("User is inactive"), code="user_inactive")
 
         return user
+
+
+from drf_spectacular.extensions import OpenApiAuthenticationExtension
+
+
+class FastJWTAuthenticationScheme(OpenApiAuthenticationExtension):
+    target_class = "common.authentication.FastJWTAuthentication"
+    name = "jwtAuth"
+
+    def get_security_definition(self, auto_schema):
+        return {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+
