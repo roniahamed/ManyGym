@@ -1,4 +1,4 @@
-from .profile import (
+from apps.gyms.rest_api.v1.serializers.profile_serializers import (
     GymLocationSerializer,
     GymOpeningHoursItemSerializer,
     GymOpeningHoursBulkItemSerializer,
@@ -8,13 +8,13 @@ from .profile import (
     GymLocationUpdateSerializer,
     GymDetailSerializer,
 )
-from .gallery import (
+from apps.gyms.rest_api.v1.serializers.gallery_serializers import (
     GymGalleryItemSerializer,
     GymGalleryCreateSerializer,
     GymGalleryReorderItemSerializer,
     GymGalleryReorderSerializer,
 )
-from .settings import (
+from apps.gyms.rest_api.v1.serializers.settings_serializers import (
     GymSettingSerializer,
     GymSettingUpdateSerializer,
     GymBlockedUserSerializer,
@@ -22,7 +22,7 @@ from .settings import (
     GymUserSearchToBlockSerializer,
     GymAccessControlActionSerializer,
 )
-from .social import (
+from apps.gyms.rest_api.v1.serializers.social_serializers import (
     GymFollowerItemSerializer,
     FollowedGymItemSerializer,
     GymFollowActionResponseSerializer,

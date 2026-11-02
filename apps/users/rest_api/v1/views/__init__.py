@@ -1,4 +1,4 @@
-from apps.users.rest_api.v1.views.auth import (
+from apps.users.rest_api.v1.views.auth_views import (
     RegisterView,
     VerifySignupOTPView,
     ResendOTPView,
@@ -7,10 +7,10 @@ from apps.users.rest_api.v1.views.auth import (
     ResetPasswordView,
     ChangePasswordView,
 )
-from apps.users.rest_api.v1.views.profile import (
+from apps.users.rest_api.v1.views.profile_views import (
     UserProfileMeView,
 )
-from apps.users.rest_api.v1.views.social import (
+from apps.users.rest_api.v1.views.social_views import (
     UserFollowToggleView,
     UserFollowersListView,
     UserFollowingListView,

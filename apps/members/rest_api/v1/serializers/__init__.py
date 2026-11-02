@@ -1,4 +1,11 @@
-from apps.members.rest_api.v1.serializers.subscription import (
+from apps.members.rest_api.v1.serializers.member_serializers import (
+    MemberListSerializer,
+    MemberDetailSerializer,
+    MemberCreateSerializer,
+    MemberUpdateSerializer,
+    MemberAcceptInvitationSerializer,
+)
+from apps.members.rest_api.v1.serializers.subscription_serializers import (
     MemberExtraAmenitySerializer,
     MemberPaymentSerializer,
     MemberSubscriptionDetailSerializer,
@@ -7,15 +14,13 @@ from apps.members.rest_api.v1.serializers.subscription import (
     MemberPaymentCreateSerializer,
     MemberExtraAmenitiesCreateSerializer,
 )
-from apps.members.rest_api.v1.serializers.member import (
-    MemberListSerializer,
-    MemberDetailSerializer,
-    MemberCreateSerializer,
-    MemberUpdateSerializer,
-    MemberAcceptInvitationSerializer,
-)
 
 __all__ = [
+    "MemberListSerializer",
+    "MemberDetailSerializer",
+    "MemberCreateSerializer",
+    "MemberUpdateSerializer",
+    "MemberAcceptInvitationSerializer",
     "MemberExtraAmenitySerializer",
     "MemberPaymentSerializer",
     "MemberSubscriptionDetailSerializer",
@@ -23,9 +28,4 @@ __all__ = [
     "MemberSubscriptionStatusTransitionSerializer",
     "MemberPaymentCreateSerializer",
     "MemberExtraAmenitiesCreateSerializer",
-    "MemberListSerializer",
-    "MemberDetailSerializer",
-    "MemberCreateSerializer",
-    "MemberUpdateSerializer",
-    "MemberAcceptInvitationSerializer",
 ]

@@ -1,9 +1,9 @@
-from apps.routines.rest_api.v1.serializers.base import (
+from apps.routines.rest_api.v1.serializers.base_serializers import (
     StrictCharField,
     ExerciseInputSerializer,
     DayInputSerializer,
 )
-from apps.routines.rest_api.v1.serializers.template import (
+from apps.routines.rest_api.v1.serializers.template_serializers import (
     RoutineTemplateExerciseSerializer,
     RoutineTemplateDaySerializer,
     RoutineTemplateListSerializer,
@@ -11,7 +11,7 @@ from apps.routines.rest_api.v1.serializers.template import (
     RoutineTemplateCreateSerializer,
     RoutineTemplateUpdateSerializer,
 )
-from apps.routines.rest_api.v1.serializers.assignment import (
+from apps.routines.rest_api.v1.serializers.assignment_serializers import (
     MemberRoutineExerciseSerializer,
     MemberRoutineDaySerializer,
     MemberRoutineListSerializer,

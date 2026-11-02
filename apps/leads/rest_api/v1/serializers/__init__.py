@@ -1,5 +1,12 @@
-from apps.leads.rest_api.v1.serializers.actions import (
-    StrictCharField,
+from apps.leads.rest_api.v1.serializers.lead_serializers import (
+    LeadListSerializer,
+    LeadDetailSerializer,
+    LeadCreateSerializer,
+    LeadUpdateSerializer,
+    LeadStageUpdateSerializer,
+    LeadConvertToMemberSerializer,
+)
+from apps.leads.rest_api.v1.serializers.action_serializers import (
     LeadCustomReasonSerializer,
     LeadCustomReasonCreateSerializer,
     LeadNextMoveSerializer,
@@ -10,17 +17,14 @@ from apps.leads.rest_api.v1.serializers.actions import (
     LeadMetricsSerializer,
     ReasonsDirectorySerializer,
 )
-from apps.leads.rest_api.v1.serializers.lead import (
-    LeadListSerializer,
-    LeadDetailSerializer,
-    LeadCreateSerializer,
-    LeadUpdateSerializer,
-    LeadStageUpdateSerializer,
-    LeadConvertToMemberSerializer,
-)
 
 __all__ = [
-    "StrictCharField",
+    "LeadListSerializer",
+    "LeadDetailSerializer",
+    "LeadCreateSerializer",
+    "LeadUpdateSerializer",
+    "LeadStageUpdateSerializer",
+    "LeadConvertToMemberSerializer",
     "LeadCustomReasonSerializer",
     "LeadCustomReasonCreateSerializer",
     "LeadNextMoveSerializer",
@@ -30,10 +34,4 @@ __all__ = [
     "LeadNoteCreateSerializer",
     "LeadMetricsSerializer",
     "ReasonsDirectorySerializer",
-    "LeadListSerializer",
-    "LeadDetailSerializer",
-    "LeadCreateSerializer",
-    "LeadUpdateSerializer",
-    "LeadStageUpdateSerializer",
-    "LeadConvertToMemberSerializer",
 ]

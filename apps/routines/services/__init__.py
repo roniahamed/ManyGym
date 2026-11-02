@@ -1,13 +1,13 @@
-from apps.routines.services.validation import (
+from apps.routines.services.validation_services import (
     validate_exercise_data,
     validate_days_payload,
 )
-from apps.routines.services.template import (
+from apps.routines.services.template_services import (
     create_routine_template,
     update_routine_template,
     delete_routine_template,
 )
-from apps.routines.services.assignment import (
+from apps.routines.services.assignment_services import (
     assign_routine_to_member,
     customize_member_routine,
 )

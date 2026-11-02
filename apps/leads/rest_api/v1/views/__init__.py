@@ -1,13 +1,13 @@
-from apps.leads.rest_api.v1.views.base import (
+from apps.leads.rest_api.v1.views.base_views import (
     resolve_lead_gym,
     check_lead_permission,
 )
-from apps.leads.rest_api.v1.views.lead import (
+from apps.leads.rest_api.v1.views.lead_views import (
     LeadListCreateView,
     LeadDetailUpdateDeleteView,
     LeadConvertView,
 )
-from apps.leads.rest_api.v1.views.actions import (
+from apps.leads.rest_api.v1.views.action_views import (
     LeadMetricsView,
     LeadReasonsView,
     LeadNextMoveListCreateView,

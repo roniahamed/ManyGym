@@ -1,13 +1,4 @@
-from .profile import (
-    UserProfileSerializer,
-    UserSerializer,
-    UpdateProfileSerializer,
-    TokenResponseSerializer,
-    CurrentContextSerializer,
-    AccessibleGymItemSerializer,
-    UserProfileMeResponseSerializer,
-)
-from .auth import (
+from apps.users.rest_api.v1.serializers.auth_serializers import (
     UserRegistrationSerializer,
     VerifySignupOTPSerializer,
     ResendOTPSerializer,
@@ -18,7 +9,17 @@ from .auth import (
     RegisterResponseSerializer,
     VerifySignupResponseSerializer,
 )
-from .social import (
+from apps.users.rest_api.v1.serializers.profile_serializers import (
+    UserSerializer,
+    UserProfileSerializer,
+    UpdateProfileSerializer,
+    UserProfileUpdateSerializer,
+    TokenResponseSerializer,
+    CurrentContextSerializer,
+    AccessibleGymItemSerializer,
+    UserProfileMeResponseSerializer,
+)
+from apps.users.rest_api.v1.serializers.social_serializers import (
     FollowUserItemSerializer,
     UserFollowActionResponseSerializer,
     FollowActionSerializer,
@@ -28,13 +29,6 @@ from .social import (
 )
 
 __all__ = [
-    "UserProfileSerializer",
-    "UserSerializer",
-    "UpdateProfileSerializer",
-    "TokenResponseSerializer",
-    "CurrentContextSerializer",
-    "AccessibleGymItemSerializer",
-    "UserProfileMeResponseSerializer",
     "UserRegistrationSerializer",
     "VerifySignupOTPSerializer",
     "ResendOTPSerializer",
@@ -44,6 +38,14 @@ __all__ = [
     "ChangePasswordSerializer",
     "RegisterResponseSerializer",
     "VerifySignupResponseSerializer",
+    "UserSerializer",
+    "UserProfileSerializer",
+    "UpdateProfileSerializer",
+    "UserProfileUpdateSerializer",
+    "TokenResponseSerializer",
+    "CurrentContextSerializer",
+    "AccessibleGymItemSerializer",
+    "UserProfileMeResponseSerializer",
     "FollowUserItemSerializer",
     "UserFollowActionResponseSerializer",
     "FollowActionSerializer",

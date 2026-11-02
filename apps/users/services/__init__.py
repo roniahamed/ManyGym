@@ -1,5 +1,4 @@
-from apps.users.services.auth import (
-    generate_numeric_otp,
+from apps.users.services.auth_services import (
     register_user,
     verify_signup_otp,
     resend_signup_otp,
@@ -8,16 +7,15 @@ from apps.users.services.auth import (
     reset_password,
     change_password,
 )
-from apps.users.services.profile import (
+from apps.users.services.profile_services import (
     update_user_profile,
 )
-from apps.users.services.social import (
+from apps.users.services.social_services import (
     follow_user,
     unfollow_user,
 )
 
 __all__ = [
-    "generate_numeric_otp",
     "register_user",
     "verify_signup_otp",
     "resend_signup_otp",
