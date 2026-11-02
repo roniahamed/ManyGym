@@ -150,9 +150,28 @@ class FollowUserItemSerializer(serializers.Serializer):
     first_name = serializers.CharField()
     last_name = serializers.CharField()
     full_name = serializers.CharField()
-    avatar_url = serializers.CharField(allow_null=True)
-    is_private = serializers.BooleanField()
+    avatar_url = serializers.CharField(allow_null=True, required=False)
+    is_private = serializers.BooleanField(default=False)
     followed_at = serializers.DateTimeField()
+
+    def to_representation(self, instance):
+        if not isinstance(instance, dict):
+            relation_type = self.context.get("relation_type", "follower")
+            target_user = instance.followed_user if relation_type == "following" else instance.follower
+            profile = getattr(target_user, "profile", None)
+            first_name = getattr(target_user, "first_name", "") or ""
+            last_name = getattr(target_user, "last_name", "") or ""
+            return {
+                "user_id": target_user.id,
+                "email": getattr(target_user, "email", ""),
+                "first_name": first_name,
+                "last_name": last_name,
+                "full_name": f"{first_name} {last_name}".strip(),
+                "avatar_url": getattr(profile, "avatar_url", None),
+                "is_private": getattr(profile, "is_private", False),
+                "followed_at": instance.created_at,
+            }
+        return super().to_representation(instance)
 
 
 class UserFollowActionResponseSerializer(serializers.Serializer):
@@ -206,12 +225,26 @@ class FollowActionSerializer(serializers.Serializer):
         return attrs
 
 
-
 class FollowActionResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
     is_following = serializers.BooleanField()
     target_type = serializers.CharField()
     target_id = serializers.UUIDField()
     target_name = serializers.CharField(allow_null=True, required=False)
+
+
+class UnifiedTargetFollowersResponseSerializer(serializers.Serializer):
+    target_type = serializers.ChoiceField(choices=["user", "gym"], help_text="Type of the target entity ('user' or 'gym').")
+    target_id = serializers.UUIDField(help_text="UUID of target entity.")
+    followers_count = serializers.IntegerField(help_text="Total number of followers.")
+    is_following = serializers.BooleanField(help_text="Whether authenticated user follows this target.")
+    followers = serializers.ListField(child=serializers.DictField(), help_text="Followers list.")
+
+
+class UnifiedFollowedAccountsResponseSerializer(serializers.Serializer):
+    followed_users = FollowUserItemSerializer(many=True, help_text="List of users followed by authenticated user.")
+    followed_gyms = serializers.ListField(child=serializers.DictField(), help_text="List of gyms followed by authenticated user.")
+    total_followed_users = serializers.IntegerField(help_text="Total count of followed users.")
+    total_followed_gyms = serializers.IntegerField(help_text="Total count of followed gyms.")
 
 

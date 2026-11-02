@@ -3,7 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiExample, OpenApiParameter
 
 from apps.users.rest_api.v1.serializers import (
     UserRegistrationSerializer,
@@ -22,6 +22,8 @@ from apps.users.rest_api.v1.serializers import (
     UserFollowActionResponseSerializer,
     FollowActionSerializer,
     FollowActionResponseSerializer,
+    UnifiedTargetFollowersResponseSerializer,
+    UnifiedFollowedAccountsResponseSerializer,
 )
 from apps.users.services import (
     register_user,
@@ -44,6 +46,8 @@ from apps.users.selectors import (
     list_user_followers,
     list_user_following,
     is_following_user,
+    resolve_target_entity,
+    ResolvedTarget,
 )
 import uuid
 
@@ -56,7 +60,7 @@ from apps.gyms.selectors import (
     list_user_followed_gyms,
     is_following_gym,
 )
-from apps.gyms.rest_api.v1.serializers import GymFollowerItemSerializer
+from apps.gyms.rest_api.v1.serializers import GymFollowerItemSerializer, FollowedGymItemSerializer
 from common.enums import TokenContextType
 from common.exceptions import DomainValidationError, ResourceNotFoundError, PermissionDeniedError
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
@@ -810,35 +814,11 @@ class UserFollowersListView(APIView):
         if request.query_params.get("page") or request.query_params.get("page_size"):
             paginator = StandardResultsSetPagination()
             page_results = paginator.paginate_queryset(followers_qs, request)
-            data = [
-                {
-                    "user_id": f.follower.id,
-                    "email": f.follower.email,
-                    "first_name": f.follower.first_name,
-                    "last_name": f.follower.last_name,
-                    "full_name": f"{f.follower.first_name} {f.follower.last_name}".strip(),
-                    "avatar_url": getattr(getattr(f.follower, "profile", None), "avatar_url", None),
-                    "is_private": getattr(getattr(f.follower, "profile", None), "is_private", False),
-                    "followed_at": f.created_at,
-                }
-                for f in page_results
-            ]
-            return paginator.get_paginated_response(FollowUserItemSerializer(data, many=True).data)
+            serializer = FollowUserItemSerializer(page_results, many=True, context={"relation_type": "follower"})
+            return paginator.get_paginated_response(serializer.data)
 
-        data = [
-            {
-                "user_id": f.follower.id,
-                "email": f.follower.email,
-                "first_name": f.follower.first_name,
-                "last_name": f.follower.last_name,
-                "full_name": f"{f.follower.first_name} {f.follower.last_name}".strip(),
-                "avatar_url": getattr(getattr(f.follower, "profile", None), "avatar_url", None),
-                "is_private": getattr(getattr(f.follower, "profile", None), "is_private", False),
-                "followed_at": f.created_at,
-            }
-            for f in followers_qs
-        ]
-        return Response(FollowUserItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
+        serializer = FollowUserItemSerializer(followers_qs, many=True, context={"relation_type": "follower"})
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class UserFollowingListView(APIView):
@@ -850,7 +830,18 @@ class UserFollowingListView(APIView):
     @extend_schema(
         tags=["User Social & Follow"],
         summary="List User Following",
-        description="Lists all users that the specified user is following. Restricted if the target user is private.",
+        description="""
+### Summary
+Lists all users that the specified user is following. Restricted if the target user is private.
+
+### Authentication & Authorization
+- **Authentication**: Bearer JWT token required.
+- **Authorization**: Public for open profiles. If the target user is private, only the account owner can view.
+        """,
+        parameters=[
+            OpenApiParameter(name="page", type=int, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name="page_size", type=int, location=OpenApiParameter.QUERY, required=False),
+        ],
         responses={
             200: OpenApiResponse(response=FollowUserItemSerializer(many=True), description="List of users followed."),
             401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
@@ -865,142 +856,11 @@ class UserFollowingListView(APIView):
         if request.query_params.get("page") or request.query_params.get("page_size"):
             paginator = StandardResultsSetPagination()
             page_results = paginator.paginate_queryset(following_qs, request)
-            data = [
-                {
-                    "user_id": f.followed_user.id,
-                    "email": f.followed_user.email,
-                    "first_name": f.followed_user.first_name,
-                    "last_name": f.followed_user.last_name,
-                    "full_name": f"{f.followed_user.first_name} {f.followed_user.last_name}".strip(),
-                    "avatar_url": getattr(getattr(f.followed_user, "profile", None), "avatar_url", None),
-                    "is_private": getattr(getattr(f.followed_user, "profile", None), "is_private", False),
-                    "followed_at": f.created_at,
-                }
-                for f in page_results
-            ]
-            return paginator.get_paginated_response(FollowUserItemSerializer(data, many=True).data)
+            serializer = FollowUserItemSerializer(page_results, many=True, context={"relation_type": "following"})
+            return paginator.get_paginated_response(serializer.data)
 
-        data = [
-            {
-                "user_id": f.followed_user.id,
-                "email": f.followed_user.email,
-                "first_name": f.followed_user.first_name,
-                "last_name": f.followed_user.last_name,
-                "full_name": f"{f.followed_user.first_name} {f.followed_user.last_name}".strip(),
-                "avatar_url": getattr(getattr(f.followed_user, "profile", None), "avatar_url", None),
-                "is_private": getattr(getattr(f.followed_user, "profile", None), "is_private", False),
-                "followed_at": f.created_at,
-            }
-            for f in following_qs
-        ]
-        return Response(FollowUserItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
-
-
-class ResolvedTarget(tuple):
-    """
-    Tuple subclass representing (target_type, target_uuid) while holding the loaded entity
-    to eliminate redundant subsequent database round-trips.
-    """
-    def __new__(cls, target_type, target_uuid, entity=None):
-        return super().__new__(cls, (target_type, target_uuid))
-
-    def __init__(self, target_type, target_uuid, entity=None):
-        self.target_type = target_type
-        self.target_uuid = target_uuid
-        self.entity = entity
-
-
-def resolve_target_entity(target_id, target_type=None) -> ResolvedTarget:
-    """
-    Validates target_id and auto-detects whether the entity is a Gym or a User.
-    Optimized with single query execution, field projections, and relationship prefetching.
-    """
-    if isinstance(target_id, Gym):
-        return ResolvedTarget("gym", target_id.id, target_id)
-    if isinstance(target_id, User):
-        return ResolvedTarget("user", target_id.id, target_id)
-
-    try:
-        target_uuid = uuid.UUID(str(target_id))
-    except (ValueError, TypeError, AttributeError):
-        raise DomainValidationError("Invalid target ID format. Must be a valid UUID.")
-
-    resolved_type = (target_type or "").strip().lower()
-
-    if resolved_type == "gym":
-        gym = (
-            Gym.objects.select_related("settings")
-            .only(
-                "id",
-                "name",
-                "owner_user_id",
-                "settings__id",
-                "settings__is_deleted",
-                "settings__is_deactivated",
-                "settings__who_can_see_followers",
-                "settings__who_can_see_following",
-            )
-            .filter(id=target_uuid)
-            .first()
-        )
-        if not gym:
-            raise ResourceNotFoundError("Target entity (Gym) not found.")
-        return ResolvedTarget("gym", target_uuid, gym)
-
-    if resolved_type == "user":
-        user = (
-            User.objects.select_related("profile")
-            .only(
-                "id",
-                "first_name",
-                "last_name",
-                "is_active",
-                "profile__id",
-                "profile__is_private",
-            )
-            .filter(id=target_uuid)
-            .first()
-        )
-        if not user:
-            raise ResourceNotFoundError("Target entity (User) not found.")
-        return ResolvedTarget("user", target_uuid, user)
-
-    # Auto-detect whether target_id is a Gym or User in minimal DB round-trips
-    gym = (
-        Gym.objects.select_related("settings")
-        .only(
-            "id",
-            "name",
-            "owner_user_id",
-            "settings__id",
-            "settings__is_deleted",
-            "settings__is_deactivated",
-            "settings__who_can_see_followers",
-            "settings__who_can_see_following",
-        )
-        .filter(id=target_uuid)
-        .first()
-    )
-    if gym:
-        return ResolvedTarget("gym", target_uuid, gym)
-
-    user = (
-        User.objects.select_related("profile")
-        .only(
-            "id",
-            "first_name",
-            "last_name",
-            "is_active",
-            "profile__id",
-            "profile__is_private",
-        )
-        .filter(id=target_uuid)
-        .first()
-    )
-    if user:
-        return ResolvedTarget("user", target_uuid, user)
-
-    raise ResourceNotFoundError("Target entity (User or Gym) not found.")
+        serializer = FollowUserItemSerializer(following_qs, many=True, context={"relation_type": "following"})
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class UnifiedFollowView(APIView):
@@ -1107,9 +967,18 @@ Parameters can be sent via:
 ### Summary
 - If `target_id` is supplied (in URL path or query param), returns the **followers list** of the target User or Gym. Target entity type is **automatically detected**. Respects target privacy settings (returns 403 if restricted).
 - If `target_id` is omitted, returns the list of entities (Users and Gyms) followed by the current authenticated user.
+
+### Authentication & Authorization
+- **Authentication**: Bearer JWT token required.
+- **Authorization**: Authenticated users. Restricted if target User is private or target Gym followers visibility is restricted.
         """,
+        parameters=[
+            OpenApiParameter(name="target_id", type=uuid.UUID, location=OpenApiParameter.QUERY, required=False, description="UUID of target entity."),
+            OpenApiParameter(name="page", type=int, location=OpenApiParameter.QUERY, required=False, description="Page number."),
+            OpenApiParameter(name="page_size", type=int, location=OpenApiParameter.QUERY, required=False, description="Page size (max 100)."),
+        ],
         responses={
-            200: OpenApiResponse(description="Followers or following list."),
+            200: OpenApiResponse(response=UnifiedTargetFollowersResponseSerializer, description="Followers list of target entity (or followed accounts if target_id omitted)."),
             401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
             403: OpenApiResponse(response=ErrorDetailSerializer, description="Target is private or restricted by settings."),
             404: OpenApiResponse(response=ErrorDetailSerializer, description="Target entity not found."),
@@ -1118,7 +987,6 @@ Parameters can be sent via:
     def get(self, request, target_id=None):
         raw_id = target_id or request.query_params.get("target_id") or request.query_params.get("id")
         if not raw_id:
-            # Return current user's followed accounts (passing request.user eliminates extra DB query)
             user_following_qs = list_user_following(user_id=request.user, requesting_user=request.user)
             followed_gyms_qs = list_user_followed_gyms(user=request.user)
 
@@ -1126,68 +994,23 @@ Parameters can be sent via:
                 paginator = StandardResultsSetPagination()
                 page_users = paginator.paginate_queryset(user_following_qs, request)
                 page_gyms = list(followed_gyms_qs[:paginator.get_page_size(request) or 20])
-                users_data = [
-                    {
-                        "user_id": f.followed_user.id,
-                        "email": f.followed_user.email,
-                        "first_name": f.followed_user.first_name,
-                        "last_name": f.followed_user.last_name,
-                        "full_name": f"{f.followed_user.first_name} {f.followed_user.last_name}".strip(),
-                        "avatar_url": getattr(getattr(f.followed_user, "profile", None), "avatar_url", None),
-                        "is_private": getattr(getattr(f.followed_user, "profile", None), "is_private", False),
-                        "followed_at": f.created_at,
-                    }
-                    for f in page_users
-                ]
-                gyms_data = [
-                    {
-                        "gym_id": f.gym.id,
-                        "name": f.gym.name,
-                        "primary_type": f.gym.primary_type,
-                        "profile_picture_url": f.gym.profile_picture_url,
-                        "followed_at": f.created_at,
-                    }
-                    for f in page_gyms
-                ]
-                return paginator.get_paginated_response({
-                    "followed_users": users_data,
-                    "followed_gyms": gyms_data,
+                payload = {
+                    "followed_users": FollowUserItemSerializer(page_users, many=True, context={"relation_type": "following"}).data,
+                    "followed_gyms": FollowedGymItemSerializer(page_gyms, many=True).data,
                     "total_followed_users": user_following_qs.count(),
                     "total_followed_gyms": followed_gyms_qs.count(),
-                })
+                }
+                return paginator.get_paginated_response(payload)
 
-            users_data = [
-                {
-                    "user_id": f.followed_user.id,
-                    "email": f.followed_user.email,
-                    "first_name": f.followed_user.first_name,
-                    "last_name": f.followed_user.last_name,
-                    "full_name": f"{f.followed_user.first_name} {f.followed_user.last_name}".strip(),
-                    "avatar_url": getattr(getattr(f.followed_user, "profile", None), "avatar_url", None),
-                    "is_private": getattr(getattr(f.followed_user, "profile", None), "is_private", False),
-                    "followed_at": f.created_at,
-                }
-                for f in user_following_qs
-            ]
-            gyms_data = [
-                {
-                    "gym_id": f.gym.id,
-                    "name": f.gym.name,
-                    "primary_type": f.gym.primary_type,
-                    "profile_picture_url": f.gym.profile_picture_url,
-                    "followed_at": f.created_at,
-                }
-                for f in followed_gyms_qs
-            ]
-            return Response(
-                {
-                    "followed_users": users_data,
-                    "followed_gyms": gyms_data,
-                    "total_followed_users": len(users_data),
-                    "total_followed_gyms": len(gyms_data),
-                },
-                status=status.HTTP_200_OK,
-            )
+            followed_users_data = FollowUserItemSerializer(user_following_qs, many=True, context={"relation_type": "following"}).data
+            followed_gyms_data = FollowedGymItemSerializer(followed_gyms_qs, many=True).data
+            payload = {
+                "followed_users": followed_users_data,
+                "followed_gyms": followed_gyms_data,
+                "total_followed_users": len(followed_users_data),
+                "total_followed_gyms": len(followed_gyms_data),
+            }
+            return Response(payload, status=status.HTTP_200_OK)
 
         target_info = resolve_target_entity(raw_id)
         target_type, resolved_id = target_info
@@ -1199,54 +1022,30 @@ Parameters can be sent via:
             if request.query_params.get("page") or request.query_params.get("page_size"):
                 paginator = StandardResultsSetPagination()
                 page_results = paginator.paginate_queryset(followers_qs, request)
-                data = [
-                    {
-                        "user_id": f.follower.id,
-                        "email": f.follower.email,
-                        "first_name": f.follower.first_name,
-                        "last_name": f.follower.last_name,
-                        "full_name": f"{f.follower.first_name} {f.follower.last_name}".strip(),
-                        "avatar_url": getattr(getattr(f.follower, "profile", None), "avatar_url", None),
-                        "is_private": getattr(getattr(f.follower, "profile", None), "is_private", False),
-                        "followed_at": f.created_at,
-                    }
-                    for f in page_results
-                ]
+                followers_data = FollowUserItemSerializer(page_results, many=True, context={"relation_type": "follower"}).data
                 is_following = is_following_user(request.user, resolved_id)
                 return paginator.get_paginated_response({
                     "target_type": "user",
                     "target_id": str(resolved_id),
                     "followers_count": paginator.page.paginator.count,
                     "is_following": is_following,
-                    "followers": data,
+                    "followers": followers_data,
                 })
 
-            data = [
-                {
-                    "user_id": f.follower.id,
-                    "email": f.follower.email,
-                    "first_name": f.follower.first_name,
-                    "last_name": f.follower.last_name,
-                    "full_name": f"{f.follower.first_name} {f.follower.last_name}".strip(),
-                    "avatar_url": getattr(getattr(f.follower, "profile", None), "avatar_url", None),
-                    "is_private": getattr(getattr(f.follower, "profile", None), "is_private", False),
-                    "followed_at": f.created_at,
-                }
-                for f in followers_qs
-            ]
+            followers_data = FollowUserItemSerializer(followers_qs, many=True, context={"relation_type": "follower"}).data
             if request.user.id == resolved_id:
                 is_following = False
             else:
-                user_in_data = any(item["user_id"] == request.user.id for item in data)
+                user_in_data = any(item["user_id"] == request.user.id for item in followers_data)
                 is_following = True if user_in_data else is_following_user(request.user, resolved_id)
 
             return Response(
                 {
                     "target_type": "user",
                     "target_id": str(resolved_id),
-                    "followers_count": len(data),
+                    "followers_count": len(followers_data),
                     "is_following": is_following,
-                    "followers": data,
+                    "followers": followers_data,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -1257,48 +1056,26 @@ Parameters can be sent via:
         if request.query_params.get("page") or request.query_params.get("page_size"):
             paginator = StandardResultsSetPagination()
             page_results = paginator.paginate_queryset(followers_qs, request)
-            data = [
-                {
-                    "user_id": f.user.id,
-                    "email": f.user.email,
-                    "first_name": f.user.first_name,
-                    "last_name": f.user.last_name,
-                    "full_name": f"{f.user.first_name} {f.user.last_name}".strip(),
-                    "avatar_url": getattr(getattr(f.user, "profile", None), "avatar_url", None),
-                    "followed_at": f.created_at,
-                }
-                for f in page_results
-            ]
+            followers_data = GymFollowerItemSerializer(page_results, many=True).data
             return paginator.get_paginated_response({
                 "target_type": "gym",
                 "target_id": str(resolved_id),
                 "followers_count": paginator.page.paginator.count,
                 "is_following": is_following_gym(request.user, resolved_id),
-                "followers": data,
+                "followers": followers_data,
             })
 
-        data = [
-            {
-                "user_id": f.user.id,
-                "email": f.user.email,
-                "first_name": f.user.first_name,
-                "last_name": f.user.last_name,
-                "full_name": f"{f.user.first_name} {f.user.last_name}".strip(),
-                "avatar_url": getattr(getattr(f.user, "profile", None), "avatar_url", None),
-                "followed_at": f.created_at,
-            }
-            for f in followers_qs
-        ]
-        user_in_data = any(item["user_id"] == request.user.id for item in data)
+        followers_data = GymFollowerItemSerializer(followers_qs, many=True).data
+        user_in_data = any(item["user_id"] == request.user.id for item in followers_data)
         is_following = True if user_in_data else is_following_gym(request.user, resolved_id)
 
         return Response(
             {
                 "target_type": "gym",
                 "target_id": str(resolved_id),
-                "followers_count": len(data),
+                "followers_count": len(followers_data),
                 "is_following": is_following,
-                "followers": data,
+                "followers": followers_data,
             },
             status=status.HTTP_200_OK,
         )

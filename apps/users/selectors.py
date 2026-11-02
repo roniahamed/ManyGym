@@ -143,3 +143,113 @@ def is_following_user(follower, target_user) -> bool:
         followed_user_id=t_id,
     ).exists()
 
+
+class ResolvedTarget(tuple):
+    """
+    Tuple subclass representing (target_type, target_uuid) while holding the loaded entity
+    to eliminate redundant subsequent database round-trips.
+    """
+    def __new__(cls, target_type, target_uuid, entity=None):
+        return super().__new__(cls, (target_type, target_uuid))
+
+    def __init__(self, target_type, target_uuid, entity=None):
+        self.target_type = target_type
+        self.target_uuid = target_uuid
+        self.entity = entity
+
+
+def resolve_target_entity(target_id, target_type=None) -> ResolvedTarget:
+    """
+    Validates target_id and auto-detects whether the entity is a Gym or a User.
+    Optimized with single query execution, field projections, and relationship prefetching.
+    Returns ResolvedTarget(target_type, target_uuid, entity_obj).
+    """
+    from apps.gyms.models import Gym
+
+    if isinstance(target_id, Gym):
+        return ResolvedTarget("gym", target_id.id, target_id)
+    if isinstance(target_id, User):
+        return ResolvedTarget("user", target_id.id, target_id)
+
+    try:
+        target_uuid = uuid.UUID(str(target_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid target ID format. Must be a valid UUID.")
+
+    resolved_type = (target_type or "").strip().lower()
+
+    if resolved_type == "gym":
+        gym = (
+            Gym.objects.select_related("settings")
+            .only(
+                "id",
+                "name",
+                "owner_user_id",
+                "settings__id",
+                "settings__is_deleted",
+                "settings__is_deactivated",
+                "settings__who_can_see_followers",
+                "settings__who_can_see_following",
+            )
+            .filter(id=target_uuid)
+            .first()
+        )
+        if not gym:
+            raise ResourceNotFoundError("Target entity (Gym) not found.")
+        return ResolvedTarget("gym", target_uuid, gym)
+
+    if resolved_type == "user":
+        user = (
+            User.objects.select_related("profile")
+            .only(
+                "id",
+                "first_name",
+                "last_name",
+                "is_active",
+                "profile__id",
+                "profile__is_private",
+            )
+            .filter(id=target_uuid)
+            .first()
+        )
+        if not user:
+            raise ResourceNotFoundError("Target entity (User) not found.")
+        return ResolvedTarget("user", target_uuid, user)
+
+    # Auto-detect whether target_id is a Gym or User in minimal DB round-trips
+    gym = (
+        Gym.objects.select_related("settings")
+        .only(
+            "id",
+            "name",
+            "owner_user_id",
+            "settings__id",
+            "settings__is_deleted",
+            "settings__is_deactivated",
+            "settings__who_can_see_followers",
+            "settings__who_can_see_following",
+        )
+        .filter(id=target_uuid)
+        .first()
+    )
+    if gym:
+        return ResolvedTarget("gym", target_uuid, gym)
+
+    user = (
+        User.objects.select_related("profile")
+        .only(
+            "id",
+            "first_name",
+            "last_name",
+            "is_active",
+            "profile__id",
+            "profile__is_private",
+        )
+        .filter(id=target_uuid)
+        .first()
+    )
+    if user:
+        return ResolvedTarget("user", target_uuid, user)
+
+    raise ResourceNotFoundError("Target entity (User or Gym) not found.")
+

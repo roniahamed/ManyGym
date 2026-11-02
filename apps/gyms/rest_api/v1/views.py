@@ -870,7 +870,34 @@ class GymFollowersListView(APIView):
     @extend_schema(
         tags=["Gym Social & Follow"],
         summary="List Gym Followers",
-        description="Lists all users who follow the specified gym.",
+        description="""
+### Summary
+Lists all users who follow the specified gym workspace.
+
+### Authorization & Scopes
+- **Authentication**: Required (`Bearer <JWT>`).
+- **Required Permission**: Public (any authenticated user can inspect gym followers unless blocked).
+
+### Error Codes
+- `401 Unauthorized`: Missing or invalid authentication token.
+- `404 Not Found`: Target gym workspace not found.
+        """,
+        parameters=[
+            OpenApiParameter(
+                name="page",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="A page number within the paginated result set.",
+            ),
+            OpenApiParameter(
+                name="page_size",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Number of results to return per page.",
+            ),
+        ],
         responses={
             200: OpenApiResponse(response=GymFollowerItemSerializer(many=True), description="List of gym followers."),
             401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
@@ -883,33 +910,11 @@ class GymFollowersListView(APIView):
         if request.query_params.get("page") or request.query_params.get("page_size"):
             paginator = StandardResultsSetPagination()
             page_results = paginator.paginate_queryset(followers_qs, request)
-            data = [
-                {
-                    "user_id": f.user.id,
-                    "email": f.user.email,
-                    "first_name": f.user.first_name,
-                    "last_name": f.user.last_name,
-                    "full_name": f"{f.user.first_name} {f.user.last_name}".strip(),
-                    "avatar_url": getattr(getattr(f.user, "profile", None), "avatar_url", None),
-                    "followed_at": f.created_at,
-                }
-                for f in page_results
-            ]
-            return paginator.get_paginated_response(GymFollowerItemSerializer(data, many=True).data)
+            serializer = GymFollowerItemSerializer(page_results, many=True)
+            return paginator.get_paginated_response(serializer.data)
 
-        data = [
-            {
-                "user_id": f.user.id,
-                "email": f.user.email,
-                "first_name": f.user.first_name,
-                "last_name": f.user.last_name,
-                "full_name": f"{f.user.first_name} {f.user.last_name}".strip(),
-                "avatar_url": getattr(getattr(f.user, "profile", None), "avatar_url", None),
-                "followed_at": f.created_at,
-            }
-            for f in followers_qs
-        ]
-        return Response(GymFollowerItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
+        serializer = GymFollowerItemSerializer(followers_qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class UserFollowedGymsListView(APIView):
@@ -921,7 +926,33 @@ class UserFollowedGymsListView(APIView):
     @extend_schema(
         tags=["Gym Social & Follow"],
         summary="List Gyms Followed by User",
-        description="Retrieves a list of all gyms followed by the authenticated user.",
+        description="""
+### Summary
+Retrieves a list of all gym workspaces followed by the authenticated user.
+
+### Authorization & Scopes
+- **Authentication**: Required (`Bearer <JWT>`).
+- **Required Permission**: Authenticated account holder (self).
+
+### Error Codes
+- `401 Unauthorized`: Missing or invalid authentication token.
+        """,
+        parameters=[
+            OpenApiParameter(
+                name="page",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="A page number within the paginated result set.",
+            ),
+            OpenApiParameter(
+                name="page_size",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Number of results to return per page.",
+            ),
+        ],
         responses={
             200: OpenApiResponse(response=FollowedGymItemSerializer(many=True), description="List of followed gyms."),
             401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
@@ -933,29 +964,11 @@ class UserFollowedGymsListView(APIView):
         if request.query_params.get("page") or request.query_params.get("page_size"):
             paginator = StandardResultsSetPagination()
             page_results = paginator.paginate_queryset(followed_qs, request)
-            data = [
-                {
-                    "gym_id": f.gym.id,
-                    "name": f.gym.name,
-                    "primary_type": f.gym.primary_type,
-                    "profile_picture_url": f.gym.profile_picture_url,
-                    "followed_at": f.created_at,
-                }
-                for f in page_results
-            ]
-            return paginator.get_paginated_response(FollowedGymItemSerializer(data, many=True).data)
+            serializer = FollowedGymItemSerializer(page_results, many=True)
+            return paginator.get_paginated_response(serializer.data)
 
-        data = [
-            {
-                "gym_id": f.gym.id,
-                "name": f.gym.name,
-                "primary_type": f.gym.primary_type,
-                "profile_picture_url": f.gym.profile_picture_url,
-                "followed_at": f.created_at,
-            }
-            for f in followed_qs
-        ]
-        return Response(FollowedGymItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
+        serializer = FollowedGymItemSerializer(followed_qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class GymFollowingListView(APIView):
