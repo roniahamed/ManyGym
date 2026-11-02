@@ -186,6 +186,18 @@ class FollowActionSerializer(serializers.Serializer):
         help_text="Action to perform: 'follow' (default) or 'unfollow'.",
     )
 
+    def validate_target_id(self, value):
+        raw = self.initial_data.get("target_id") if hasattr(self, "initial_data") and isinstance(self.initial_data, dict) else None
+        if isinstance(raw, (bool, int, float)):
+            raise serializers.ValidationError("target_id must be a valid UUID string.")
+        return value
+
+    def validate_id(self, value):
+        raw = self.initial_data.get("id") if hasattr(self, "initial_data") and isinstance(self.initial_data, dict) else None
+        if isinstance(raw, (bool, int, float)):
+            raise serializers.ValidationError("id must be a valid UUID string.")
+        return value
+
     def validate(self, attrs):
         tid = attrs.get("target_id") or attrs.get("id") or self.context.get("target_id")
         if not tid:
