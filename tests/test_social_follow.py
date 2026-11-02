@@ -11,7 +11,7 @@ from apps.members.models import Member
 from apps.members.services import create_member, accept_member_invitation
 from apps.messaging.permissions import can_user_message_gym
 from apps.authentication.services import issue_context_token
-from common.enums import TokenContextType, AudienceMessagingEnum, MemberJoiningStatus
+from common.enums import TokenContextType, AudienceMessagingEnum, AudienceFollowingVisibilityEnum, MemberJoiningStatus
 
 
 @pytest.fixture
@@ -453,6 +453,225 @@ class TestUnifiedFollowAPI:
         assert res_unfollow_gym.status_code == status.HTTP_200_OK
         assert res_unfollow_gym.json()["is_following"] is False
         assert not GymFollow.objects.filter(user=user_alice, gym=gym_instance).exists()
+
+
+@pytest.mark.django_db
+class TestGymFollowersSettingsVisibility:
+    """
+    Tests follower list visibility enforcement based on GymSetting:
+    who_can_see_followers and who_can_see_following (everyone, only_members, private).
+    """
+
+    def test_followers_visibility_everyone(self, client_bob, gym_instance, user_alice):
+        # Alice follows gym
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        # Default setting is 'everyone' -> Bob (outsider) can view followers
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/followers/")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert len(data) >= 1
+        assert any(item["user_id"] == str(user_alice.id) for item in data)
+
+    def test_followers_visibility_only_members_restricted_for_outsider(self, client_bob, gym_instance, user_alice):
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        # Set who_can_see_followers to ONLY_MEMBERS
+        settings = gym_instance.settings
+        settings.who_can_see_followers = AudienceFollowingVisibilityEnum.ONLY_MEMBERS
+        settings.save()
+
+        # Bob is NOT a member -> 403 Forbidden
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/followers/")
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert "Only gym members" in response.json().get("message", "")
+
+    def test_followers_visibility_only_members_allowed_for_member(self, client_bob, user_bob, gym_instance, user_alice):
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        # Bob becomes an accepted member of the gym
+        Member.objects.create(
+            gym=gym_instance,
+            user=user_bob,
+            first_name="Bob",
+            last_name="Builder",
+            joining_status="active",
+        )
+
+        settings = gym_instance.settings
+        settings.who_can_see_followers = AudienceFollowingVisibilityEnum.ONLY_MEMBERS
+        settings.save()
+
+        # Bob IS a member -> 200 OK
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/followers/")
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.json()) >= 1
+
+    def test_followers_visibility_only_members_allowed_for_owner(self, client_alice, gym_instance, user_alice):
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        settings = gym_instance.settings
+        settings.who_can_see_followers = AudienceFollowingVisibilityEnum.ONLY_MEMBERS
+        settings.save()
+
+        # Alice (owner) is allowed -> 200 OK
+        response = client_alice.get(f"/api/v1/gyms/{gym_instance.id}/followers/")
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_followers_visibility_private_restricted_for_member(self, client_bob, user_bob, gym_instance, user_alice):
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        Member.objects.create(
+            gym=gym_instance,
+            user=user_bob,
+            first_name="Bob",
+            last_name="Builder",
+            joining_status="active",
+        )
+
+        # Set to PRIVATE
+        settings = gym_instance.settings
+        settings.who_can_see_followers = AudienceFollowingVisibilityEnum.PRIVATE
+        settings.save()
+
+        # Even members are restricted -> 403 Forbidden
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/followers/")
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert "private" in response.json().get("message", "").lower()
+
+    def test_followers_visibility_private_allowed_for_owner(self, client_alice, gym_instance, user_alice):
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        settings = gym_instance.settings
+        settings.who_can_see_followers = AudienceFollowingVisibilityEnum.PRIVATE
+        settings.save()
+
+        # Alice (owner) is allowed -> 200 OK
+        response = client_alice.get(f"/api/v1/gyms/{gym_instance.id}/followers/")
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_followers_visibility_fallback_to_who_can_see_following(self, client_bob, gym_instance, user_alice):
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        # who_can_see_followers is default "everyone", but who_can_see_following is configured "private"
+        settings = gym_instance.settings
+        settings.who_can_see_followers = AudienceFollowingVisibilityEnum.EVERYONE
+        settings.who_can_see_following = AudienceFollowingVisibilityEnum.PRIVATE
+        settings.save()
+
+        # Fallback to who_can_see_following restricts non-owner/non-staff -> 403
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/followers/")
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.django_db
+class TestUnifiedGetFollowersEndpoint:
+    """
+    Tests GET /api/v1/follows/<target_id>/ auto-detecting user vs gym followers
+    and GET /api/v1/follows/ returning accounts followed by requesting user.
+    """
+
+    def test_unified_get_followers_user(self, client_alice, user_alice, user_bob):
+        UserFollow.objects.create(follower=user_alice, followed_user=user_bob)
+
+        # GET /api/v1/follows/<user_bob.id>/ auto-detects user
+        response = client_alice.get(f"/api/v1/follows/{user_bob.id}/")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["target_type"] == "user"
+        assert data["target_id"] == str(user_bob.id)
+        assert data["followers_count"] == 1
+        assert data["followers"][0]["user_id"] == str(user_alice.id)
+
+    def test_unified_get_followers_gym(self, client_alice, user_alice, gym_instance):
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        # GET /api/v1/follows/<gym_instance.id>/ auto-detects gym
+        response = client_alice.get(f"/api/v1/follows/{gym_instance.id}/")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["target_type"] == "gym"
+        assert data["target_id"] == str(gym_instance.id)
+        assert data["followers_count"] == 1
+        assert data["followers"][0]["user_id"] == str(user_alice.id)
+
+    def test_unified_get_current_user_following(self, client_alice, user_alice, user_bob, gym_instance):
+        UserFollow.objects.create(follower=user_alice, followed_user=user_bob)
+        GymFollow.objects.create(user=user_alice, gym=gym_instance)
+
+        # GET /api/v1/follows/ (no target_id) returns current user's followings
+        response = client_alice.get("/api/v1/follows/")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["total_followed_users"] == 1
+        assert data["total_followed_gyms"] == 1
+        assert data["followed_users"][0]["user_id"] == str(user_bob.id)
+        assert data["followed_gyms"][0]["gym_id"] == str(gym_instance.id)
+
+
+@pytest.mark.django_db
+class TestGymFollowingSettingsVisibility:
+    """
+    Tests who can see the people and pages the gym follows:
+    GymSetting.who_can_see_following (everyone, only_members, private).
+    """
+
+    def test_gym_following_visibility_everyone(self, client_bob, gym_instance):
+        # Default is 'everyone' -> Any authenticated user can view
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/following/")
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == []
+
+    def test_gym_following_visibility_only_members_restricted_for_outsider(self, client_bob, gym_instance):
+        settings = gym_instance.settings
+        settings.who_can_see_following = AudienceFollowingVisibilityEnum.ONLY_MEMBERS
+        settings.save()
+
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/following/")
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert "Only gym members" in response.json().get("message", "")
+
+    def test_gym_following_visibility_only_members_allowed_for_member(self, client_bob, user_bob, gym_instance):
+        Member.objects.create(
+            gym=gym_instance,
+            user=user_bob,
+            first_name="Bob",
+            last_name="Builder",
+            joining_status="active",
+        )
+        settings = gym_instance.settings
+        settings.who_can_see_following = AudienceFollowingVisibilityEnum.ONLY_MEMBERS
+        settings.save()
+
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/following/")
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_gym_following_visibility_private_restricted_for_member(self, client_bob, user_bob, gym_instance):
+        Member.objects.create(
+            gym=gym_instance,
+            user=user_bob,
+            first_name="Bob",
+            last_name="Builder",
+            joining_status="active",
+        )
+        settings = gym_instance.settings
+        settings.who_can_see_following = AudienceFollowingVisibilityEnum.PRIVATE
+        settings.save()
+
+        response = client_bob.get(f"/api/v1/gyms/{gym_instance.id}/following/")
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert "private" in response.json().get("message", "").lower()
+
+    def test_gym_following_visibility_private_allowed_for_owner(self, client_alice, gym_instance):
+        settings = gym_instance.settings
+        settings.who_can_see_following = AudienceFollowingVisibilityEnum.PRIVATE
+        settings.save()
+
+        # Alice (owner) is allowed
+        response = client_alice.get(f"/api/v1/gyms/{gym_instance.id}/following/")
+        assert response.status_code == status.HTTP_200_OK
+
+
 
 
 

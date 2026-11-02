@@ -439,6 +439,7 @@ def update_gym_settings(gym: Gym, **data: Any) -> GymSetting:
         "who_can_message",
         "who_can_send_joining_request",
         "who_can_see_members",
+        "who_can_see_followers",
         "who_can_see_following",
         "posts_age_restriction",
         "is_deactivated",

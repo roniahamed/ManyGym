@@ -14,6 +14,7 @@ from apps.gyms.rest_api.v1.views import (
     GymAccessControlActionView,
     GymFollowToggleView,
     GymFollowersListView,
+    GymFollowingListView,
     UserFollowedGymsListView,
 )
 
@@ -37,5 +38,6 @@ urlpatterns = [
     path("followed/", UserFollowedGymsListView.as_view(), name="gym-followed-list"),
     path("<uuid:gym_id>/follow/", GymFollowToggleView.as_view(), name="gym-follow-toggle"),
     path("<uuid:gym_id>/followers/", GymFollowersListView.as_view(), name="gym-followers-list"),
+    path("<uuid:gym_id>/following/", GymFollowingListView.as_view(), name="gym-following-list"),
 ]
 

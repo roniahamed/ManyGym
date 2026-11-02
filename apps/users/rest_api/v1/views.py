@@ -43,15 +43,22 @@ from apps.users.selectors import (
     get_user_by_id,
     list_user_followers,
     list_user_following,
+    is_following_user,
 )
 import uuid
 
 from apps.gyms.models import Gym
 from apps.users.models import User
 from apps.authentication.services import issue_context_token
-from apps.gyms.selectors import get_accessible_gyms_for_user
+from apps.gyms.selectors import (
+    get_accessible_gyms_for_user,
+    list_gym_followers,
+    list_user_followed_gyms,
+    is_following_gym,
+)
+from apps.gyms.rest_api.v1.serializers import GymFollowerItemSerializer
 from common.enums import TokenContextType
-from common.exceptions import DomainValidationError, ResourceNotFoundError
+from common.exceptions import DomainValidationError, ResourceNotFoundError, PermissionDeniedError
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
 
 
@@ -962,6 +969,113 @@ Parameters can be sent via:
 
         target_type, resolved_id = resolve_target_entity(raw_id, raw_type)
         return self._perform_unfollow(request.user, target_type, resolved_id)
+
+    @extend_schema(
+        tags=["Unified Social Follow"],
+        summary="Get Followers or Following List",
+        description="""
+### Summary
+- If `target_id` is supplied (in URL path or query param), returns the **followers list** of the target User or Gym. Target entity type is **automatically detected**. Respects target privacy settings (returns 403 if restricted).
+- If `target_id` is omitted, returns the list of entities (Users and Gyms) followed by the current authenticated user.
+        """,
+        responses={
+            200: OpenApiResponse(description="Followers or following list."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Target is private or restricted by settings."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Target entity not found."),
+        },
+    )
+    def get(self, request, target_id=None):
+        raw_id = target_id or request.query_params.get("target_id") or request.query_params.get("id")
+        if not raw_id:
+            # Return current user's followed accounts
+            user_following_qs = list_user_following(user_id=request.user.id, requesting_user=request.user)
+            followed_gyms_qs = list_user_followed_gyms(user=request.user)
+
+            users_data = [
+                {
+                    "user_id": f.followed_user.id,
+                    "email": f.followed_user.email,
+                    "first_name": f.followed_user.first_name,
+                    "last_name": f.followed_user.last_name,
+                    "full_name": f"{f.followed_user.first_name} {f.followed_user.last_name}".strip(),
+                    "avatar_url": getattr(getattr(f.followed_user, "profile", None), "avatar_url", None),
+                    "is_private": getattr(getattr(f.followed_user, "profile", None), "is_private", False),
+                    "followed_at": f.created_at,
+                }
+                for f in user_following_qs
+            ]
+            gyms_data = [
+                {
+                    "gym_id": f.gym.id,
+                    "name": f.gym.name,
+                    "primary_type": f.gym.primary_type,
+                    "profile_picture_url": f.gym.profile_picture_url,
+                    "followed_at": f.created_at,
+                }
+                for f in followed_gyms_qs
+            ]
+            return Response(
+                {
+                    "followed_users": users_data,
+                    "followed_gyms": gyms_data,
+                    "total_followed_users": len(users_data),
+                    "total_followed_gyms": len(gyms_data),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        target_type, resolved_id = resolve_target_entity(raw_id)
+        if target_type == "user":
+            followers_qs = list_user_followers(user_id=resolved_id, requesting_user=request.user)
+            data = [
+                {
+                    "user_id": f.follower.id,
+                    "email": f.follower.email,
+                    "first_name": f.follower.first_name,
+                    "last_name": f.follower.last_name,
+                    "full_name": f"{f.follower.first_name} {f.follower.last_name}".strip(),
+                    "avatar_url": getattr(getattr(f.follower, "profile", None), "avatar_url", None),
+                    "is_private": getattr(getattr(f.follower, "profile", None), "is_private", False),
+                    "followed_at": f.created_at,
+                }
+                for f in followers_qs
+            ]
+            return Response(
+                {
+                    "target_type": "user",
+                    "target_id": str(resolved_id),
+                    "followers_count": len(data),
+                    "is_following": is_following_user(request.user, resolved_id),
+                    "followers": data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # target_type == "gym"
+        followers_qs = list_gym_followers(gym_id=resolved_id, requesting_user=request.user)
+        data = [
+            {
+                "user_id": f.user.id,
+                "email": f.user.email,
+                "first_name": f.user.first_name,
+                "last_name": f.user.last_name,
+                "full_name": f"{f.user.first_name} {f.user.last_name}".strip(),
+                "avatar_url": getattr(getattr(f.user, "profile", None), "avatar_url", None),
+                "followed_at": f.created_at,
+            }
+            for f in followers_qs
+        ]
+        return Response(
+            {
+                "target_type": "gym",
+                "target_id": str(resolved_id),
+                "followers_count": len(data),
+                "is_following": is_following_gym(request.user, resolved_id),
+                "followers": data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     def _perform_follow(self, user, target_type: str, target_id):
         if target_type == "user":

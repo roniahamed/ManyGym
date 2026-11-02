@@ -306,6 +306,7 @@ class GymSettingSerializer(serializers.ModelSerializer):
             "who_can_message",
             "who_can_send_joining_request",
             "who_can_see_members",
+            "who_can_see_followers",
             "who_can_see_following",
             "posts_age_restriction",
             # Visibility -> Access & Control
@@ -360,6 +361,11 @@ class GymSettingUpdateSerializer(serializers.Serializer):
         choices=AudienceMembersVisibilityEnum.choices,
         required=False,
         help_text="Visibility of gym member roster: 'everyone', 'only_members'",
+    )
+    who_can_see_followers = serializers.ChoiceField(
+        choices=AudienceFollowingVisibilityEnum.choices,
+        required=False,
+        help_text="Visibility of gym followers: 'everyone', 'only_members', 'private'",
     )
     who_can_see_following = serializers.ChoiceField(
         choices=AudienceFollowingVisibilityEnum.choices,

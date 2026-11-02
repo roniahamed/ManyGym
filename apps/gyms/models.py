@@ -227,6 +227,12 @@ class GymSetting(models.Model):
         default=AudienceMembersVisibilityEnum.EVERYONE,
         help_text="Who can see your Gym’s Members? (Everyone, Only Members)"
     )
+    who_can_see_followers = models.CharField(
+        max_length=50,
+        choices=AudienceFollowingVisibilityEnum.choices,
+        default=AudienceFollowingVisibilityEnum.EVERYONE,
+        help_text="Who can see your Gym’s followers? (Everyone, Only members, Private)"
+    )
     who_can_see_following = models.CharField(
         max_length=50,
         choices=AudienceFollowingVisibilityEnum.choices,

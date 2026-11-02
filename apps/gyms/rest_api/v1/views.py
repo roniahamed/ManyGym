@@ -52,6 +52,7 @@ from apps.gyms.selectors import (
     list_blocked_users_for_gym,
     search_users_to_block_for_gym,
     list_gym_followers,
+    list_gym_following,
     list_user_followed_gyms,
 )
 from common.exceptions import (
@@ -919,4 +920,28 @@ class UserFollowedGymsListView(APIView):
             for f in followed_qs
         ]
         return Response(FollowedGymItemSerializer(data, many=True).data, status=status.HTTP_200_OK)
+
+
+class GymFollowingListView(APIView):
+    """
+    API endpoint for listing people and pages followed by a gym.
+    Restricted by GymSetting.who_can_see_following (Everyone, Only members, Private).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Social & Follow"],
+        summary="List People and Pages Gym Follows",
+        description="Lists all people and pages followed by the gym. Restricted by GymSetting.who_can_see_following ('everyone', 'only_members', 'private').",
+        responses={
+            200: OpenApiResponse(description="List of accounts followed by gym."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Following list is restricted by privacy settings."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
+        },
+    )
+    def get(self, request, gym_id):
+        following_list = list_gym_following(gym_id=gym_id, requesting_user=request.user)
+        return Response(following_list, status=status.HTTP_200_OK)
+
 

@@ -90,10 +90,14 @@ def list_user_following(user_id, requesting_user: Optional[User] = None) -> Quer
     )
 
 
-def is_following_user(follower_id, target_user_id) -> bool:
-    """Returns True if follower_id is actively following target_user_id."""
+def is_following_user(follower, target_user) -> bool:
+    """Returns True if follower is actively following target_user."""
+    f_id = getattr(follower, "id", follower)
+    t_id = getattr(target_user, "id", target_user)
+    if not f_id or not t_id:
+        return False
     return UserFollow.objects.filter(
-        follower_id=follower_id,
-        followed_user_id=target_user_id,
+        follower_id=f_id,
+        followed_user_id=t_id,
     ).exists()
 
