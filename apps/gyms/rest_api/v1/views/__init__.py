@@ -29,6 +29,12 @@ from apps.gyms.rest_api.v1.views.social_views import (
     GymMemberJoiningRequestView,
     GymFollowerBlockView,
 )
+from apps.gyms.rest_api.v1.views.admin_log_views import (
+    GymAdminLogsListView,
+    GymAdminLogDetailView,
+    GymAdminLogsMetricsView,
+    GymAdminLogsActionTypesView,
+)
 
 __all__ = [
     "resolve_gym_context",
@@ -52,4 +58,8 @@ __all__ = [
     "GymMembersListView",
     "GymMemberJoiningRequestView",
     "GymFollowerBlockView",
+    "GymAdminLogsListView",
+    "GymAdminLogDetailView",
+    "GymAdminLogsMetricsView",
+    "GymAdminLogsActionTypesView",
 ]

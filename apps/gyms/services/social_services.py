@@ -192,6 +192,23 @@ def send_member_joining_request(
         from apps.leads.services.action_services import add_lead_note
         add_lead_note(lead=lead, note_text=notes.strip())
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        user_name = f"{user.first_name} {user.last_name}".strip() or user.email
+        log_admin_action(
+            gym=gym,
+            actor=user,
+            action="Create a member request",
+            action_type=AdminLogActionType.CREATE_MEMBER_REQUEST,
+            details=f"Received joining request from {user_name} ({user.email})",
+            category=AdminLogCategory.MEMBER_REQUESTS,
+            target_type="member_request",
+            target_id=str(lead.id),
+        )
+    except Exception:
+        pass
+
     return {
         "message": "Member joining request sent successfully.",
         "gym_id": str(gym.id),

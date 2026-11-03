@@ -26,5 +26,9 @@ def check_gym_permission(request, gym: Gym, required_scope: str = None) -> None:
     if gym.owner_user_id == request.user.id or request.user.is_superuser:
         return
     scopes = getattr(request, "scopes", [])
-    if required_scope and required_scope not in scopes:
-        raise PermissionDeniedError(f"You do not possess the required '{required_scope}' scope for this gym operation.")
+    if required_scope:
+        if required_scope == "admin_logs:read":
+            if any(s in scopes for s in ["admin_logs:read", "gym_profile:read", "people_roles:read"]):
+                return
+        if required_scope not in scopes:
+            raise PermissionDeniedError(f"You do not possess the required '{required_scope}' scope for this gym operation.")

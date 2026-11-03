@@ -112,6 +112,18 @@ def block_user_for_gym(
 
     if created:
         logger.info("Blocked user %s on gym %s by %s", target_user.email, gym.name, blocked_by_user)
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            actor=blocked_by_user,
+            action="Blocked a user",
+            action_type=AdminLogActionType.BLOCK_USER,
+            details=f"Blocked {target_user.email}{f': {cleaned_reason}' if cleaned_reason else ''}",
+            category=AdminLogCategory.SETTINGS,
+            target_type="user",
+            target_id=str(target_user.id),
+        )
     return blocked_obj
 
 
@@ -130,6 +142,17 @@ def unblock_user_for_gym(gym: Gym, user_id: str) -> bool:
         raise ResourceNotFoundError("Blocked user not found for this gym.")
 
     logger.info("Unblocked user %s from gym %s", user_id, gym.name)
+    from apps.gyms.services.admin_log_services import log_admin_action
+    from common.enums import AdminLogCategory, AdminLogActionType
+    log_admin_action(
+        gym=gym,
+        action="Unblocked a user",
+        action_type=AdminLogActionType.UNBLOCK_USER,
+        details=f"Unblocked user {user_id}",
+        category=AdminLogCategory.SETTINGS,
+        target_type="user",
+        target_id=str(user_id),
+    )
     return True
 
 
@@ -176,4 +199,30 @@ def apply_access_control_action(
     handler()
     settings_obj.save()
     logger.info("Applied access control '%s' to gym %s by user %s", action, gym.name, user.email)
+
+    from apps.gyms.services.admin_log_services import log_admin_action
+    from common.enums import AdminLogCategory, AdminLogActionType
+
+    log_details_map = {
+        "unpublish": ("Changed page visibility", AdminLogActionType.CHANGE_PAGE_VISIBILITY, "Public → Unpublished", AdminLogCategory.VISIBILITY),
+        "publish": ("Changed page visibility", AdminLogActionType.CHANGE_PAGE_VISIBILITY, "Unpublished → Public", AdminLogCategory.VISIBILITY),
+        "deactivate": ("Deactivated gym workspace", AdminLogActionType.UPDATE_SETTINGS, "Suspended gym operations", AdminLogCategory.VISIBILITY),
+        "reactivate": ("Reactivated gym workspace", AdminLogActionType.UPDATE_SETTINGS, "Restored gym operations", AdminLogCategory.VISIBILITY),
+        "delete": ("Deleted gym workspace", AdminLogActionType.UPDATE_SETTINGS, "Soft-deleted gym workspace", AdminLogCategory.VISIBILITY),
+        "restore": ("Restored gym workspace", AdminLogActionType.UPDATE_SETTINGS, "Restored soft-deleted gym workspace", AdminLogCategory.VISIBILITY),
+    }
+
+    if action in log_details_map:
+        act_title, act_type, act_desc, act_cat = log_details_map[action]
+        log_admin_action(
+            gym=gym,
+            actor=user,
+            action=act_title,
+            action_type=act_type,
+            details=act_desc,
+            category=act_cat,
+            target_type="gym",
+            target_id=str(gym.id),
+        )
+
     return settings_obj

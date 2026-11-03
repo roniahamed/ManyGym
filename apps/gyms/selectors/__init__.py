@@ -21,6 +21,11 @@ from apps.gyms.selectors.social_selectors import (
     list_gym_following,
     list_gym_members_for_audience,
 )
+from apps.gyms.selectors.admin_log_selectors import (
+    list_admin_logs,
+    get_admin_log_by_id,
+    get_admin_logs_metrics,
+)
 
 __all__ = [
     "stream_accessible_gyms_for_user",
@@ -38,4 +43,7 @@ __all__ = [
     "is_following_gym",
     "list_gym_following",
     "list_gym_members_for_audience",
+    "list_admin_logs",
+    "get_admin_log_by_id",
+    "get_admin_logs_metrics",
 ]

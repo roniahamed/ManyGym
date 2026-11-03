@@ -57,6 +57,9 @@ DEFAULT_PERMISSIONS_DEFINITION = [
     # Topic 11: Messaging & Direct Communication
     {"topic": "Messaging", "scope_code": "messaging:read", "name": "View Gym Messages", "description": "Access to view gym conversations and messages."},
     {"topic": "Messaging", "scope_code": "messaging:send", "name": "Send Gym Messages", "description": "Ability to send messages on behalf of the gym."},
+
+    # Topic 12: Alerts & Logs
+    {"topic": "Alerts & Logs", "scope_code": "admin_logs:read", "name": "View Admin Logs", "description": "Access to view gym administrative activity and audit logs."},
 ]
 
 
@@ -96,7 +99,7 @@ def seed_default_permissions_and_roles() -> None:
         "plans:read", "members:read", "members:edit",
         "leads:read", "leads:manage", "trainers:read",
         "routines:read", "people_roles:read",
-        "posts:read", "posts:manage",
+        "posts:read", "posts:manage", "admin_logs:read",
     ]
     staff_role, _ = Role.objects.get_or_create(
         gym=None,
@@ -218,6 +221,23 @@ def invite_staff_member(gym: Gym, user_email: str, role_id: str) -> GymStaffAssi
         assignment.status = StaffStatus.ACTIVE
         assignment.save(update_fields=["status"])
 
+    if created:
+        try:
+            from apps.gyms.services.admin_log_services import log_admin_action
+            from common.enums import AdminLogCategory, AdminLogActionType
+            user_display = f"{user.first_name} {user.last_name}".strip() or user.email
+            log_admin_action(
+                gym=gym,
+                action="Added an admin",
+                action_type=AdminLogActionType.ADD_ADMIN,
+                details=f"Added {user_display} as {role.name}",
+                category=AdminLogCategory.ACCESS_CONTROL,
+                target_type="staff",
+                target_id=str(assignment.id),
+            )
+        except Exception:
+            pass
+
     return assignment
 
 
@@ -238,4 +258,19 @@ def remove_staff_assignment(assignment: GymStaffAssignment) -> None:
     """
     Revokes gym staff access.
     """
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        user_display = f"{assignment.user.first_name} {assignment.user.last_name}".strip() or assignment.user.email
+        log_admin_action(
+            gym=assignment.gym,
+            action="Removed staff member",
+            action_type=AdminLogActionType.REMOVE_STAFF,
+            details=f"Removed {user_display} from {assignment.role.name}",
+            category=AdminLogCategory.ACCESS_CONTROL,
+            target_type="staff",
+            target_id=str(assignment.id),
+        )
+    except Exception:
+        pass
     assignment.delete()

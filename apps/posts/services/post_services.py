@@ -104,6 +104,23 @@ def create_post(
         )
         order_index += 1
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        snippet = f"“{text_clean[:60]}”" if text_clean else "Published a media post"
+        log_admin_action(
+            gym=gym,
+            actor=author_user,
+            action="Published a post",
+            action_type=AdminLogActionType.PUBLISH_POST,
+            details=snippet,
+            category=AdminLogCategory.POSTS,
+            target_type="post",
+            target_id=str(post.id),
+        )
+    except Exception:
+        pass
+
     return post
 
 
@@ -143,6 +160,22 @@ def update_post(
             if media_id and new_idx is not None:
                 post.media_attachments.filter(id=media_id).update(order_index=int(new_idx))
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        snippet = f"“{(post.content_text or '')[:60]}”" if post.content_text else "Updated post details"
+        log_admin_action(
+            gym=post.gym,
+            action="Updated a post",
+            action_type=AdminLogActionType.UPDATE_POST,
+            details=snippet,
+            category=AdminLogCategory.POSTS,
+            target_type="post",
+            target_id=str(post.id),
+        )
+    except Exception:
+        pass
+
     return post
 
 
@@ -151,6 +184,22 @@ def delete_post(post: GymPost) -> None:
     """
     Deletes post entity and cleans up associated attachments.
     """
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        snippet = f"“{(post.content_text or '')[:60]}”" if post.content_text else f"Deleted post {post.id}"
+        log_admin_action(
+            gym=post.gym,
+            action="Deleted a post",
+            action_type=AdminLogActionType.DELETE_POST,
+            details=snippet,
+            category=AdminLogCategory.POSTS,
+            target_type="post",
+            target_id=str(post.id),
+        )
+    except Exception:
+        pass
+
     # Delete associated media files from local disk if present
     for media in post.media_attachments.all():
         for url_field in [media.original_url, media.optimized_url, media.thumbnail_url, media.media_url]:

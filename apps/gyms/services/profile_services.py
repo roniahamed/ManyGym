@@ -177,6 +177,25 @@ def update_gym_overview(gym: Gym, **data) -> Gym:
             setattr(gym, f, data[f])
 
     gym.save()
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+
+        log_detail = "Changed the page description" if "short_description" in data else "Updated page information"
+        log_admin_action(
+            gym=gym,
+            actor=data.get("actor") or getattr(gym, "_request_user", None),
+            action="Updated page information",
+            action_type=AdminLogActionType.UPDATE_PAGE_INFO,
+            details=log_detail,
+            category=AdminLogCategory.GYM_PROFILE,
+            target_type="gym",
+            target_id=str(gym.id),
+        )
+    except Exception:
+        pass
+
     return gym
 
 

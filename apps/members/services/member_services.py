@@ -171,6 +171,21 @@ def create_member(
         token=invitation_token,
     )
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Create a member",
+            action_type=AdminLogActionType.CREATE_MEMBER,
+            details=f"Created member {member.first_name} {member.last_name} ({member.email})",
+            category=AdminLogCategory.MEMBERS,
+            target_type="member",
+            target_id=str(member.id),
+        )
+    except Exception:
+        pass
+
     return member
 
 
@@ -283,6 +298,21 @@ def update_member_profile(
     except ValidationError as exc:
         raise DomainValidationError(str(exc))
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Update a member",
+            action_type=AdminLogActionType.UPDATE_MEMBER,
+            details=f"Updated member {member.first_name} {member.last_name} ({member.email})",
+            category=AdminLogCategory.MEMBERS,
+            target_type="member",
+            target_id=str(member.id),
+        )
+    except Exception:
+        pass
+
     return member
 
 
@@ -299,5 +329,20 @@ def delete_member(member_id: uuid.UUID, gym: Gym) -> None:
     has_payments = MemberPayment.objects.filter(member_subscription__member=member).exists()
     if has_payments:
         raise ResourceConflictError("Cannot permanently delete a member with payment ledger history. Cancel their active subscription instead.")
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Delete a member",
+            action_type=AdminLogActionType.DELETE_MEMBER,
+            details=f"Deleted member {member.first_name} {member.last_name} ({member.email})",
+            category=AdminLogCategory.MEMBERS,
+            target_type="member",
+            target_id=str(member.id),
+        )
+    except Exception:
+        pass
 
     member.delete()

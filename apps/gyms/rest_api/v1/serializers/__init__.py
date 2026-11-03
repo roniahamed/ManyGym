@@ -31,6 +31,14 @@ from apps.gyms.rest_api.v1.serializers.social_serializers import (
     GymMemberJoiningRequestResponseSerializer,
     GymMemberJoiningRequestStatusSerializer,
 )
+from apps.gyms.rest_api.v1.serializers.admin_log_serializers import (
+    AdminActorSerializer,
+    GymAdminLogSerializer,
+    GymAdminLogCreateSerializer,
+    GymAdminLogsPaginatedResponseSerializer,
+    GymAdminLogsMetricsSerializer,
+    AdminLogOptionsResponseSerializer,
+)
 
 __all__ = [
     "GymLocationSerializer",
@@ -58,4 +66,10 @@ __all__ = [
     "GymMemberJoiningRequestCreateSerializer",
     "GymMemberJoiningRequestResponseSerializer",
     "GymMemberJoiningRequestStatusSerializer",
+    "AdminActorSerializer",
+    "GymAdminLogSerializer",
+    "GymAdminLogCreateSerializer",
+    "GymAdminLogsPaginatedResponseSerializer",
+    "GymAdminLogsMetricsSerializer",
+    "AdminLogOptionsResponseSerializer",
 ]

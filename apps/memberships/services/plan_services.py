@@ -106,6 +106,21 @@ def create_membership_plan(
     if included_amenity_ids:
         sync_plan_amenities(plan=plan, gym=gym, amenity_ids=included_amenity_ids)
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Create a custom membership plan",
+            action_type=AdminLogActionType.CREATE_MEMBERSHIP_PLAN,
+            details=f"Created custom plan '{plan.name}' ({plan.price})",
+            category=AdminLogCategory.MEMBERSHIP_PLANS,
+            target_type="plan",
+            target_id=str(plan.id),
+        )
+    except Exception:
+        pass
+
     return plan
 
 
@@ -187,6 +202,21 @@ def update_membership_plan(
     if included_amenity_ids is not None:
         sync_plan_amenities(plan=plan, gym=gym, amenity_ids=included_amenity_ids)
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Update a custom membership plan",
+            action_type=AdminLogActionType.UPDATE_MEMBERSHIP_PLAN,
+            details=f"Updated custom plan '{plan.name}'",
+            category=AdminLogCategory.MEMBERSHIP_PLANS,
+            target_type="plan",
+            target_id=str(plan.id),
+        )
+    except Exception:
+        pass
+
     return plan
 
 
@@ -237,6 +267,21 @@ def delete_membership_plan(
         plan = MembershipPlan.objects.get(id=plan_id, gym=gym)
     except MembershipPlan.DoesNotExist:
         raise ResourceNotFoundError(f"Membership plan '{plan_id}' not found for this gym.")
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Delete a custom membership plan",
+            action_type=AdminLogActionType.DELETE_MEMBERSHIP_PLAN,
+            details=f"Deleted custom plan '{plan.name}'",
+            category=AdminLogCategory.MEMBERSHIP_PLANS,
+            target_type="plan",
+            target_id=str(plan.id),
+        )
+    except Exception:
+        pass
 
     has_subscriptions = False
     if hasattr(plan, "subscriptions"):

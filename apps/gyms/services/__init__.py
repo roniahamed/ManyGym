@@ -23,6 +23,9 @@ from apps.gyms.services.social_services import (
     send_member_joining_request,
     get_member_joining_request_status,
 )
+from apps.gyms.services.admin_log_services import (
+    log_admin_action,
+)
 
 __all__ = [
     "create_gym",
@@ -42,4 +45,5 @@ __all__ = [
     "auto_follow_gym_for_member",
     "send_member_joining_request",
     "get_member_joining_request_status",
+    "log_admin_action",
 ]

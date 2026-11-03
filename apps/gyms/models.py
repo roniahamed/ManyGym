@@ -13,6 +13,8 @@ from common.enums import (
     AudienceMembersVisibilityEnum,
     AudienceFollowingVisibilityEnum,
     PostsAgeRestrictionEnum,
+    AdminLogCategory,
+    AdminLogActionType,
 )
 from common.models import OptimizedMediaMixin
 
@@ -385,3 +387,82 @@ class GymFollow(models.Model):
 
     def __str__(self):
         return f"{self.user.email} follows {self.gym.name}"
+
+
+class GymAdminLog(models.Model):
+    """
+    Audit log record capturing administrative actions executed within a Gym workspace.
+    Covers actions such as:
+    - Updated page information / Gym profile
+    - Published / Edited / Deleted a post
+    - Added an admin / staff assignment / role update
+    - Changed page visibility / lifecycle transitions
+    - Created / Updated / Deleted member requests
+    - Created / Updated / Deleted members
+    - Created / Updated / Deleted custom membership plans
+    - Routine templates, Leads CRM, Settings & Blocking
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    gym = models.ForeignKey(
+        Gym,
+        on_delete=models.CASCADE,
+        related_name="admin_logs",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="gym_admin_logs",
+    )
+    actor_name = models.CharField(max_length=255, blank=True, default="")
+    actor_email = models.CharField(max_length=255, blank=True, default="")
+    action = models.CharField(max_length=255)
+    action_type = models.CharField(
+        max_length=100,
+        choices=AdminLogActionType.choices,
+        default=AdminLogActionType.CUSTOM_ACTION,
+        db_index=True,
+    )
+    category = models.CharField(
+        max_length=50,
+        choices=AdminLogCategory.choices,
+        default=AdminLogCategory.GENERAL,
+        db_index=True,
+    )
+    details = models.TextField(blank=True, default="")
+    target_type = models.CharField(max_length=100, blank=True, null=True)
+    target_id = models.CharField(max_length=100, blank=True, null=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "gym_admin_logs"
+        verbose_name = "Gym Admin Log"
+        verbose_name_plural = "Gym Admin Logs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["gym", "-created_at"], name="idx_admin_log_gym_created"),
+            models.Index(fields=["gym", "category", "-created_at"], name="idx_admin_log_gym_cat_created"),
+            models.Index(fields=["gym", "action_type", "-created_at"], name="idx_admin_log_gym_act_created"),
+            models.Index(fields=["gym", "actor", "-created_at"], name="idx_admin_log_gym_usr_created"),
+        ]
+
+    def __str__(self):
+        admin_display = self.actor_name or (self.actor.email if self.actor else "System")
+        return f"[{self.gym.name}] {admin_display}: {self.action} ({self.created_at})"
+
+    @property
+    def formatted_date_time(self) -> str:
+        """
+        Formats datetime in user-requested format, e.g. '1 Nov 2026, 2:30 PM'.
+        """
+        if not self.created_at:
+            return ""
+        try:
+            return self.created_at.strftime("%-d %b %Y, %-I:%M %p")
+        except ValueError:
+            return f"{self.created_at.day} {self.created_at.strftime('%b %Y')}, {self.created_at.strftime('%I:%M %p').lstrip('0')}"
+

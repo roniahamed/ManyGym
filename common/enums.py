@@ -249,3 +249,79 @@ class KeyAlgorithmEnum(models.TextChoices):
     """Asymmetric cryptography key algorithms supported for E2EE."""
     X25519 = "x25519", "Curve25519 / X25519 (ECDH)"
     ED25519 = "ed25519", "Ed25519 (Digital Signatures)"
+
+
+class AdminLogCategory(models.TextChoices):
+    """Categories / modules for gym administration logs."""
+    GYM_PROFILE = "gym_profile", "Gym Profile"
+    POSTS = "posts", "Posts"
+    ACCESS_CONTROL = "access_control", "People & Roles"
+    VISIBILITY = "visibility", "Page Visibility"
+    SETTINGS = "settings", "Settings & Alerts"
+    MEMBERS = "members", "Members"
+    MEMBER_REQUESTS = "member_requests", "Member Requests"
+    MEMBERSHIP_PLANS = "membership_plans", "Membership Plans"
+    ROUTINES = "routines", "Routine Templates"
+    LEADS = "leads", "Leads"
+    GENERAL = "general", "General"
+
+
+class AdminLogActionType(models.TextChoices):
+    """Machine-readable action types for gym administration logs."""
+    # Gym Profile
+    UPDATE_PAGE_INFO = "update_page_info", "Updated page information"
+    UPDATE_GYM_PROFILE = "update_gym_profile", "Update Gym profile"
+    UPDATE_GYM_LOCATION = "update_gym_location", "Updated gym location"
+    UPDATE_OPENING_HOURS = "update_opening_hours", "Updated opening hours"
+    ADD_GALLERY_MEDIA = "add_gallery_media", "Added gallery media"
+    DELETE_GALLERY_MEDIA = "delete_gallery_media", "Deleted gallery media"
+
+    # Community Posts
+    PUBLISH_POST = "publish_post", "Publish a post"
+    UPDATE_POST = "update_post", "Update a post"
+    DELETE_POST = "delete_post", "Delete a post"
+
+    # Staff & Access Control
+    ADD_ADMIN = "add_admin", "Added an admin"
+    UPDATE_STAFF_ROLE = "update_staff_role", "Update staff role"
+    REMOVE_STAFF = "remove_staff", "Remove staff member"
+    CREATE_ROLE = "create_role", "Create a role"
+    UPDATE_ROLE = "update_role", "Update a role"
+    DELETE_ROLE = "delete_role", "Delete a role"
+
+    # Visibility & Lifecycle
+    CHANGE_PAGE_VISIBILITY = "change_page_visibility", "Changed page visibility"
+
+    # Settings & Privacy
+    UPDATE_SETTINGS = "update_settings", "Update gym settings"
+    BLOCK_USER = "block_user", "Block user"
+    UNBLOCK_USER = "unblock_user", "Unblock user"
+
+    # Member Requests
+    CREATE_MEMBER_REQUEST = "create_member_request", "Create a member request"
+    UPDATE_MEMBER_REQUEST = "update_member_request", "Update a member request"
+    DELETE_MEMBER_REQUEST = "delete_member_request", "Delete a member request"
+
+    # Members
+    CREATE_MEMBER = "create_member", "Create a member"
+    UPDATE_MEMBER = "update_member", "Update a member"
+    DELETE_MEMBER = "delete_member", "Delete a member"
+
+    # Custom Membership Plans
+    CREATE_MEMBERSHIP_PLAN = "create_membership_plan", "Create a custom membership plan"
+    UPDATE_MEMBERSHIP_PLAN = "update_membership_plan", "Update a custom membership plan"
+    DELETE_MEMBERSHIP_PLAN = "delete_membership_plan", "Delete a custom membership plan"
+
+    # Routine Templates
+    CREATE_ROUTINE = "create_routine", "Create a routine template"
+    UPDATE_ROUTINE = "update_routine", "Update a routine template"
+    DELETE_ROUTINE = "delete_routine", "Delete a routine template"
+
+    # Leads CRM
+    CREATE_LEAD = "create_lead", "Create a lead"
+    UPDATE_LEAD = "update_lead", "Update a lead"
+    DELETE_LEAD = "delete_lead", "Delete a lead"
+
+    # Custom / General
+    CUSTOM_ACTION = "custom_action", "Custom Action"
+
