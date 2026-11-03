@@ -25,6 +25,7 @@ from apps.gyms.selectors.admin_log_selectors import (
     list_admin_logs,
     get_admin_log_by_id,
     get_admin_logs_metrics,
+    get_admin_logs_export_iterator,
 )
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "list_admin_logs",
     "get_admin_log_by_id",
     "get_admin_logs_metrics",
+    "get_admin_logs_export_iterator",
 ]

@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional, Dict, Any, Tuple, List, Union
+from typing import Optional, Dict, Any, Tuple, List, Union, Iterator
 from datetime import datetime
 from django.db.models import Q, Count
 from django.utils import timezone
@@ -7,8 +7,43 @@ from django.utils.dateparse import parse_datetime, parse_date
 from apps.gyms.models import Gym, GymAdminLog
 from common.exceptions import ResourceNotFoundError, DomainValidationError
 
+ADMIN_LOG_LIST_ONLY_FIELDS = (
+    "id",
+    "gym_id",
+    "actor_id",
+    "actor_name",
+    "actor_email",
+    "action",
+    "action_type",
+    "category",
+    "details",
+    "target_type",
+    "target_id",
+    "metadata",
+    "created_at",
+    "actor__id",
+    "actor__email",
+    "actor__first_name",
+    "actor__last_name",
+    "actor__profile__id",
+    "actor__profile__avatar_url",
+)
 
-def list_admin_logs(
+ADMIN_LOG_EXPORT_CSV_ONLY_FIELDS = (
+    "actor_name",
+    "actor_email",
+    "actor__email",
+    "action",
+    "details",
+    "created_at",
+    "category",
+    "action_type",
+    "target_type",
+    "target_id",
+)
+
+
+def _build_admin_logs_filtered_queryset(
     gym: Gym,
     category: Optional[str] = None,
     action_type: Optional[str] = None,
@@ -16,31 +51,9 @@ def list_admin_logs(
     start_date: Optional[Union[datetime, str]] = None,
     end_date: Optional[Union[datetime, str]] = None,
     search: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
-) -> Tuple[List[GymAdminLog], int, int]:
-    """
-    Retrieves an optimized, paginated list of administration audit logs for a gym workspace.
-
-    Args:
-        gym: Target gym instance.
-        category: Optional category filter string.
-        action_type: Optional action type code filter.
-        actor_id: Optional UUID (or string) of the user who performed the action.
-        start_date: Optional start datetime (or ISO string) for range filtering.
-        end_date: Optional end datetime (or ISO string) for range filtering.
-        search: Optional search term matching action, details, actor name, or actor email.
-        page: Page number (1-based index, automatically clamped).
-        page_size: Items per page (clamped between 1 and 100).
-
-    Returns:
-        (logs_list, total_count, total_pages)
-    """
-    qs = (
-        GymAdminLog.objects.filter(gym=gym)
-        .select_related("actor", "actor__profile")
-        .order_by("-created_at")
-    )
+):
+    """Internal helper to construct filtered querysets with index awareness."""
+    qs = GymAdminLog.objects.filter(gym=gym)
 
     if category:
         clean_category = str(category).replace("\x00", "").strip()
@@ -108,7 +121,39 @@ def list_admin_logs(
                 | Q(actor_email__icontains=search_term)
             )
 
-    total_count = qs.count()
+    return qs
+
+
+def list_admin_logs(
+    gym: Gym,
+    category: Optional[str] = None,
+    action_type: Optional[str] = None,
+    actor_id: Optional[Union[uuid.UUID, str]] = None,
+    start_date: Optional[Union[datetime, str]] = None,
+    end_date: Optional[Union[datetime, str]] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> Tuple[List[GymAdminLog], int, int]:
+    """
+    Retrieves an optimized, paginated list of administration audit logs for a gym workspace.
+    Employs field projections (only) and relationship loading (select_related) to minimize
+    memory footprint and completely eliminate N+1 queries.
+
+    Returns:
+        (logs_list, total_count, total_pages)
+    """
+    base_qs = _build_admin_logs_filtered_queryset(
+        gym=gym,
+        category=category,
+        action_type=action_type,
+        actor_id=actor_id,
+        start_date=start_date,
+        end_date=end_date,
+        search=search,
+    )
+
+    total_count = base_qs.count()
 
     try:
         raw_page = int(page)
@@ -125,24 +170,20 @@ def list_admin_logs(
     offset = (safe_page - 1) * safe_page_size
     total_pages = (total_count + safe_page_size - 1) // safe_page_size if total_count > 0 else 1
 
-    logs = list(qs[offset : offset + safe_page_size])
+    # Project only fields required by serializer and order by compound index (gym, -created_at)
+    page_qs = (
+        base_qs.select_related("actor", "actor__profile")
+        .only(*ADMIN_LOG_LIST_ONLY_FIELDS)
+        .order_by("-created_at")
+    )
+
+    logs = list(page_qs[offset : offset + safe_page_size])
     return logs, total_count, total_pages
 
 
 def get_admin_log_by_id(gym: Gym, log_id: Union[uuid.UUID, str]) -> GymAdminLog:
     """
-    Retrieves a single administration log record for the specified gym.
-
-    Args:
-        gym: Gym entity scope.
-        log_id: UUID of the admin log record.
-
-    Returns:
-        The matched GymAdminLog instance.
-
-    Raises:
-        DomainValidationError: If log_id is not a valid UUID string.
-        ResourceNotFoundError: If the log does not exist or does not belong to the gym.
+    Retrieves a single administration log record with optimized field projections.
     """
     clean_id = str(log_id).replace("\x00", "").strip()
     try:
@@ -152,8 +193,10 @@ def get_admin_log_by_id(gym: Gym, log_id: Union[uuid.UUID, str]) -> GymAdminLog:
 
     try:
         return (
-            GymAdminLog.objects.select_related("actor", "actor__profile")
-            .get(gym=gym, id=clean_id)
+            GymAdminLog.objects.filter(gym=gym, id=clean_id)
+            .select_related("actor", "actor__profile")
+            .only(*ADMIN_LOG_LIST_ONLY_FIELDS)
+            .get()
         )
     except GymAdminLog.DoesNotExist:
         raise ResourceNotFoundError("Admin log entry not found.")
@@ -162,18 +205,18 @@ def get_admin_log_by_id(gym: Gym, log_id: Union[uuid.UUID, str]) -> GymAdminLog:
 def get_admin_logs_metrics(gym: Gym) -> Dict[str, Any]:
     """
     Calculates summary metrics for gym administration activity.
-
-    Returns:
-        A dictionary containing:
-        - `total_logs`: Total number of administrative logs.
-        - `logs_today`: Number of logs created today.
-        - `by_category`: Count distribution map per category.
-        - `recent_logs`: The 5 most recent GymAdminLog instances.
+    Combines total_logs and logs_today into a SINGLE database aggregation query using Q filters,
+    reducing query count by 25%.
     """
     today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    total_logs = GymAdminLog.objects.filter(gym=gym).count()
-    logs_today = GymAdminLog.objects.filter(gym=gym, created_at__gte=today_start).count()
+    # Consolidated conditional aggregation (1 query for both totals)
+    aggregates = GymAdminLog.objects.filter(gym=gym).aggregate(
+        total_logs=Count("id"),
+        logs_today=Count("id", filter=Q(created_at__gte=today_start)),
+    )
+    total_logs = aggregates["total_logs"] or 0
+    logs_today = aggregates["logs_today"] or 0
 
     category_counts = (
         GymAdminLog.objects.filter(gym=gym)
@@ -186,6 +229,7 @@ def get_admin_logs_metrics(gym: Gym) -> Dict[str, Any]:
     recent_logs = list(
         GymAdminLog.objects.filter(gym=gym)
         .select_related("actor", "actor__profile")
+        .only(*ADMIN_LOG_LIST_ONLY_FIELDS)
         .order_by("-created_at")[:5]
     )
 
@@ -195,3 +239,45 @@ def get_admin_logs_metrics(gym: Gym) -> Dict[str, Any]:
         "by_category": by_category,
         "recent_logs": recent_logs,
     }
+
+
+def get_admin_logs_export_iterator(
+    gym: Gym,
+    category: Optional[str] = None,
+    action_type: Optional[str] = None,
+    actor_id: Optional[Union[uuid.UUID, str]] = None,
+    start_date: Optional[Union[datetime, str]] = None,
+    end_date: Optional[Union[datetime, str]] = None,
+    search: Optional[str] = None,
+    limit: int = 5000,
+    is_csv: bool = True,
+) -> Iterator[GymAdminLog]:
+    """
+    Memory-efficient iterator for administrative logs export.
+    Uses chunked fetching (.iterator(chunk_size=500)) and field projections
+    to ensure O(1) memory consumption even during large dataset exports.
+    """
+    base_qs = _build_admin_logs_filtered_queryset(
+        gym=gym,
+        category=category,
+        action_type=action_type,
+        actor_id=actor_id,
+        start_date=start_date,
+        end_date=end_date,
+        search=search,
+    ).order_by("-created_at")
+
+    if is_csv:
+        qs = (
+            base_qs.select_related("actor")
+            .only(*ADMIN_LOG_EXPORT_CSV_ONLY_FIELDS)[:limit]
+            .iterator(chunk_size=500)
+        )
+    else:
+        qs = (
+            base_qs.select_related("actor", "actor__profile")
+            .only(*ADMIN_LOG_LIST_ONLY_FIELDS)[:limit]
+            .iterator(chunk_size=500)
+        )
+
+    return qs

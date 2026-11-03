@@ -23,6 +23,7 @@ from apps.gyms.selectors.admin_log_selectors import (
     list_admin_logs,
     get_admin_log_by_id,
     get_admin_logs_metrics,
+    get_admin_logs_export_iterator,
 )
 from apps.gyms.rest_api.v1.views.base_views import resolve_gym_context, check_gym_permission
 from common.serializers import ErrorDetailSerializer
@@ -347,7 +348,10 @@ Accepts the same filtering parameters as the list endpoint.
         export_filter.is_valid(raise_exception=True)
         params = export_filter.validated_data
 
-        logs, _, _ = list_admin_logs(
+        export_format = params.get("format", "csv")
+        is_csv = (export_format == "csv")
+
+        logs_iterator = get_admin_logs_export_iterator(
             gym=gym,
             category=params.get("category"),
             action_type=params.get("action_type"),
@@ -355,16 +359,15 @@ Accepts the same filtering parameters as the list endpoint.
             start_date=params.get("start_date"),
             end_date=params.get("end_date"),
             search=params.get("search"),
-            page=1,
-            page_size=1000,
+            limit=5000,
+            is_csv=is_csv,
         )
 
-        export_format = params.get("format", "csv")
         if export_format == "json":
-            serializer = GymAdminLogSerializer(logs, many=True)
+            serializer = GymAdminLogSerializer(logs_iterator, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
-        csv_content = generate_admin_logs_csv_content(logs)
+        csv_content = generate_admin_logs_csv_content(logs_iterator)
         filename = get_admin_logs_export_filename(gym=gym, format_type="csv")
         response = HttpResponse(csv_content, content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
