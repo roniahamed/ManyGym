@@ -964,3 +964,363 @@ class TestUserSettingsHTTPMethodValidation:
             assert res.status_code == status.HTTP_405_METHOD_NOT_ALLOWED, (
                 f"Expected 405 on {method.upper()} {endpoint}, got {res.status_code}"
             )
+
+
+# ==============================================================================
+# 11. FULL CRUD & WORST-CASE ADVERSARIAL SCENARIOS
+# ==============================================================================
+
+@pytest.mark.django_db
+class TestUserSettingsWorstCaseAdversarialScenarios:
+    """11. Exhaustive End-to-End CRUD & High-Stress Worst Case Scenarios."""
+
+    def test_full_crud_end_to_end_lifecycle(self, alice_client, bob_client, user_alice, user_bob, user_charlie):
+        """
+        Executes complete CRUD lifecycle:
+        - Read default settings
+        - Update settings across all fields
+        - Verify persisted changes
+        - Create block on User B
+        - Read blocked list (User B present with metadata)
+        - Search users to block (User B excluded)
+        - Delete / Unblock User B
+        - Verify User B removed from blocklist and restored to search
+        - Create block directly from followers endpoint
+        - Access & Control complete lifecycle (deactivate -> reactivate -> delete -> restore)
+        """
+        # 1. READ default settings
+        settings_url = reverse("user-settings")
+        res_read = alice_client.get(settings_url)
+        assert res_read.status_code == status.HTTP_200_OK
+        assert res_read.data["language"] == "en"
+        assert res_read.data["dark_mode"] is False
+        assert res_read.data["is_private"] is False
+
+        # 2. UPDATE settings across multiple fields
+        update_payload = {
+            "language": "fr",
+            "dark_mode": True,
+            "is_private": True,
+            "who_can_message": UserAudienceMessagingEnum.FOLLOWERS,
+            "who_can_see_followers": UserAudienceVisibilityEnum.FOLLOWERS,
+            "who_can_see_following": UserAudienceVisibilityEnum.PRIVATE,
+        }
+        res_update = alice_client.patch(settings_url, update_payload, format="json")
+        assert res_update.status_code == status.HTTP_200_OK
+        assert res_update.data["language"] == "fr"
+        assert res_update.data["dark_mode"] is True
+        assert res_update.data["is_private"] is True
+        assert res_update.data["who_can_message"] == UserAudienceMessagingEnum.FOLLOWERS
+        assert res_update.data["who_can_see_followers"] == UserAudienceVisibilityEnum.FOLLOWERS
+        assert res_update.data["who_can_see_following"] == UserAudienceVisibilityEnum.PRIVATE
+
+        # 3. VERIFY READ reflects updated state
+        res_read_after = alice_client.get(settings_url)
+        assert res_read_after.status_code == status.HTTP_200_OK
+        assert res_read_after.data["language"] == "fr"
+        assert res_read_after.data["dark_mode"] is True
+        assert res_read_after.data["is_private"] is True
+
+        # 4. CREATE block record
+        block_url = reverse("user-settings-blocked-users")
+        res_block = alice_client.post(block_url, {"user_id": str(user_bob.id), "reason": "Persistent spam"}, format="json")
+        assert res_block.status_code == status.HTTP_201_CREATED
+        assert res_block.data["user_id"] == str(user_bob.id)
+        assert res_block.data["reason"] == "Persistent spam"
+        assert res_block.data["email"] == user_bob.email
+        assert res_block.data["first_name"] == user_bob.first_name
+
+        # 5. READ blocked list
+        res_list = alice_client.get(block_url)
+        assert res_list.status_code == status.HTTP_200_OK
+        assert len(res_list.data) == 1
+        assert res_list.data[0]["user_id"] == str(user_bob.id)
+
+        # 6. READ search candidates (User B must be excluded)
+        search_url = reverse("user-settings-blocked-users-search")
+        res_search = alice_client.get(search_url)
+        assert res_search.status_code == status.HTTP_200_OK
+        candidate_ids = [u["id"] for u in res_search.data]
+        assert str(user_bob.id) not in candidate_ids
+        assert str(user_charlie.id) in candidate_ids
+
+        # 7. DELETE / Unblock User B
+        unblock_url = reverse("user-settings-blocked-user-detail", kwargs={"user_id": user_bob.id})
+        res_unblock = alice_client.delete(unblock_url)
+        assert res_unblock.status_code == status.HTTP_200_OK
+        assert "unblocked successfully" in res_unblock.data["message"]
+
+        # 8. VERIFY DELETE
+        res_list_empty = alice_client.get(block_url)
+        assert res_list_empty.status_code == status.HTTP_200_OK
+        assert len(res_list_empty.data) == 0
+
+        # 9. VERIFY SEARCH (User B reappears as candidate)
+        res_search_restored = alice_client.get(search_url)
+        candidate_ids_restored = [u["id"] for u in res_search_restored.data]
+        assert str(user_bob.id) in candidate_ids_restored
+
+        # 10. CREATE block from followers list endpoint
+        from apps.users.models import UserFollow
+        UserFollow.objects.create(follower=user_bob, followed_user=user_alice)
+        assert UserFollow.objects.filter(follower=user_bob, followed_user=user_alice).exists()
+
+        follower_block_url = reverse("user-follower-block", kwargs={"user_id": user_bob.id})
+        res_fblock = alice_client.post(follower_block_url, {"reason": "Blocked from followers list"}, format="json")
+        assert res_fblock.status_code == status.HTTP_200_OK
+        assert not UserFollow.objects.filter(follower=user_bob, followed_user=user_alice).exists()
+        assert UserBlockedUser.objects.filter(blocker=user_alice, blocked_user=user_bob).exists()
+
+        # Clean up block for access control tests
+        alice_client.delete(unblock_url)
+
+        # 11. ACCESS CONTROL: Full lifecycle
+        ac_url = reverse("user-settings-access-control")
+        # Deactivate
+        res_deact = alice_client.post(ac_url, {"action": "deactivate"}, format="json")
+        assert res_deact.status_code == status.HTTP_200_OK
+        assert res_deact.data["is_deactivated"] is True
+
+        # Reactivate via login
+        anon_client = APIClient()
+        res_react = anon_client.post(
+            reverse("login"),
+            {"email": user_alice.email, "password": "SecurePassword123!", "reactivate": True},
+            format="json",
+        )
+        assert res_react.status_code == status.HTTP_200_OK
+        new_token = res_react.data["tokens"]["access"]
+        alice_client.credentials(HTTP_AUTHORIZATION=f"Bearer {new_token}")
+
+        # Delete
+        res_del = alice_client.post(
+            ac_url,
+            {"action": "delete", "password": "SecurePassword123!", "confirmation": "delete"},
+            format="json",
+        )
+        assert res_del.status_code == status.HTTP_200_OK
+        assert res_del.data["is_deleted"] is True
+
+        # Restore via login
+        res_rest = anon_client.post(
+            reverse("login"),
+            {"email": user_alice.email, "password": "SecurePassword123!", "restore": True},
+            format="json",
+        )
+        assert res_rest.status_code == status.HTTP_200_OK
+        user_alice.refresh_from_db()
+        assert user_alice.status == UserStatus.ACTIVE
+
+    def test_mutual_blocking_and_isolation(self, alice_client, bob_client, user_alice, user_bob):
+        """
+        Adversarial Scenario: User A blocks User B, and User B also blocks User A.
+        Verifies:
+        - Both block records coexist peacefully under the composite uniqueness constraint.
+        - Neither can view the other's followers or following lists.
+        - Neither can initiate messaging.
+        - When User A unblocks User B, User B's block on User A remains active and restrictive.
+        """
+        from apps.messaging.services.conversation_services import get_or_create_user_to_user_conversation
+        from common.exceptions import PermissionDeniedError
+
+        # 1. Alice blocks Bob
+        res1 = alice_client.post(reverse("user-settings-blocked-users"), {"user_id": str(user_bob.id)}, format="json")
+        assert res1.status_code == status.HTTP_201_CREATED
+
+        # 2. Bob blocks Alice
+        res2 = bob_client.post(reverse("user-settings-blocked-users"), {"user_id": str(user_alice.id)}, format="json")
+        assert res2.status_code == status.HTTP_201_CREATED
+
+        # Both records exist in database
+        assert UserBlockedUser.objects.filter(blocker=user_alice, blocked_user=user_bob).exists()
+        assert UserBlockedUser.objects.filter(blocker=user_bob, blocked_user=user_alice).exists()
+
+        # 3. Bob tries to view Alice's followers -> 403 Forbidden
+        res_bf = bob_client.get(reverse("user-followers-list", kwargs={"user_id": user_alice.id}))
+        assert res_bf.status_code == status.HTTP_403_FORBIDDEN
+
+        # 4. Alice tries to view Bob's followers -> 403 Forbidden
+        res_af = alice_client.get(reverse("user-followers-list", kwargs={"user_id": user_bob.id}))
+        assert res_af.status_code == status.HTTP_403_FORBIDDEN
+
+        # 5. Messaging is forbidden in both directions
+        with pytest.raises(PermissionDeniedError, match="blocked from messaging"):
+            get_or_create_user_to_user_conversation(user_alice, user_bob)
+        with pytest.raises(PermissionDeniedError, match="blocked from messaging"):
+            get_or_create_user_to_user_conversation(user_bob, user_alice)
+
+        # 6. Alice unblocks Bob
+        unblock_url = reverse("user-settings-blocked-user-detail", kwargs={"user_id": user_bob.id})
+        res_unblock = alice_client.delete(unblock_url)
+        assert res_unblock.status_code == status.HTTP_200_OK
+
+        # 7. Bob's block on Alice is STILL ACTIVE!
+        assert not UserBlockedUser.objects.filter(blocker=user_alice, blocked_user=user_bob).exists()
+        assert UserBlockedUser.objects.filter(blocker=user_bob, blocked_user=user_alice).exists()
+
+        # Alice STILL cannot view Bob's followers because Bob has Alice blocked!
+        res_af2 = alice_client.get(reverse("user-followers-list", kwargs={"user_id": user_bob.id}))
+        assert res_af2.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_follow_attempt_while_blocked(self, alice_client, bob_client, user_alice, user_bob):
+        """
+        Verifies that follow requests are blocked bidirectionally:
+        - Blocked target cannot be followed by blocker (must unblock first, 400).
+        - Blocker cannot be followed by blocked target (403).
+        """
+        # Alice blocks Bob
+        alice_client.post(reverse("user-settings-blocked-users"), {"user_id": str(user_bob.id)}, format="json")
+
+        follow_url = reverse("user-unified-follow")
+
+        # Bob attempts to follow Alice -> 403 Forbidden
+        res_bob = bob_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_bob.status_code == status.HTTP_403_FORBIDDEN
+        assert "blocked" in str(res_bob.data).lower()
+
+        # Alice attempts to follow Bob -> 400 Bad Request
+        res_alice = alice_client.post(follow_url, {"target_id": str(user_bob.id), "target_type": "user"}, format="json")
+        assert res_alice.status_code == status.HTTP_400_BAD_REQUEST
+        assert "cannot follow a user you have blocked" in str(res_alice.data).lower()
+
+    def test_malformed_json_and_unsupported_media_types(self, alice_client):
+        """
+        Sends raw malformed JSON syntax and unsupported media types to verify
+        that no 500 Internal Server Errors occur.
+        """
+        settings_url = reverse("user-settings")
+
+        # 1. Broken JSON syntax -> 400 Bad Request (ParseError)
+        res_broken = alice_client.patch(
+            settings_url,
+            data='{"language": "fr", "dark_mode": ',
+            content_type="application/json",
+        )
+        assert res_broken.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 2. Unsupported Content-Type -> 415 Unsupported Media Type
+        res_xml = alice_client.patch(
+            settings_url,
+            data="<settings><language>fr</language></settings>",
+            content_type="application/xml",
+        )
+        assert res_xml.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+
+    def test_null_byte_rejections_prevent_data_error(self, alice_client, user_bob):
+        """
+        Adversarial: Injects null bytes (\\x00) into string fields to verify
+        that DRF and services reject them with 400 rather than throwing a
+        PostgreSQL DataError 500.
+        """
+        # 1. Null byte in language
+        res_lang = alice_client.patch(
+            reverse("user-settings"),
+            {"language": "en\x00fr"},
+            format="json",
+        )
+        assert res_lang.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 2. Null byte in block reason
+        res_reason = alice_client.post(
+            reverse("user-settings-blocked-users"),
+            {"user_id": str(user_bob.id), "reason": "spam\x00bot"},
+            format="json",
+        )
+        assert res_reason.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 3. Null byte in follower block reason
+        res_fblock = alice_client.post(
+            reverse("user-follower-block", kwargs={"user_id": user_bob.id}),
+            {"reason": "spam\x00bot"},
+            format="json",
+        )
+        assert res_fblock.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_idempotent_and_rapid_access_control_actions(self, alice_client, user_alice):
+        """
+        Worst-Case State Machine & Inactive Account Enforcement:
+        - Reactivate an already active account (idempotent, 200).
+        - Restore an already active account (idempotent, 200).
+        - Deactivate an active account (200).
+        - Verify session token is invalidated and inactive user cannot access endpoints (401).
+        - Attempt login while deactivated -> prompts to reactivate (400).
+        - Reactivate via login parameter -> returns fresh tokens and restores ACTIVE state (200).
+        - Soft-delete account -> revokes session tokens and marks DELETED (200).
+        - Attempt login while deleted -> prompts to restore (400).
+        - Restore via login parameter with valid password -> restores account and issues fresh tokens (200).
+        """
+        ac_url = reverse("user-settings-access-control")
+
+        # 1. Reactivate while already active -> 200 OK
+        res1 = alice_client.post(ac_url, {"action": "reactivate"}, format="json")
+        assert res1.status_code == status.HTTP_200_OK
+        assert res1.data["is_deactivated"] is False
+
+        # 2. Restore while already active -> 200 OK
+        res2 = alice_client.post(ac_url, {"action": "restore", "password": "SecurePassword123!"}, format="json")
+        assert res2.status_code == status.HTTP_200_OK
+        assert res2.data["is_deleted"] is False
+
+        # 3. Deactivate account
+        res3 = alice_client.post(ac_url, {"action": "deactivate"}, format="json")
+        assert res3.status_code == status.HTTP_200_OK
+        assert res3.data["is_deactivated"] is True
+
+        # 4. Bearer token is immediately rejected because user is deactivated/inactive -> 401
+        res4 = alice_client.get(reverse("user-settings"))
+        assert res4.status_code == status.HTTP_401_UNAUTHORIZED
+
+        # 5. Normal login while deactivated informs user and prompts reactivation -> 400
+        anon_client = APIClient()
+        res5 = anon_client.post(
+            reverse("login"),
+            {"email": user_alice.email, "password": "SecurePassword123!"},
+            format="json",
+        )
+        assert res5.status_code == status.HTTP_400_BAD_REQUEST
+        assert "deactivated" in str(res5.data).lower()
+
+        # 6. Reactivate via login parameter -> 200 OK
+        res6 = anon_client.post(
+            reverse("login"),
+            {"email": user_alice.email, "password": "SecurePassword123!", "reactivate": True},
+            format="json",
+        )
+        assert res6.status_code == status.HTTP_200_OK
+        assert "tokens" in res6.data
+        new_token = res6.data["tokens"]["access"]
+        alice_client.credentials(HTTP_AUTHORIZATION=f"Bearer {new_token}")
+
+        # 7. Delete account
+        res7 = alice_client.post(
+            ac_url,
+            {"action": "delete", "password": "SecurePassword123!", "confirmation": "delete"},
+            format="json",
+        )
+        assert res7.status_code == status.HTTP_200_OK
+        assert res7.data["is_deleted"] is True
+
+        # 8. Token rejected after deletion -> 401
+        res8 = alice_client.get(reverse("user-settings"))
+        assert res8.status_code == status.HTTP_401_UNAUTHORIZED
+
+        # 9. Normal login while deleted informs user and prompts restoration -> 400
+        res9 = anon_client.post(
+            reverse("login"),
+            {"email": user_alice.email, "password": "SecurePassword123!"},
+            format="json",
+        )
+        assert res9.status_code == status.HTTP_400_BAD_REQUEST
+        assert "deleted" in str(res9.data).lower()
+
+        # 10. Restore via login parameter with valid password -> 200 OK
+        res10 = anon_client.post(
+            reverse("login"),
+            {"email": user_alice.email, "password": "SecurePassword123!", "restore": True},
+            format="json",
+        )
+        assert res10.status_code == status.HTTP_200_OK
+        user_alice.refresh_from_db()
+        assert user_alice.status == UserStatus.ACTIVE
+        assert user_alice.is_active is True
+

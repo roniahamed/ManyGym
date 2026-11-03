@@ -89,6 +89,8 @@ def block_user_for_gym(
         if not isinstance(reason, str):
             raise DomainValidationError("Reason must be a valid string.")
         cleaned_reason = reason.strip()
+        if "\x00" in cleaned_reason:
+            raise DomainValidationError("Null characters are not allowed.")
         if len(cleaned_reason) > 255:
             raise DomainValidationError("Reason cannot exceed 255 characters.")
 
