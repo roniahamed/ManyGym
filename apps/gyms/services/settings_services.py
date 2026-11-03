@@ -84,12 +84,20 @@ def block_user_for_gym(
     if target_user.id == gym.owner_user_id:
         raise DomainValidationError("Gym owner cannot be blocked.")
 
+    cleaned_reason = None
+    if reason is not None:
+        if not isinstance(reason, str):
+            raise DomainValidationError("Reason must be a valid string.")
+        cleaned_reason = reason.strip()
+        if len(cleaned_reason) > 255:
+            raise DomainValidationError("Reason cannot exceed 255 characters.")
+
     blocked_obj, created = GymBlockedUser.objects.get_or_create(
         gym=gym,
         user=target_user,
         defaults={
             "blocked_by": blocked_by_user,
-            "reason": reason.strip() if reason else None,
+            "reason": cleaned_reason,
         },
     )
     # Remove follow relationship if user was following the gym

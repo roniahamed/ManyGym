@@ -74,11 +74,19 @@ def block_user_for_user(
     if target_user.id == blocker.id:
         raise DomainValidationError("You cannot block yourself.")
 
+    cleaned_reason = None
+    if reason is not None:
+        if not isinstance(reason, str):
+            raise DomainValidationError("Reason must be a valid string.")
+        cleaned_reason = reason.strip()
+        if len(cleaned_reason) > 255:
+            raise DomainValidationError("Reason cannot exceed 255 characters.")
+
     blocked_obj, created = UserBlockedUser.objects.get_or_create(
         blocker=blocker,
         blocked_user=target_user,
         defaults={
-            "reason": reason.strip() if reason else None,
+            "reason": cleaned_reason,
         },
     )
 
