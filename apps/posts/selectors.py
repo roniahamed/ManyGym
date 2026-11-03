@@ -1,11 +1,58 @@
 import uuid
 from typing import Optional, Generator
 from django.db.models import QuerySet, Q, Count
+from django.utils import timezone
 
-from apps.gyms.models import Gym
+from apps.gyms.models import Gym, GymSetting, GymBlockedUser
+from apps.access_control.models import GymStaffAssignment
 from apps.posts.models import GymPost, GymPostMedia
-from common.enums import PostPrivacyEnum
-from common.exceptions import ResourceNotFoundError, PermissionDeniedError
+from common.enums import PostPrivacyEnum, PostsAgeRestrictionEnum, StaffStatus
+from common.exceptions import ResourceNotFoundError, PermissionDeniedError, DomainValidationError
+
+
+def check_posts_age_restriction(gym: Gym, requesting_user=None) -> bool:
+    """
+    Evaluates whether the requesting user satisfies the gym's posts age restriction policy:
+    - 'any_age': Any user (including guests) can view.
+    - '17_plus', '18_plus', '19_plus', '20_plus': Requires user to be authenticated,
+      have date_of_birth in profile, and be >= threshold age.
+    - Gym owner, superuser, and active gym staff are exempt.
+    """
+    setting = getattr(gym, "settings", None)
+    if not setting:
+        setting = GymSetting.objects.filter(gym=gym).first()
+
+    policy = getattr(setting, "posts_age_restriction", PostsAgeRestrictionEnum.ANY_AGE) if setting else PostsAgeRestrictionEnum.ANY_AGE
+    if not policy or policy == PostsAgeRestrictionEnum.ANY_AGE:
+        return True
+
+    age_thresholds = {
+        PostsAgeRestrictionEnum.AGE_17_PLUS: 17,
+        PostsAgeRestrictionEnum.AGE_18_PLUS: 18,
+        PostsAgeRestrictionEnum.AGE_19_PLUS: 19,
+        PostsAgeRestrictionEnum.AGE_20_PLUS: 20,
+    }
+    required_age = age_thresholds.get(policy, 0)
+    if required_age == 0:
+        return True
+
+    if not requesting_user or not requesting_user.is_authenticated:
+        return False
+
+    if requesting_user.is_superuser or gym.owner_user_id == requesting_user.id:
+        return True
+
+    if GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+        return True
+
+    profile = getattr(requesting_user, "profile", None)
+    if not profile or not profile.date_of_birth:
+        return False
+
+    dob = profile.date_of_birth
+    today = timezone.now().date()
+    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    return age >= required_age
 
 
 def list_gym_feed(
@@ -13,13 +60,32 @@ def list_gym_feed(
     is_member_or_staff: bool = False,
     privacy_filter: Optional[str] = None,
     search: Optional[str] = None,
+    requesting_user=None,
 ) -> QuerySet[GymPost]:
     """
     Returns an optimized queryset of gym community posts ordered by publication time.
     Visibility Rules:
     - Public / Unauthenticated / Non-member users see ONLY public posts.
     - Verified Members and Staff see both public and members_only posts.
+    - Respects GymBlockedUser, gym lifecycle (deleted/deactivated), and posts_age_restriction.
     """
+    setting = getattr(gym, "settings", None)
+    if not setting:
+        setting = GymSetting.objects.filter(gym=gym).first()
+
+    if setting and setting.is_deleted:
+        raise ResourceNotFoundError("Gym not found.")
+
+    if setting and setting.is_deactivated and not is_member_or_staff:
+        return GymPost.objects.none()
+
+    if requesting_user and requesting_user.is_authenticated:
+        if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():
+            return GymPost.objects.none()
+
+    if not check_posts_age_restriction(gym, requesting_user):
+        return GymPost.objects.none()
+
     qs = (
         GymPost.objects.filter(gym=gym)
         .select_related("gym", "author_user__profile")
@@ -58,11 +124,29 @@ def get_post_detail(
     gym: Gym,
     post_id: uuid.UUID,
     is_member_or_staff: bool = False,
+    requesting_user=None,
 ) -> GymPost:
     """
     Retrieves a single gym post dossier with all attached media.
-    Enforces privacy access rules.
+    Enforces privacy access rules, blocklist, lifecycle state, and age restriction.
     """
+    setting = getattr(gym, "settings", None)
+    if not setting:
+        setting = GymSetting.objects.filter(gym=gym).first()
+
+    if setting and setting.is_deleted:
+        raise ResourceNotFoundError("Gym not found.")
+
+    if setting and setting.is_deactivated and not is_member_or_staff:
+        raise DomainValidationError("This gym is deactivated.")
+
+    if requesting_user and requesting_user.is_authenticated:
+        if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():
+            raise PermissionDeniedError("You have been blocked by this gym.")
+
+    if not check_posts_age_restriction(gym, requesting_user):
+        raise PermissionDeniedError("This gym's posts are age-restricted. You do not meet the minimum age requirement.")
+
     try:
         post = (
             GymPost.objects.filter(gym=gym, id=post_id)

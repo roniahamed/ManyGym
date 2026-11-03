@@ -13,6 +13,7 @@ from common.enums import AudienceMessagingEnum, StaffStatus, ConversationTypeEnu
 from common.exceptions import (
     PermissionDeniedError,
     DomainValidationError,
+    ResourceNotFoundError,
 )
 
 
@@ -20,17 +21,26 @@ def can_user_message_gym(user, gym: Gym) -> bool:
     """
     Evaluates whether an individual user is permitted to initiate contact with a Gym:
     1. Rejects if user is blocked in GymBlockedUser.
-    2. Validates against GymSettings.who_can_message (EVERYONE, MEMBERS_ONLY, FOLLOWERS_AND_MEMBERS).
+    2. Validates against GymSettings lifecycle (is_deleted, is_deactivated).
+    3. Validates against GymSettings.who_can_message (EVERYONE, MEMBERS_ONLY, FOLLOWERS_AND_MEMBERS).
     """
     # 1. Block list check
     if GymBlockedUser.objects.filter(gym=gym, user=user).exists():
         raise PermissionDeniedError("You have been blocked from messaging this gym.")
 
-    # 2. Check gym settings
+    # 2. Check gym settings & lifecycle
     try:
         setting = gym.settings
-        policy = setting.who_can_message
     except (GymSetting.DoesNotExist, AttributeError):
+        setting = None
+
+    if setting:
+        if getattr(setting, "is_deleted", False):
+            raise ResourceNotFoundError("Gym not found.")
+        if getattr(setting, "is_deactivated", False) and gym.owner_user_id != getattr(user, "id", None):
+            raise DomainValidationError("This gym is deactivated and cannot receive new messages.")
+        policy = setting.who_can_message
+    else:
         policy = AudienceMessagingEnum.EVERYONE
 
     if policy == AudienceMessagingEnum.EVERYONE:

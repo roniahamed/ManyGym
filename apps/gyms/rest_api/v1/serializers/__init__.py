@@ -26,6 +26,10 @@ from apps.gyms.rest_api.v1.serializers.social_serializers import (
     GymFollowerItemSerializer,
     FollowedGymItemSerializer,
     GymFollowActionResponseSerializer,
+    GymMemberRosterItemSerializer,
+    GymMemberJoiningRequestCreateSerializer,
+    GymMemberJoiningRequestResponseSerializer,
+    GymMemberJoiningRequestStatusSerializer,
 )
 
 __all__ = [
@@ -50,4 +54,8 @@ __all__ = [
     "GymFollowerItemSerializer",
     "FollowedGymItemSerializer",
     "GymFollowActionResponseSerializer",
+    "GymMemberRosterItemSerializer",
+    "GymMemberJoiningRequestCreateSerializer",
+    "GymMemberJoiningRequestResponseSerializer",
+    "GymMemberJoiningRequestStatusSerializer",
 ]

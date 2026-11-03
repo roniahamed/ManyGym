@@ -55,3 +55,61 @@ class GymFollowActionResponseSerializer(serializers.Serializer):
     is_following = serializers.BooleanField()
     gym_id = serializers.UUIDField()
     gym_name = serializers.CharField()
+
+
+class GymMemberRosterItemSerializer(serializers.Serializer):
+    """
+    Serializer representing an active member in the gym's public/member-facing roster.
+    """
+    member_id = serializers.UUIDField()
+    user_id = serializers.UUIDField(allow_null=True)
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    full_name = serializers.CharField()
+    email = serializers.EmailField()
+    avatar_url = serializers.CharField(allow_null=True, required=False)
+    joined_at = serializers.DateTimeField()
+    joining_status = serializers.CharField()
+
+    def to_representation(self, instance):
+        if not isinstance(instance, dict):
+            user = getattr(instance, "user", None)
+            profile = getattr(user, "profile", None) if user else None
+            avatar = getattr(profile, "avatar_url", None) or getattr(instance, "profile_photo_url", None)
+            fn = getattr(instance, "first_name", "") or ""
+            ln = getattr(instance, "last_name", "") or ""
+            return {
+                "member_id": instance.id,
+                "user_id": user.id if user else None,
+                "first_name": fn,
+                "last_name": ln,
+                "full_name": f"{fn} {ln}".strip(),
+                "email": getattr(instance, "email", ""),
+                "avatar_url": avatar,
+                "joined_at": instance.created_at,
+                "joining_status": getattr(instance, "joining_status", ""),
+            }
+        return super().to_representation(instance)
+
+
+class GymMemberJoiningRequestCreateSerializer(serializers.Serializer):
+    interested_plan_id = serializers.UUIDField(required=False, allow_null=True)
+    notes = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
+class GymMemberJoiningRequestResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    gym_id = serializers.UUIDField()
+    gym_name = serializers.CharField()
+    status = serializers.CharField()
+    lead_id = serializers.UUIDField()
+    created = serializers.BooleanField()
+
+
+class GymMemberJoiningRequestStatusSerializer(serializers.Serializer):
+    gym_id = serializers.UUIDField()
+    can_send_request = serializers.BooleanField()
+    is_member = serializers.BooleanField()
+    has_pending_request = serializers.BooleanField()
+    is_blocked = serializers.BooleanField()
+    who_can_send_joining_request = serializers.CharField()

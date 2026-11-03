@@ -8,7 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 
-from apps.gyms.models import Gym
+from apps.gyms.models import Gym, GymBlockedUser
 from apps.users.models import User
 from apps.access_control.models import GymStaffAssignment
 from apps.memberships.models import MembershipPlan
@@ -91,6 +91,9 @@ def create_member(
 
     if Member.objects.filter(gym=gym, email=email_clean).exists():
         raise ResourceConflictError(f"A member with email '{email_clean}' already exists in this gym.")
+
+    if GymBlockedUser.objects.filter(gym=gym, user__email=email_clean).exists():
+        raise DomainValidationError(f"User with email '{email_clean}' is currently blocked by this gym.")
 
     # 2. Validate trainer assignment if provided
     trainer_assignment = None

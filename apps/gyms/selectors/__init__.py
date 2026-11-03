@@ -19,6 +19,7 @@ from apps.gyms.selectors.social_selectors import (
     list_user_followed_gyms,
     is_following_gym,
     list_gym_following,
+    list_gym_members_for_audience,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "list_user_followed_gyms",
     "is_following_gym",
     "list_gym_following",
+    "list_gym_members_for_audience",
 ]

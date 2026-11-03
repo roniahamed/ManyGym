@@ -1,11 +1,11 @@
 import uuid
 from typing import Optional
 from django.db import models
-from apps.gyms.models import Gym, GymSetting, GymFollow
+from apps.gyms.models import Gym, GymSetting, GymFollow, GymBlockedUser
 from apps.access_control.models import GymStaffAssignment
 from apps.users.models import User
 from apps.members.models import Member
-from common.enums import AudienceFollowingVisibilityEnum, StaffStatus
+from common.enums import AudienceFollowingVisibilityEnum, AudienceMembersVisibilityEnum, StaffStatus
 from common.exceptions import DomainValidationError, ResourceNotFoundError, PermissionDeniedError
 
 
@@ -35,6 +35,8 @@ def list_gym_followers(gym_id, requesting_user: Optional[User] = None) -> models
                     "settings__id",
                     "settings__who_can_see_followers",
                     "settings__who_can_see_following",
+                    "settings__is_deactivated",
+                    "settings__is_deleted",
                 )
                 .get(id=gym_uuid)
             )
@@ -44,6 +46,23 @@ def list_gym_followers(gym_id, requesting_user: Optional[User] = None) -> models
     setting = getattr(gym, "settings", None)
     if not setting:
         setting = GymSetting.objects.filter(gym_id=gym.id).first()
+
+    if getattr(setting, "is_deleted", False):
+        raise ResourceNotFoundError("Gym not found.")
+
+    if getattr(setting, "is_deactivated", False):
+        is_owner_or_staff = False
+        if requesting_user and requesting_user.is_authenticated:
+            if gym.owner_user_id == requesting_user.id:
+                is_owner_or_staff = True
+            elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+                is_owner_or_staff = True
+        if not is_owner_or_staff:
+            raise DomainValidationError("This gym is deactivated.")
+
+    if requesting_user and requesting_user.is_authenticated:
+        if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():
+            raise PermissionDeniedError("You have been blocked by this gym.")
 
     if setting:
         policy = getattr(setting, "who_can_see_followers", None) or AudienceFollowingVisibilityEnum.EVERYONE
@@ -145,6 +164,8 @@ def list_gym_following(gym_id, requesting_user: Optional[User] = None) -> list:
                     "owner_user_id",
                     "settings__id",
                     "settings__who_can_see_following",
+                    "settings__is_deactivated",
+                    "settings__is_deleted",
                 )
                 .get(id=gym_uuid)
             )
@@ -154,6 +175,23 @@ def list_gym_following(gym_id, requesting_user: Optional[User] = None) -> list:
     setting = getattr(gym, "settings", None)
     if not setting:
         setting = GymSetting.objects.filter(gym_id=gym.id).first()
+
+    if getattr(setting, "is_deleted", False):
+        raise ResourceNotFoundError("Gym not found.")
+
+    if getattr(setting, "is_deactivated", False):
+        is_owner_or_staff = False
+        if requesting_user and requesting_user.is_authenticated:
+            if gym.owner_user_id == requesting_user.id:
+                is_owner_or_staff = True
+            elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+                is_owner_or_staff = True
+        if not is_owner_or_staff:
+            raise DomainValidationError("This gym is deactivated.")
+
+    if requesting_user and requesting_user.is_authenticated:
+        if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():
+            raise PermissionDeniedError("You have been blocked by this gym.")
 
     if setting:
         policy = setting.who_can_see_following
@@ -182,3 +220,108 @@ def list_gym_following(gym_id, requesting_user: Optional[User] = None) -> list:
                 raise PermissionDeniedError("The following list for this gym is private.")
 
     return []
+
+
+def list_gym_members_for_audience(
+    gym_id,
+    requesting_user: Optional[User] = None,
+    search: Optional[str] = None,
+) -> models.QuerySet[Member]:
+    """
+    Returns a QuerySet of Member records representing gym members.
+    Enforces:
+    - Gym existence and soft-delete / deactivation checks.
+    - GymBlockedUser check (blocked users cannot view).
+    - GymSetting.who_can_see_members:
+        - 'everyone': visible to all authenticated users.
+        - 'only_members': visible only to gym members, active staff, or owner.
+    """
+    if isinstance(gym_id, Gym):
+        gym = gym_id
+    else:
+        try:
+            gym_uuid = uuid.UUID(str(gym_id))
+        except (ValueError, TypeError, AttributeError):
+            raise DomainValidationError("Invalid gym ID.")
+
+        try:
+            gym = (
+                Gym.objects.select_related("settings")
+                .only(
+                    "id",
+                    "owner_user_id",
+                    "settings__id",
+                    "settings__who_can_see_members",
+                    "settings__is_deactivated",
+                    "settings__is_deleted",
+                )
+                .get(id=gym_uuid)
+            )
+        except Gym.DoesNotExist:
+            raise ResourceNotFoundError("Gym not found.")
+
+    setting = getattr(gym, "settings", None)
+    if not setting:
+        setting = GymSetting.objects.filter(gym_id=gym.id).first()
+
+    if getattr(setting, "is_deleted", False):
+        raise ResourceNotFoundError("Gym not found.")
+
+    if getattr(setting, "is_deactivated", False):
+        is_owner_or_staff = False
+        if requesting_user and requesting_user.is_authenticated:
+            if gym.owner_user_id == requesting_user.id:
+                is_owner_or_staff = True
+            elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+                is_owner_or_staff = True
+        if not is_owner_or_staff:
+            raise DomainValidationError("This gym is deactivated.")
+
+    if requesting_user and requesting_user.is_authenticated:
+        if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():
+            raise PermissionDeniedError("You have been blocked by this gym.")
+
+    if setting:
+        policy = getattr(setting, "who_can_see_members", AudienceMembersVisibilityEnum.EVERYONE)
+        if policy == AudienceMembersVisibilityEnum.ONLY_MEMBERS:
+            is_authorized = False
+            if requesting_user and requesting_user.is_authenticated:
+                if gym.owner_user_id == requesting_user.id:
+                    is_authorized = True
+                elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+                    is_authorized = True
+                elif Member.objects.filter(gym=gym, user=requesting_user).exclude(joining_status="removed").exists():
+                    is_authorized = True
+
+            if not is_authorized:
+                raise PermissionDeniedError("Only gym members can view the member roster.")
+
+    qs = (
+        Member.objects.filter(gym=gym)
+        .exclude(joining_status="removed")
+        .select_related("user", "user__profile")
+        .only(
+            "id",
+            "gym_id",
+            "user_id",
+            "first_name",
+            "last_name",
+            "email",
+            "profile_photo_url",
+            "joining_status",
+            "created_at",
+            "user__id",
+            "user__profile__avatar_url",
+        )
+        .order_by("-created_at")
+    )
+
+    if search and search.strip():
+        s = search.strip()
+        qs = qs.filter(
+            models.Q(first_name__icontains=s)
+            | models.Q(last_name__icontains=s)
+            | models.Q(email__icontains=s)
+        )
+
+    return qs

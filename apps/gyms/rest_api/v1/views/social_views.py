@@ -8,16 +8,25 @@ from apps.gyms.rest_api.v1.serializers import (
     GymFollowerItemSerializer,
     FollowedGymItemSerializer,
     GymFollowActionResponseSerializer,
+    GymMemberRosterItemSerializer,
+    GymMemberJoiningRequestCreateSerializer,
+    GymMemberJoiningRequestResponseSerializer,
+    GymMemberJoiningRequestStatusSerializer,
 )
 from apps.gyms.services import (
     follow_gym,
     unfollow_gym,
+    block_user_for_gym,
+    send_member_joining_request,
+    get_member_joining_request_status,
 )
 from apps.gyms.selectors import (
     list_gym_followers,
     list_gym_following,
     list_user_followed_gyms,
+    list_gym_members_for_audience,
 )
+from apps.gyms.rest_api.v1.views.base_views import resolve_gym_context, check_gym_permission
 from common.serializers import ErrorDetailSerializer
 from common.pagination import StandardResultsSetPagination
 
@@ -211,3 +220,123 @@ class GymFollowingListView(APIView):
     def get(self, request, gym_id):
         following_list = list_gym_following(gym_id=gym_id, requesting_user=request.user)
         return Response(following_list, status=status.HTTP_200_OK)
+
+
+class GymMembersListView(APIView):
+    """
+    API endpoint for listing members of a gym for Manygym audience.
+    Restricted by GymSetting.who_can_see_members (Everyone, Only Members).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Social & Follow"],
+        summary="List Gym Members (Audience)",
+        description="Lists active gym members. Restricted by GymSetting.who_can_see_members ('everyone', 'only_members').",
+        parameters=[
+            OpenApiParameter(name="page", type=int, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name="page_size", type=int, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name="search", type=str, location=OpenApiParameter.QUERY, required=False),
+        ],
+        responses={
+            200: OpenApiResponse(response=GymMemberRosterItemSerializer(many=True), description="List of gym members."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Roster is restricted by privacy settings."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
+        },
+    )
+    def get(self, request, gym_id):
+        members_qs = list_gym_members_for_audience(
+            gym_id=gym_id,
+            requesting_user=request.user,
+            search=request.query_params.get("search"),
+        )
+
+        if request.query_params.get("page") or request.query_params.get("page_size"):
+            paginator = StandardResultsSetPagination()
+            page_results = paginator.paginate_queryset(members_qs, request)
+            serializer = GymMemberRosterItemSerializer(page_results, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = GymMemberRosterItemSerializer(members_qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class GymMemberJoiningRequestView(APIView):
+    """
+    API endpoint for Manygym users to submit a member joining request to a gym.
+    Restricted by GymSetting.who_can_send_joining_request (Everyone, No one).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Social & Follow"],
+        summary="Submit Member Joining Request",
+        description="Sends a joining request from the authenticated user to the gym. Restricted by GymSetting.who_can_send_joining_request ('everyone', 'no_one').",
+        request=GymMemberJoiningRequestCreateSerializer,
+        responses={
+            201: OpenApiResponse(response=GymMemberJoiningRequestResponseSerializer, description="Joining request submitted."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure or already a member."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Gym does not accept requests or user is blocked."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
+        },
+    )
+    def post(self, request, gym_id):
+        serializer = GymMemberJoiningRequestCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        res_data = send_member_joining_request(
+            user=request.user,
+            gym_id=gym_id,
+            interested_plan_id=serializer.validated_data.get("interested_plan_id"),
+            notes=serializer.validated_data.get("notes"),
+        )
+        status_code = status.HTTP_201_CREATED if res_data.get("created") else status.HTTP_200_OK
+        return Response(res_data, status=status_code)
+
+    @extend_schema(
+        tags=["Gym Social & Follow"],
+        summary="Get Member Joining Request Status",
+        description="Retrieves the authenticated user's eligibility and current membership joining status for this gym.",
+        responses={
+            200: OpenApiResponse(response=GymMemberJoiningRequestStatusSerializer, description="Joining request status."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
+        },
+    )
+    def get(self, request, gym_id):
+        status_data = get_member_joining_request_status(user=request.user, gym_id=gym_id)
+        return Response(status_data, status=status.HTTP_200_OK)
+
+
+class GymFollowerBlockView(APIView):
+    """
+    API endpoint to block a user directly from gym followers.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Gym Settings - Blocking"],
+        summary="Block User from Followers",
+        description="Blocks a follower from the gym workspace, immediately removing them from followers. Requires 'gym_profile:edit' scope.",
+        responses={
+            200: OpenApiResponse(description="Follower successfully blocked from gym."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure or owner block attempt."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym or user not found."),
+        },
+    )
+    def post(self, request, gym_id, user_id):
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="gym_profile:edit")
+        block_user_for_gym(
+            gym=gym,
+            user_id=str(user_id),
+            blocked_by_user=request.user,
+            reason="Blocked from followers list",
+        )
+        return Response(
+            {"message": "Follower successfully blocked from gym.", "user_id": str(user_id)},
+            status=status.HTTP_200_OK,
+        )

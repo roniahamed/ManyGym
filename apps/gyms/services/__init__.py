@@ -20,6 +20,8 @@ from apps.gyms.services.social_services import (
     follow_gym,
     unfollow_gym,
     auto_follow_gym_for_member,
+    send_member_joining_request,
+    get_member_joining_request_status,
 )
 
 __all__ = [
@@ -38,4 +40,6 @@ __all__ = [
     "follow_gym",
     "unfollow_gym",
     "auto_follow_gym_for_member",
+    "send_member_joining_request",
+    "get_member_joining_request_status",
 ]

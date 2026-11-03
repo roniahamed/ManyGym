@@ -25,6 +25,9 @@ from apps.gyms.rest_api.v1.views.social_views import (
     GymFollowersListView,
     UserFollowedGymsListView,
     GymFollowingListView,
+    GymMembersListView,
+    GymMemberJoiningRequestView,
+    GymFollowerBlockView,
 )
 
 __all__ = [
@@ -46,4 +49,7 @@ __all__ = [
     "GymFollowersListView",
     "UserFollowedGymsListView",
     "GymFollowingListView",
+    "GymMembersListView",
+    "GymMemberJoiningRequestView",
+    "GymFollowerBlockView",
 ]

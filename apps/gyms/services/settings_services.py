@@ -2,7 +2,7 @@ import uuid
 import logging
 from typing import Optional, Any
 from django.db import transaction
-from apps.gyms.models import Gym, GymSetting, GymBlockedUser
+from apps.gyms.models import Gym, GymSetting, GymBlockedUser, GymFollow
 from apps.users.models import User
 from common.exceptions import DomainValidationError, ResourceNotFoundError
 
@@ -92,6 +92,9 @@ def block_user_for_gym(
             "reason": reason.strip() if reason else None,
         },
     )
+    # Remove follow relationship if user was following the gym
+    GymFollow.objects.filter(gym=gym, user=target_user).delete()
+
     if created:
         logger.info("Blocked user %s on gym %s by %s", target_user.email, gym.name, blocked_by_user)
     return blocked_obj

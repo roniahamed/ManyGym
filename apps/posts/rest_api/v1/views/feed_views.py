@@ -70,6 +70,7 @@ class GymFeedView(APIView):
             is_member_or_staff=is_member_or_staff,
             privacy_filter=privacy,
             search=search,
+            requesting_user=request.user,
         )
 
         paginator = StandardResultsSetPagination()
@@ -147,7 +148,12 @@ class GymPostDetailView(APIView):
         gym = resolve_post_gym(request)
         is_member_or_staff = check_user_is_member_or_staff(request, gym)
 
-        post = get_post_detail(gym=gym, post_id=post_id, is_member_or_staff=is_member_or_staff)
+        post = get_post_detail(
+            gym=gym,
+            post_id=post_id,
+            is_member_or_staff=is_member_or_staff,
+            requesting_user=request.user,
+        )
         return Response(GymPostDetailSerializer(post).data, status=status.HTTP_200_OK)
 
     @extend_schema(
