@@ -23,6 +23,7 @@ from apps.gyms.rest_api.v1.views import (
     GymAdminLogDetailView,
     GymAdminLogsMetricsView,
     GymAdminLogsActionTypesView,
+    GymAdminLogsExportView,
 )
 
 app_name = "gyms_v1"
@@ -45,11 +46,13 @@ urlpatterns = [
     path("logs/admin/", GymAdminLogsListView.as_view(), name="gym-admin-logs-list"),
     path("logs/admin/metrics/", GymAdminLogsMetricsView.as_view(), name="gym-admin-logs-metrics"),
     path("logs/admin/actions/", GymAdminLogsActionTypesView.as_view(), name="gym-admin-logs-actions"),
+    path("logs/admin/export/", GymAdminLogsExportView.as_view(), name="gym-admin-logs-export"),
     path("logs/admin/<uuid:log_id>/", GymAdminLogDetailView.as_view(), name="gym-admin-log-detail"),
     # Convenient aliases matching "admin-logs" convention
     path("admin-logs/", GymAdminLogsListView.as_view(), name="gym-admin-logs-alias-list"),
     path("admin-logs/metrics/", GymAdminLogsMetricsView.as_view(), name="gym-admin-logs-alias-metrics"),
     path("admin-logs/actions/", GymAdminLogsActionTypesView.as_view(), name="gym-admin-logs-alias-actions"),
+    path("admin-logs/export/", GymAdminLogsExportView.as_view(), name="gym-admin-logs-alias-export"),
     path("admin-logs/<uuid:log_id>/", GymAdminLogDetailView.as_view(), name="gym-admin-log-alias-detail"),
     # Social follow & audience routes
     path("followed/", UserFollowedGymsListView.as_view(), name="gym-followed-list"),

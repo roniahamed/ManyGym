@@ -57,6 +57,25 @@ def update_gym_settings(gym: Gym, **data: Any) -> GymSetting:
 
     settings_obj.save()
     logger.info("Updated settings for gym %s (%s)", gym.name, gym.id)
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        updated_keys = [k for k in data.keys() if k in allowed_fields and data[k] is not None]
+        if updated_keys:
+            log_admin_action(
+                gym=gym,
+                action="Updated gym settings",
+                action_type=AdminLogActionType.UPDATE_SETTINGS,
+                details=f"Updated settings: {', '.join(updated_keys[:4])}",
+                category=AdminLogCategory.SETTINGS,
+                target_type="gym_settings",
+                target_id=str(settings_obj.id),
+                metadata={"updated_fields": updated_keys},
+            )
+    except Exception:
+        pass
+
     return settings_obj
 
 

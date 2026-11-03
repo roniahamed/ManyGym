@@ -217,6 +217,22 @@ def resend_member_invitation(member_id: uuid.UUID, gym: Gym) -> Member:
         gym_name=gym.name,
         token=new_token,
     )
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Resent member invitation",
+            action_type=AdminLogActionType.RESEND_MEMBER_INVITATION,
+            details=f"Resent invitation to {member.first_name} ({member.email})",
+            category=AdminLogCategory.MEMBERS,
+            target_type="member",
+            target_id=str(member.id),
+        )
+    except Exception:
+        pass
+
     return member
 
 

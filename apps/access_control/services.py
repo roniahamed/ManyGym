@@ -151,6 +151,21 @@ def create_custom_role(gym: Gym, name: str, description: str = None, permission_
         perms = Permission.objects.filter(id__in=permission_ids)
         role.permissions.set(perms)
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Created a custom role",
+            action_type=AdminLogActionType.CREATE_ROLE,
+            details=f"Created custom role '{role.name}'",
+            category=AdminLogCategory.ACCESS_CONTROL,
+            target_type="role",
+            target_id=str(role.id),
+        )
+    except Exception:
+        pass
+
     return role
 
 
@@ -174,6 +189,22 @@ def update_custom_role(role: Role, name: str = None, description: str = None, pe
         perms = Permission.objects.filter(id__in=permission_ids)
         role.permissions.set(perms)
 
+    if role.gym:
+        try:
+            from apps.gyms.services.admin_log_services import log_admin_action
+            from common.enums import AdminLogCategory, AdminLogActionType
+            log_admin_action(
+                gym=role.gym,
+                action="Updated a custom role",
+                action_type=AdminLogActionType.UPDATE_ROLE,
+                details=f"Updated role '{role.name}'",
+                category=AdminLogCategory.ACCESS_CONTROL,
+                target_type="role",
+                target_id=str(role.id),
+            )
+        except Exception:
+            pass
+
     return role
 
 
@@ -187,6 +218,22 @@ def delete_custom_role(role: Role) -> None:
 
     if GymStaffAssignment.objects.filter(role=role).exists():
         raise DomainValidationError("Cannot delete a role that is currently assigned to gym staff members.")
+
+    if role.gym:
+        try:
+            from apps.gyms.services.admin_log_services import log_admin_action
+            from common.enums import AdminLogCategory, AdminLogActionType
+            log_admin_action(
+                gym=role.gym,
+                action="Deleted a custom role",
+                action_type=AdminLogActionType.DELETE_ROLE,
+                details=f"Deleted role '{role.name}'",
+                category=AdminLogCategory.ACCESS_CONTROL,
+                target_type="role",
+                target_id=str(role.id),
+            )
+        except Exception:
+            pass
 
     role.delete()
 
@@ -250,6 +297,23 @@ def update_staff_status(assignment: GymStaffAssignment, status_value: str) -> Gy
         raise DomainValidationError(f"Invalid staff status: '{status_value}'.")
     assignment.status = status_value
     assignment.save(update_fields=["status"])
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        user_name = f"{assignment.user.first_name} {assignment.user.last_name}".strip() or assignment.user.email
+        log_admin_action(
+            gym=assignment.gym,
+            action="Updated staff status",
+            action_type=AdminLogActionType.UPDATE_STAFF_ROLE,
+            details=f"Updated status of {user_name} to {status_value}",
+            category=AdminLogCategory.ACCESS_CONTROL,
+            target_type="staff",
+            target_id=str(assignment.id),
+        )
+    except Exception:
+        pass
+
     return assignment
 
 

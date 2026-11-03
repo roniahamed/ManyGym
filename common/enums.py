@@ -259,6 +259,7 @@ class AdminLogCategory(models.TextChoices):
     VISIBILITY = "visibility", "Page Visibility"
     SETTINGS = "settings", "Settings & Alerts"
     MEMBERS = "members", "Members"
+    SUBSCRIPTIONS = "subscriptions", "Subscriptions & Payments"
     MEMBER_REQUESTS = "member_requests", "Member Requests"
     MEMBERSHIP_PLANS = "membership_plans", "Membership Plans"
     ROUTINES = "routines", "Routine Templates"
@@ -275,6 +276,7 @@ class AdminLogActionType(models.TextChoices):
     UPDATE_OPENING_HOURS = "update_opening_hours", "Updated opening hours"
     ADD_GALLERY_MEDIA = "add_gallery_media", "Added gallery media"
     DELETE_GALLERY_MEDIA = "delete_gallery_media", "Deleted gallery media"
+    REORDER_GALLERY = "reorder_gallery", "Reordered gallery media"
 
     # Community Posts
     PUBLISH_POST = "publish_post", "Publish a post"
@@ -306,21 +308,34 @@ class AdminLogActionType(models.TextChoices):
     CREATE_MEMBER = "create_member", "Create a member"
     UPDATE_MEMBER = "update_member", "Update a member"
     DELETE_MEMBER = "delete_member", "Delete a member"
+    RESEND_MEMBER_INVITATION = "resend_member_invitation", "Resent member invitation"
+
+    # Subscriptions & Payments
+    CREATE_SUBSCRIPTION = "create_subscription", "Create subscription"
+    UPDATE_SUBSCRIPTION_STATUS = "update_subscription_status", "Updated subscription status"
+    RECORD_PAYMENT = "record_payment", "Recorded payment"
 
     # Custom Membership Plans
     CREATE_MEMBERSHIP_PLAN = "create_membership_plan", "Create a custom membership plan"
     UPDATE_MEMBERSHIP_PLAN = "update_membership_plan", "Update a custom membership plan"
     DELETE_MEMBERSHIP_PLAN = "delete_membership_plan", "Delete a custom membership plan"
+    CHANGE_PLAN_STATUS = "change_plan_status", "Changed plan status"
 
-    # Routine Templates
+    # Routine Templates & Prescriptions
     CREATE_ROUTINE = "create_routine", "Create a routine template"
     UPDATE_ROUTINE = "update_routine", "Update a routine template"
     DELETE_ROUTINE = "delete_routine", "Delete a routine template"
+    ASSIGN_ROUTINE = "assign_routine", "Assigned routine to member"
 
     # Leads CRM
     CREATE_LEAD = "create_lead", "Create a lead"
     UPDATE_LEAD = "update_lead", "Update a lead"
+    UPDATE_LEAD_STAGE = "update_lead_stage", "Updated lead stage"
+    CONVERT_LEAD = "convert_lead", "Converted lead to member"
     DELETE_LEAD = "delete_lead", "Delete a lead"
+
+    # Audit & Reporting
+    EXPORT_LOGS = "export_logs", "Exported admin logs"
 
     # Custom / General
     CUSTOM_ACTION = "custom_action", "Custom Action"

@@ -251,6 +251,22 @@ def set_plan_status(
 
     plan.plan_status = new_status
     plan.save(update_fields=["plan_status", "updated_at"])
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Changed plan status",
+            action_type=AdminLogActionType.CHANGE_PLAN_STATUS,
+            details=f"Changed status of '{plan.name}' from {current_status} to {new_status}",
+            category=AdminLogCategory.MEMBERSHIP_PLANS,
+            target_type="plan",
+            target_id=str(plan.id),
+        )
+    except Exception:
+        pass
+
     return plan
 
 

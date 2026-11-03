@@ -105,4 +105,20 @@ def convert_lead_to_member(
         author_staff_id=author_staff_id,
     )
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        lead_name = f"{lead.first_name} {lead.last_name}".strip()
+        log_admin_action(
+            gym=lead.gym,
+            action="Converted lead to member",
+            action_type=AdminLogActionType.CONVERT_LEAD,
+            details=f"Converted lead {lead_name} into active member {member.first_name} {member.last_name}",
+            category=AdminLogCategory.LEADS,
+            target_type="lead",
+            target_id=str(lead.id),
+        )
+    except Exception:
+        pass
+
     return member

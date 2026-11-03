@@ -34,6 +34,7 @@ from apps.gyms.rest_api.v1.views.admin_log_views import (
     GymAdminLogDetailView,
     GymAdminLogsMetricsView,
     GymAdminLogsActionTypesView,
+    GymAdminLogsExportView,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "GymAdminLogDetailView",
     "GymAdminLogsMetricsView",
     "GymAdminLogsActionTypesView",
+    "GymAdminLogsExportView",
 ]

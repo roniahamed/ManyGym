@@ -113,6 +113,21 @@ def create_routine_template(
             if ex_objs:
                 RoutineTemplateExercise.objects.bulk_create(ex_objs)
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Created a routine template",
+            action_type=AdminLogActionType.CREATE_ROUTINE,
+            details=f"Created routine template '{template.template_name}' ({template.routine_format})",
+            category=AdminLogCategory.ROUTINES,
+            target_type="routine_template",
+            target_id=str(template.id),
+        )
+    except Exception:
+        pass
+
     return template
 
 
@@ -203,6 +218,21 @@ def update_routine_template(
             if ex_objs:
                 RoutineTemplateExercise.objects.bulk_create(ex_objs)
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=template.gym,
+            action="Updated a routine template",
+            action_type=AdminLogActionType.UPDATE_ROUTINE,
+            details=f"Updated routine template '{template.template_name}'",
+            category=AdminLogCategory.ROUTINES,
+            target_type="routine_template",
+            target_id=str(template.id),
+        )
+    except Exception:
+        pass
+
     return template
 
 
@@ -219,5 +249,20 @@ def delete_routine_template(template: RoutineTemplate) -> None:
         raise ResourceConflictError(
             "Cannot delete routine template that is currently actively prescribed to gym members."
         )
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=template.gym,
+            action="Deleted a routine template",
+            action_type=AdminLogActionType.DELETE_ROUTINE,
+            details=f"Deleted routine template '{template.template_name}'",
+            category=AdminLogCategory.ROUTINES,
+            target_type="routine_template",
+            target_id=str(template.id),
+        )
+    except Exception:
+        pass
 
     template.delete()

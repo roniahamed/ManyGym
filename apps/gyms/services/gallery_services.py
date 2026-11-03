@@ -63,6 +63,21 @@ def add_gallery_item(
     from apps.gyms.tasks import optimize_gallery_media_task
     transaction.on_commit(lambda: optimize_gallery_media_task.delay(str(item.id)))
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Added gallery media",
+            action_type=AdminLogActionType.ADD_GALLERY_MEDIA,
+            details=f"Added {media_type.lower()} to {category} gallery",
+            category=AdminLogCategory.GYM_PROFILE,
+            target_type="gallery_item",
+            target_id=str(item.id),
+        )
+    except Exception:
+        pass
+
     return item
 
 
@@ -99,4 +114,20 @@ def delete_gallery_item(gym: Gym, item_id: str) -> None:
     item = GymGallery.objects.filter(gym=gym, id=item_id).first()
     if not item:
         raise ResourceNotFoundError("Gallery item not found.")
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=gym,
+            action="Deleted gallery media",
+            action_type=AdminLogActionType.DELETE_GALLERY_MEDIA,
+            details=f"Deleted {item.media_type.lower()} from gallery ({item.category})",
+            category=AdminLogCategory.GYM_PROFILE,
+            target_type="gallery_item",
+            target_id=str(item.id),
+        )
+    except Exception:
+        pass
+
     item.delete()

@@ -152,6 +152,22 @@ def create_lead(
             author_staff_id=author_staff_id,
         )
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        lead_name = f"{lead.first_name} {lead.last_name}".strip()
+        log_admin_action(
+            gym=gym,
+            action="Created a lead",
+            action_type=AdminLogActionType.CREATE_LEAD,
+            details=f"Created lead {lead_name} ({lead.email or lead.phone or 'No contact'})",
+            category=AdminLogCategory.LEADS,
+            target_type="lead",
+            target_id=str(lead.id),
+        )
+    except Exception:
+        pass
+
     return lead
 
 
@@ -332,6 +348,23 @@ def update_lead_stage(
 
     lead.stage = new_stage
     lead.save()
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        lead_name = f"{lead.first_name} {lead.last_name}".strip()
+        log_admin_action(
+            gym=lead.gym,
+            action="Updated lead stage",
+            action_type=AdminLogActionType.UPDATE_LEAD_STAGE,
+            details=f"Updated stage of {lead_name} to {new_stage}",
+            category=AdminLogCategory.LEADS,
+            target_type="lead",
+            target_id=str(lead.id),
+        )
+    except Exception:
+        pass
+
     return lead
 
 
@@ -342,4 +375,21 @@ def delete_lead(lead: Lead) -> None:
     """
     if lead.stage == LeadStageEnum.JOINED or lead.converted_member_id is not None:
         raise ResourceConflictError("Cannot delete a lead that has already been converted to a member.")
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        lead_name = f"{lead.first_name} {lead.last_name}".strip()
+        log_admin_action(
+            gym=lead.gym,
+            action="Deleted a lead",
+            action_type=AdminLogActionType.DELETE_LEAD,
+            details=f"Deleted lead {lead_name}",
+            category=AdminLogCategory.LEADS,
+            target_type="lead",
+            target_id=str(lead.id),
+        )
+    except Exception:
+        pass
+
     lead.delete()

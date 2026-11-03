@@ -303,3 +303,85 @@ class GymAdminLogsActionTypesView(APIView):
         categories = [{"value": choice[0], "label": choice[1]} for choice in AdminLogCategory.choices]
         action_types = [{"value": choice[0], "label": choice[1]} for choice in AdminLogActionType.choices]
         return Response({"categories": categories, "action_types": action_types}, status=status.HTTP_200_OK)
+
+
+class GymAdminLogsExportView(APIView):
+    """
+    API endpoint for exporting Gym Admin Logs as CSV or JSON format.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Alerts & Logs - Admin Logs"],
+        summary="Export Admin Logs",
+        description="""
+### Summary
+Exports administration audit logs as a downloadable CSV or JSON file.
+Accepts the same filtering parameters as the list endpoint.
+        """,
+        parameters=[
+            OpenApiParameter(name="gym_id", type=str, required=False),
+            OpenApiParameter(name="format", type=str, required=False, description="Export format: 'csv' (default) or 'json'"),
+            OpenApiParameter(name="category", type=str, required=False),
+            OpenApiParameter(name="action_type", type=str, required=False),
+            OpenApiParameter(name="actor_id", type=str, required=False),
+            OpenApiParameter(name="start_date", type=str, required=False),
+            OpenApiParameter(name="end_date", type=str, required=False),
+            OpenApiParameter(name="search", type=str, required=False),
+        ],
+        responses={
+            200: OpenApiResponse(description="File download attachment or JSON array."),
+        },
+    )
+    def get(self, request):
+        import csv
+        from django.http import HttpResponse
+        from django.utils import timezone
+
+        gym = resolve_gym_context(request)
+        check_gym_permission(request, gym, required_scope="admin_logs:read")
+
+        category = request.query_params.get("category")
+        action_type = request.query_params.get("action_type")
+        actor_id = request.query_params.get("actor_id")
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        search = request.query_params.get("search")
+        export_format = (request.query_params.get("format") or "csv").strip().lower()
+
+        logs, _, _ = list_admin_logs(
+            gym=gym,
+            category=category,
+            action_type=action_type,
+            actor_id=actor_id,
+            start_date=start_date,
+            end_date=end_date,
+            search=search,
+            page=1,
+            page_size=1000,
+        )
+
+        if export_format == "json":
+            data = GymAdminLogSerializer(logs, many=True).data
+            return Response(data, status=status.HTTP_200_OK)
+
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        filename = f"admin_logs_{gym.id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+        writer = csv.writer(response)
+        writer.writerow(["Admin", "Action", "Details", "Date and Time", "Category", "Action Type", "Target Type", "Target ID"])
+        for item in logs:
+            admin_name = item.actor_name or (item.actor.email if item.actor else "System")
+            writer.writerow([
+                admin_name,
+                item.action,
+                item.details,
+                item.formatted_date_time,
+                item.get_category_display(),
+                item.action_type,
+                item.target_type or "",
+                item.target_id or "",
+            ])
+
+        return response

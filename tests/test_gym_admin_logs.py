@@ -368,3 +368,88 @@ class TestGymAdminLogs:
             assert resp.status_code == status.HTTP_200_OK
             assert len(resp.json()["results"]) == 20
 
+    def test_export_admin_logs_csv_and_json(self, auth_client, test_gym, owner_user):
+        """Tests GET /api/v1/gyms/logs/admin/export/ endpoint in CSV and JSON formats."""
+        log_admin_action(
+            gym=test_gym,
+            actor=owner_user,
+            action="Updated page information",
+            details="Changed the page description",
+            category=AdminLogCategory.GYM_PROFILE,
+        )
+
+        url = reverse("gyms_v1:gym-admin-logs-export")
+
+        # 1. Test CSV format
+        resp_csv = auth_client.get(f"{url}?gym_id={test_gym.id}&format=csv")
+        assert resp_csv.status_code == status.HTTP_200_OK
+        assert "text/csv" in resp_csv["Content-Type"]
+        assert "attachment; filename=" in resp_csv["Content-Disposition"]
+        content = resp_csv.content.decode("utf-8")
+        assert "Sarah Ahmed" in content
+        assert "Updated page information" in content
+        assert "Changed the page description" in content
+
+        # 2. Test JSON format
+        resp_json = auth_client.get(f"{url}?gym_id={test_gym.id}&format=json")
+        assert resp_json.status_code == status.HTTP_200_OK
+        data = resp_json.json()
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["action"] == "Updated page information"
+
+    def test_automatic_logging_on_gallery_media(self, test_gym):
+        """Verifies gallery media upload and deletion records admin logs."""
+        from apps.gyms.services.gallery_services import add_gallery_item, delete_gallery_item
+
+        item = add_gallery_item(
+            gym=test_gym,
+            media_url="https://example.com/photo.jpg",
+            caption="Front entrance",
+        )
+        logs = GymAdminLog.objects.filter(gym=test_gym, action_type=AdminLogActionType.ADD_GALLERY_MEDIA)
+        assert logs.exists()
+
+        delete_gallery_item(gym=test_gym, item_id=str(item.id))
+        del_logs = GymAdminLog.objects.filter(gym=test_gym, action_type=AdminLogActionType.DELETE_GALLERY_MEDIA)
+        assert del_logs.exists()
+
+    def test_automatic_logging_on_lead_lifecycle(self, test_gym):
+        """Verifies lead creation, stage update, and deletion record admin logs."""
+        from apps.leads.services.lead_services import create_lead, update_lead_stage, delete_lead
+        from common.enums import LeadStageEnum
+
+        lead = create_lead(
+            gym=test_gym,
+            first_name="Jane",
+            last_name="Doe",
+            phone="01700000000",
+            email="jane@example.com",
+        )
+        logs = GymAdminLog.objects.filter(gym=test_gym, action_type=AdminLogActionType.CREATE_LEAD)
+        assert logs.exists()
+
+        update_lead_stage(lead=lead, new_stage=LeadStageEnum.CONTACTED)
+        stage_logs = GymAdminLog.objects.filter(gym=test_gym, action_type=AdminLogActionType.UPDATE_LEAD_STAGE)
+        assert stage_logs.exists()
+
+        delete_lead(lead=lead)
+        del_logs = GymAdminLog.objects.filter(gym=test_gym, action_type=AdminLogActionType.DELETE_LEAD)
+        assert del_logs.exists()
+
+    def test_automatic_logging_on_routine_template(self, test_gym):
+        """Verifies routine template creation and deletion record admin logs."""
+        from apps.routines.services.template_services import create_routine_template, delete_routine_template
+
+        template = create_routine_template(
+            gym=test_gym,
+            template_name="Strength Builder 3-Day",
+        )
+        logs = GymAdminLog.objects.filter(gym=test_gym, action_type=AdminLogActionType.CREATE_ROUTINE)
+        assert logs.exists()
+
+        delete_routine_template(template=template)
+        del_logs = GymAdminLog.objects.filter(gym=test_gym, action_type=AdminLogActionType.DELETE_ROUTINE)
+        assert del_logs.exists()
+
+

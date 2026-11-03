@@ -148,6 +148,22 @@ def assign_routine_to_member(
             if ex_objs:
                 MemberRoutineExercise.objects.bulk_create(ex_objs)
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        member_name = f"{member.first_name} {member.last_name}".strip() or member.email
+        log_admin_action(
+            gym=gym,
+            action="Assigned routine to member",
+            action_type=AdminLogActionType.ASSIGN_ROUTINE,
+            details=f"Assigned workout routine '{member_routine.routine_name}' to {member_name}",
+            category=AdminLogCategory.ROUTINES,
+            target_type="member_routine",
+            target_id=str(member_routine.id),
+        )
+    except Exception:
+        pass
+
     return member_routine
 
 
@@ -221,5 +237,21 @@ def customize_member_routine(
             ]
             if ex_objs:
                 MemberRoutineExercise.objects.bulk_create(ex_objs)
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        member_name = f"{member.first_name} {member.last_name}".strip() or member.email
+        log_admin_action(
+            gym=gym,
+            action="Assigned routine to member",
+            action_type=AdminLogActionType.ASSIGN_ROUTINE,
+            details=f"Assigned workout routine '{member_routine.routine_name}' to {member_name}",
+            category=AdminLogCategory.ROUTINES,
+            target_type="member_routine",
+            target_id=str(member_routine.id),
+        )
+    except Exception:
+        pass
 
     return member_routine

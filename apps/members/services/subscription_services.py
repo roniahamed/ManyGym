@@ -107,6 +107,21 @@ def create_member_subscription(
             notes=initial_payment_notes,
         )
 
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        log_admin_action(
+            gym=member.gym,
+            action="Created member subscription",
+            action_type=AdminLogActionType.CREATE_SUBSCRIPTION,
+            details=f"Created subscription for {member.first_name} {member.last_name} on '{plan.name}'",
+            category=AdminLogCategory.SUBSCRIPTIONS,
+            target_type="subscription",
+            target_id=str(subscription.id),
+        )
+    except Exception:
+        pass
+
     return subscription
 
 
@@ -227,6 +242,23 @@ def transition_membership_status(
 
     sub.membership_status = new_status
     sub.save(update_fields=["membership_status", "updated_at"])
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        member_name = f"{sub.member.first_name} {sub.member.last_name}".strip() or sub.member.email
+        log_admin_action(
+            gym=gym,
+            action="Updated subscription status",
+            action_type=AdminLogActionType.UPDATE_SUBSCRIPTION_STATUS,
+            details=f"Changed subscription status of {member_name} to {new_status}",
+            category=AdminLogCategory.SUBSCRIPTIONS,
+            target_type="subscription",
+            target_id=str(sub.id),
+        )
+    except Exception:
+        pass
+
     return sub
 
 

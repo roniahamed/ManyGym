@@ -41,4 +41,23 @@ def record_member_payment(
 
     # Recalculate payment status
     recalculate_subscription_payment_status(subscription)
+
+    try:
+        from apps.gyms.services.admin_log_services import log_admin_action
+        from common.enums import AdminLogCategory, AdminLogActionType
+        member = subscription.member
+        member_name = f"{member.first_name} {member.last_name}".strip() or member.email
+        log_admin_action(
+            gym=member.gym,
+            action="Recorded payment",
+            action_type=AdminLogActionType.RECORD_PAYMENT,
+            details=f"Recorded payment of ${amount} via {payment_method} for {member_name}",
+            category=AdminLogCategory.SUBSCRIPTIONS,
+            target_type="payment",
+            target_id=str(payment.id),
+            metadata={"amount": str(amount), "payment_method": payment_method},
+        )
+    except Exception:
+        pass
+
     return payment
