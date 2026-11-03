@@ -25,6 +25,12 @@ from apps.gyms.rest_api.v1.views import (
     GymAdminLogsActionTypesView,
     GymAdminLogsExportView,
 )
+from apps.members.rest_api.v1.views import (
+    MemberRequestListView,
+    MemberRequestDetailView,
+    MemberRequestAcceptView,
+    MemberRequestRejectView,
+)
 
 app_name = "gyms_v1"
 
@@ -62,5 +68,9 @@ urlpatterns = [
     path("<uuid:gym_id>/following/", GymFollowingListView.as_view(), name="gym-following-list"),
     path("<uuid:gym_id>/members/", GymMembersListView.as_view(), name="gym-members-list"),
     path("<uuid:gym_id>/join-request/", GymMemberJoiningRequestView.as_view(), name="gym-join-request"),
+    path("<uuid:gym_id>/member-requests/", MemberRequestListView.as_view(), name="gym-member-requests-list"),
+    path("<uuid:gym_id>/member-requests/<uuid:request_id>/", MemberRequestDetailView.as_view(), name="gym-member-request-detail"),
+    path("<uuid:gym_id>/member-requests/<uuid:request_id>/accept/", MemberRequestAcceptView.as_view(), name="gym-member-request-accept"),
+    path("<uuid:gym_id>/member-requests/<uuid:request_id>/reject/", MemberRequestRejectView.as_view(), name="gym-member-request-reject"),
 ]
 

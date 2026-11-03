@@ -288,6 +288,11 @@ class GymSetting(models.Model):
     def __str__(self):
         return f"Settings of {self.gym.name}"
 
+    @property
+    def is_member_request_enabled(self) -> bool:
+        """Helper indicating whether joining requests are accepted from users."""
+        return self.who_can_send_joining_request == AudienceJoiningRequestEnum.EVERYONE
+
     def deactivate(self) -> None:
         """Transitions gym state to deactivated and records timestamp."""
         self.is_deactivated = True

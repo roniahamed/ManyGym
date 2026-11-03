@@ -15,6 +15,13 @@ from apps.members.rest_api.v1.views.subscription_views import (
     MemberSubscriptionPaymentCreateView,
     MemberSubscriptionExtraAmenitiesView,
 )
+from apps.members.rest_api.v1.views.request_views import (
+    MemberRequestListView,
+    MemberRequestDetailView,
+    MemberRequestAcceptView,
+    MemberRequestRejectView,
+    MemberRequestCancelView,
+)
 
 __all__ = [
     "resolve_member_gym",
@@ -28,4 +35,9 @@ __all__ = [
     "MemberSubscriptionStatusView",
     "MemberSubscriptionPaymentCreateView",
     "MemberSubscriptionExtraAmenitiesView",
+    "MemberRequestListView",
+    "MemberRequestDetailView",
+    "MemberRequestAcceptView",
+    "MemberRequestRejectView",
+    "MemberRequestCancelView",
 ]

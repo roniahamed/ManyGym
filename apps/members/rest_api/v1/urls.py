@@ -9,12 +9,22 @@ from apps.members.rest_api.v1.views import (
     MemberSubscriptionPaymentCreateView,
     MemberSubscriptionExtraAmenitiesView,
     MemberMetricsView,
+    MemberRequestListView,
+    MemberRequestDetailView,
+    MemberRequestAcceptView,
+    MemberRequestRejectView,
+    MemberRequestCancelView,
 )
 
 urlpatterns = [
     path("", MemberListCreateView.as_view(), name="member-list-create"),
     path("metrics/", MemberMetricsView.as_view(), name="member-metrics"),
     path("accept-invitation/", MemberAcceptInvitationView.as_view(), name="member-accept-invitation"),
+    path("requests/", MemberRequestListView.as_view(), name="member-request-list"),
+    path("requests/<uuid:request_id>/", MemberRequestDetailView.as_view(), name="member-request-detail"),
+    path("requests/<uuid:request_id>/accept/", MemberRequestAcceptView.as_view(), name="member-request-accept"),
+    path("requests/<uuid:request_id>/reject/", MemberRequestRejectView.as_view(), name="member-request-reject"),
+    path("requests/<uuid:request_id>/cancel/", MemberRequestCancelView.as_view(), name="member-request-cancel"),
     path("<uuid:member_id>/", MemberDetailView.as_view(), name="member-detail"),
     path("<uuid:member_id>/resend-invitation/", MemberResendInvitationView.as_view(), name="member-resend-invitation"),
     path("<uuid:member_id>/subscriptions/", MemberSubscriptionCreateView.as_view(), name="member-subscription-create"),

@@ -102,7 +102,8 @@ class GymMemberJoiningRequestResponseSerializer(serializers.Serializer):
     gym_id = serializers.UUIDField()
     gym_name = serializers.CharField()
     status = serializers.CharField()
-    lead_id = serializers.UUIDField()
+    request_id = serializers.UUIDField(required=False)
+    lead_id = serializers.UUIDField(required=False, allow_null=True)
     created = serializers.BooleanField()
 
 
@@ -111,5 +112,6 @@ class GymMemberJoiningRequestStatusSerializer(serializers.Serializer):
     can_send_request = serializers.BooleanField()
     is_member = serializers.BooleanField()
     has_pending_request = serializers.BooleanField()
+    pending_request_id = serializers.UUIDField(required=False, allow_null=True)
     is_blocked = serializers.BooleanField()
     who_can_send_joining_request = serializers.CharField()

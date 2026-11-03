@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 
 from common.enums import (
     MemberJoiningStatus,
+    MemberRequestStatus,
     MembershipStatusEnum,
     PaymentStatusEnum,
     PaymentMethodEnum,
@@ -217,3 +218,68 @@ class MemberPayment(models.Model):
 
     def __str__(self):
         return f"{self.member_subscription.member.full_name} - Paid ${self.amount} ({self.get_payment_method_display()}) on {self.payment_date}"
+
+
+class MemberRequest(models.Model):
+    """
+    Prospective member request submitted by a Manygym user to join a gym.
+    Gym admin / staff can review, accept (providing member details), or reject.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    gym = models.ForeignKey(
+        "gyms.Gym",
+        on_delete=models.CASCADE,
+        related_name="member_requests",
+    )
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="gym_member_requests",
+    )
+    interested_plan = models.ForeignKey(
+        "memberships.MembershipPlan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="interested_member_requests",
+    )
+    notes = models.TextField(blank=True, null=True)
+    status = models.CharField(
+        max_length=50,
+        choices=MemberRequestStatus.choices,
+        default=MemberRequestStatus.PENDING,
+        db_index=True,
+    )
+    created_member = models.ForeignKey(
+        "members.Member",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="originating_request",
+    )
+    reviewed_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_member_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "member_requests"
+        verbose_name = "Member Request"
+        verbose_name_plural = "Member Requests"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["gym", "status", "-created_at"], name="idx_mreq_gym_status_created"),
+            models.Index(fields=["user", "gym", "status"], name="idx_mreq_user_gym_status"),
+        ]
+
+    def __str__(self):
+        user_name = f"{self.user.first_name} {self.user.last_name}".strip() or self.user.email
+        return f"Request from {user_name} to {self.gym.name} [{self.status}]"

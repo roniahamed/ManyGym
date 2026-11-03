@@ -8,22 +8,28 @@ from common.exceptions import (
 )
 
 
-def resolve_member_gym(request) -> Gym:
-    """Helper to determine target gym from query param, active JWT context, or request body."""
+def resolve_member_gym(request, gym_id=None) -> Gym:
+    """Helper to determine target gym from explicit arg, URL kwarg, query param, active JWT context, or request body."""
     cached = getattr(request, "_resolved_gym", None)
-    if cached is not None:
+    if cached is not None and (gym_id is None or str(cached.id) == str(gym_id)):
         return cached
 
-    gym_id = (
-        request.query_params.get("gym_id")
+    url_kwarg_gym_id = None
+    if hasattr(request, "parser_context") and isinstance(request.parser_context, dict):
+        url_kwarg_gym_id = request.parser_context.get("kwargs", {}).get("gym_id")
+
+    target_id = (
+        gym_id
+        or url_kwarg_gym_id
+        or request.query_params.get("gym_id")
         or getattr(request, "gym_id", None)
         or (request.data.get("gym_id") if isinstance(request.data, dict) else None)
     )
-    if not gym_id:
+    if not target_id:
         raise DomainValidationError("An active Gym context token or 'gym_id' parameter is required.")
     try:
-        uuid.UUID(str(gym_id))
-        gym = Gym.objects.only("id", "owner_user_id", "name", "timezone").get(id=gym_id)
+        uuid.UUID(str(target_id))
+        gym = Gym.objects.only("id", "owner_user_id", "name", "timezone").get(id=target_id)
     except (Gym.DoesNotExist, ValueError, AttributeError):
         raise ResourceNotFoundError("Gym not found.")
     request._resolved_gym = gym

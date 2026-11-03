@@ -4,6 +4,7 @@ from typing import Optional, Any
 from django.db import transaction
 from apps.gyms.models import Gym, GymSetting, GymBlockedUser, GymFollow
 from apps.users.models import User
+from common.enums import AudienceJoiningRequestEnum
 from common.exceptions import DomainValidationError, ResourceNotFoundError, PermissionDeniedError
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,13 @@ def update_gym_settings(gym: Gym, **data: Any) -> GymSetting:
     Delegates lifecycle transitions to GymSetting domain methods.
     """
     settings_obj = get_or_create_gym_settings(gym)
+
+    if "user_request_enabled" in data:
+        val = data.pop("user_request_enabled")
+        if val is not None:
+            data["who_can_send_joining_request"] = (
+                AudienceJoiningRequestEnum.EVERYONE if val else AudienceJoiningRequestEnum.NO_ONE
+            )
 
     allowed_fields = {
         "language",

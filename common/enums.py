@@ -104,6 +104,13 @@ class MemberJoiningStatus(models.TextChoices):
     JOINED = "joined", "Joined"
 
 
+class MemberRequestStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    ACCEPTED = "accepted", "Accepted"
+    REJECTED = "rejected", "Rejected"
+    CANCELLED = "cancelled", "Cancelled"
+
+
 class MembershipStatusEnum(models.TextChoices):
     SCHEDULED = "scheduled", "Scheduled"
     ACTIVE = "active", "Active"
@@ -303,6 +310,8 @@ class AdminLogActionType(models.TextChoices):
     CREATE_MEMBER_REQUEST = "create_member_request", "Create a member request"
     UPDATE_MEMBER_REQUEST = "update_member_request", "Update a member request"
     DELETE_MEMBER_REQUEST = "delete_member_request", "Delete a member request"
+    ACCEPT_MEMBER_REQUEST = "accept_member_request", "Accept member request"
+    REJECT_MEMBER_REQUEST = "reject_member_request", "Reject member request"
 
     # Members
     CREATE_MEMBER = "create_member", "Create a member"

@@ -9,6 +9,7 @@ from apps.members.models import (
     MemberSubscription,
     MemberPayment,
     MemberExtraAmenities,
+    MemberRequest,
 )
 from common.enums import (
     MemberJoiningStatus,
@@ -260,3 +261,43 @@ def stream_gym_members(gym: Gym, chunk_size: int = 500) -> Generator[Member, Non
     )
     for member in qs.iterator(chunk_size=chunk_size):
         yield member
+
+
+def list_member_requests(
+    gym: Gym,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+) -> QuerySet[MemberRequest]:
+    """
+    Retrieves member join requests for a gym with eager-loaded user, interested plan,
+    and reviewer info.
+    """
+    qs = (
+        MemberRequest.objects.filter(gym=gym)
+        .select_related("user", "interested_plan", "reviewed_by", "created_member")
+        .order_by("-created_at")
+    )
+    if status:
+        qs = qs.filter(status=status.strip().lower())
+    if search:
+        s = search.strip()
+        qs = qs.filter(
+            Q(user__first_name__icontains=s)
+            | Q(user__last_name__icontains=s)
+            | Q(user__email__icontains=s)
+            | Q(notes__icontains=s)
+        )
+    return qs
+
+
+def get_member_request_detail(gym: Gym, request_id: uuid.UUID) -> MemberRequest:
+    """
+    Fetches a single member join request for a gym with preloaded relationships.
+    """
+    try:
+        return (
+            MemberRequest.objects.select_related("gym", "user", "interested_plan", "reviewed_by", "created_member")
+            .get(id=request_id, gym=gym)
+        )
+    except (MemberRequest.DoesNotExist, ValueError):
+        raise ResourceNotFoundError("Member request not found.")

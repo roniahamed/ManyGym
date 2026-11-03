@@ -16,6 +16,7 @@ class GymSettingSerializer(serializers.ModelSerializer):
     Read-only presentation serializer for complete Gym Configuration & Privacy Settings.
     """
     gym_id = serializers.UUIDField(read_only=True)
+    is_member_request_enabled = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = GymSetting
@@ -29,6 +30,7 @@ class GymSettingSerializer(serializers.ModelSerializer):
             "issues_alerts",
             "who_can_message",
             "who_can_send_joining_request",
+            "is_member_request_enabled",
             "who_can_see_members",
             "who_can_see_followers",
             "who_can_see_following",
@@ -73,6 +75,10 @@ class GymSettingUpdateSerializer(serializers.Serializer):
         choices=AudienceJoiningRequestEnum.choices,
         required=False,
         help_text="Controls who can submit a membership request: 'everyone', 'no_one'",
+    )
+    user_request_enabled = StrictBooleanField(
+        required=False,
+        help_text="Convenience toggle to enable/disable user membership requests. Sets who_can_send_joining_request.",
     )
     who_can_see_members = serializers.ChoiceField(
         choices=AudienceMembersVisibilityEnum.choices,
