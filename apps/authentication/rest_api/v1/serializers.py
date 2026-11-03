@@ -7,6 +7,16 @@ from apps.users.rest_api.v1.serializers import UserSerializer, TokenResponseSeri
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
     password = StrictCharField(required=True, write_only=True)
+    reactivate = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="Set to true to reactivate a deactivated user account during login.",
+    )
+    restore = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="Set to true to restore a deleted user account during login.",
+    )
 
 
 class SwitchContextSerializer(serializers.Serializer):

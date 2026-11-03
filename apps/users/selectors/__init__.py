@@ -11,6 +11,12 @@ from apps.users.selectors.social_selectors import (
     resolve_target_entity,
     ResolvedTarget,
 )
+from apps.users.selectors.settings_selectors import (
+    get_user_settings,
+    list_blocked_users_for_user,
+    search_users_to_block_for_user,
+    is_user_blocked_by,
+)
 
 # Alias for backward compatibility if ever called
 get_user_with_profile = get_user_by_id
@@ -26,4 +32,8 @@ __all__ = [
     "is_following_user",
     "resolve_target_entity",
     "ResolvedTarget",
+    "get_user_settings",
+    "list_blocked_users_for_user",
+    "search_users_to_block_for_user",
+    "is_user_blocked_by",
 ]

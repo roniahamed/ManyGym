@@ -79,9 +79,16 @@ def issue_context_token(user: User, context_type: str = TokenContextType.PERSONA
     }
 
 
-def authenticate_user(email: str, password: str) -> tuple[User, dict]:
+def authenticate_user(
+    email: str,
+    password: str,
+    reactivate: bool = False,
+    restore: bool = False,
+) -> tuple[User, dict]:
     """
     Authenticates user credentials and returns user and personal context tokens.
+    Handles deactivated and soft-deleted accounts by prompting for reactivation/restoration
+    or restoring when requested.
     """
     email_clean = email.lower().strip()
     try:
@@ -91,6 +98,27 @@ def authenticate_user(email: str, password: str) -> tuple[User, dict]:
 
     if not user.check_password(password):
         raise DomainValidationError("Invalid email or password.")
+
+    setting = user.get_settings()
+    if setting.is_deleted or user.status == UserStatus.DELETED:
+        if restore:
+            from apps.users.services.settings_services import apply_user_access_control_action
+            apply_user_access_control_action(user, action="restore", password=password)
+            user.refresh_from_db()
+        else:
+            raise DomainValidationError(
+                "This account has been deleted. Do you want to restore it? If so, please confirm restoration."
+            )
+
+    if setting.is_deactivated or user.status == UserStatus.DEACTIVATED:
+        if reactivate:
+            from apps.users.services.settings_services import apply_user_access_control_action
+            apply_user_access_control_action(user, action="reactivate")
+            user.refresh_from_db()
+        else:
+            raise DomainValidationError(
+                "This account is deactivated. Do you want to reactivate it? If so, please reactivate your account."
+            )
 
     if user.status != UserStatus.ACTIVE or not user.is_active:
         raise DomainValidationError("Your account is currently inactive or suspended.")

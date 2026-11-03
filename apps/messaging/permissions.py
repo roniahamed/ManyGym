@@ -5,6 +5,7 @@ Enforces gym privacy settings, blocked users list, and role-based gym staff acce
 
 from typing import Optional
 
+from apps.users.models import User
 from apps.gyms.models import Gym, GymBlockedUser, GymSetting
 from apps.access_control.models import GymStaffAssignment
 from apps.access_control.selectors import get_user_gym_scopes
@@ -15,6 +16,37 @@ from common.exceptions import (
     DomainValidationError,
     ResourceNotFoundError,
 )
+
+
+def can_user_message_user(sender: User, receiver: User) -> bool:
+    """
+    Evaluates whether an individual user is permitted to message another user:
+    1. Rejects if either user has blocked the other in UserBlockedUser.
+    2. Validates receiver account lifecycle (deleted / deactivated).
+    3. Validates receiver UserSetting.who_can_message (everyone, followers, no_one).
+    """
+    from apps.users.models import UserBlockedUser, UserFollow
+    from common.enums import UserAudienceMessagingEnum
+
+    if UserBlockedUser.objects.filter(blocker=receiver, blocked_user=sender).exists():
+        raise PermissionDeniedError("You have been blocked from messaging this user.")
+    if UserBlockedUser.objects.filter(blocker=sender, blocked_user=receiver).exists():
+        raise DomainValidationError("You cannot message a user you have blocked. Unblock them first.")
+
+    setting = receiver.get_settings()
+    if setting.is_deleted:
+        raise ResourceNotFoundError("User not found.")
+    if setting.is_deactivated:
+        raise DomainValidationError("This user account is deactivated and cannot receive new messages.")
+
+    policy = setting.who_can_message
+    if policy == UserAudienceMessagingEnum.NO_ONE:
+        raise DomainValidationError("This user does not accept direct messages.")
+    if policy == UserAudienceMessagingEnum.FOLLOWERS:
+        if not UserFollow.objects.filter(follower=sender, followed_user=receiver).exists():
+            raise DomainValidationError("This user only accepts direct messages from their followers.")
+
+    return True
 
 
 def can_user_message_gym(user, gym: Gym) -> bool:

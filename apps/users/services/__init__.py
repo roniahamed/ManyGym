@@ -14,6 +14,13 @@ from apps.users.services.social_services import (
     follow_user,
     unfollow_user,
 )
+from apps.users.services.settings_services import (
+    get_or_create_user_settings,
+    update_user_settings,
+    block_user_for_user,
+    unblock_user_for_user,
+    apply_user_access_control_action,
+)
 
 __all__ = [
     "register_user",
@@ -26,4 +33,9 @@ __all__ = [
     "update_user_profile",
     "follow_user",
     "unfollow_user",
+    "get_or_create_user_settings",
+    "update_user_settings",
+    "block_user_for_user",
+    "unblock_user_for_user",
+    "apply_user_access_control_action",
 ]

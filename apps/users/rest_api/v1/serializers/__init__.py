@@ -27,6 +27,14 @@ from apps.users.rest_api.v1.serializers.social_serializers import (
     UnifiedTargetFollowersResponseSerializer,
     UnifiedFollowedAccountsResponseSerializer,
 )
+from apps.users.rest_api.v1.serializers.settings_serializers import (
+    UserSettingSerializer,
+    UserSettingUpdateSerializer,
+    UserBlockedUserSerializer,
+    UserBlockUserCreateSerializer,
+    UserSearchToBlockSerializer,
+    UserAccessControlActionSerializer,
+)
 
 __all__ = [
     "UserRegistrationSerializer",
@@ -52,4 +60,10 @@ __all__ = [
     "FollowActionResponseSerializer",
     "UnifiedTargetFollowersResponseSerializer",
     "UnifiedFollowedAccountsResponseSerializer",
+    "UserSettingSerializer",
+    "UserSettingUpdateSerializer",
+    "UserBlockedUserSerializer",
+    "UserBlockUserCreateSerializer",
+    "UserSearchToBlockSerializer",
+    "UserAccessControlActionSerializer",
 ]

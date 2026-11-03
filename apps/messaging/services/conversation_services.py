@@ -10,6 +10,7 @@ from apps.messaging.models import (
 )
 from apps.messaging.permissions import (
     can_user_message_gym,
+    can_user_message_user,
     is_user_authorized_for_gym,
     assert_can_access_conversation,
 )
@@ -34,6 +35,8 @@ def get_or_create_user_to_user_conversation(user_a: User, user_b: User) -> Conve
     """
     if user_a.id == user_b.id:
         raise DomainValidationError("Cannot create a conversation with yourself.")
+
+    can_user_message_user(user_a, user_b)
 
     # Canonical order
     first_user, second_user = (user_a, user_b) if user_a.id < user_b.id else (user_b, user_a)

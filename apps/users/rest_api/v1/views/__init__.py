@@ -16,6 +16,14 @@ from apps.users.rest_api.v1.views.social_views import (
     UserFollowingListView,
     UnifiedFollowView,
 )
+from apps.users.rest_api.v1.views.settings_views import (
+    UserSettingsView,
+    UserBlockedUsersListView,
+    UserBlockedUserDetailView,
+    UserSearchUsersToBlockView,
+    UserFollowerBlockView,
+    UserAccessControlActionView,
+)
 from apps.users.selectors import (
     resolve_target_entity,
     ResolvedTarget,
@@ -36,4 +44,10 @@ __all__ = [
     "UnifiedFollowView",
     "resolve_target_entity",
     "ResolvedTarget",
+    "UserSettingsView",
+    "UserBlockedUsersListView",
+    "UserBlockedUserDetailView",
+    "UserSearchUsersToBlockView",
+    "UserFollowerBlockView",
+    "UserAccessControlActionView",
 ]

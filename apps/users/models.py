@@ -2,7 +2,7 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.utils import timezone
-from common.enums import UserStatus
+from common.enums import UserStatus, UserAudienceMessagingEnum, UserAudienceVisibilityEnum
 
 
 class UserManager(BaseUserManager):
@@ -63,6 +63,11 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f"{self.email} ({self.first_name} {self.last_name})"
+
+    def get_settings(self) -> "UserSetting":
+        """Retrieves or provisions the user configuration and privacy settings record."""
+        setting, _ = UserSetting.objects.get_or_create(user=self)
+        return setting
 
 
 class UserProfile(models.Model):
@@ -239,3 +244,141 @@ class UserFollow(models.Model):
 
     def __str__(self):
         return f"{self.follower.email} follows {self.followed_user.email}"
+
+
+class UserSetting(models.Model):
+    """
+    Configuration and administrative settings for an individual user profile.
+    Encompasses Display Preferences, Audience & Messaging Privacy, and Account Lifecycle (Access & Control).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="settings",
+    )
+
+    # --- Preference -> Display ---
+    language = models.CharField(
+        max_length=20,
+        default="en",
+        help_text="Display language (e.g. en, bn).",
+    )
+    dark_mode = models.BooleanField(
+        default=False,
+        help_text="Dark Mode (ON/OFF).",
+    )
+
+    # --- Privacy and Sharing -> Audience ---
+    who_can_message = models.CharField(
+        max_length=50,
+        choices=UserAudienceMessagingEnum.choices,
+        default=UserAudienceMessagingEnum.EVERYONE,
+        help_text="Who can send you messages? (Everyone, Followers, No one)",
+    )
+    who_can_see_followers = models.CharField(
+        max_length=50,
+        choices=UserAudienceVisibilityEnum.choices,
+        default=UserAudienceVisibilityEnum.EVERYONE,
+        help_text="Who can see your followers? (Everyone, Followers, Private)",
+    )
+    who_can_see_following = models.CharField(
+        max_length=50,
+        choices=UserAudienceVisibilityEnum.choices,
+        default=UserAudienceVisibilityEnum.EVERYONE,
+        help_text="Who can see people and gyms you follow? (Everyone, Followers, Private)",
+    )
+
+    # --- Visibility -> Access & Control ---
+    is_deactivated = models.BooleanField(
+        default=False,
+        help_text="Whether the user profile is deactivated.",
+    )
+    deactivated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the user account was deactivated.",
+    )
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Soft-delete flag for user account.",
+    )
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the user account was soft-deleted.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_settings"
+        verbose_name = "User Setting"
+        verbose_name_plural = "User Settings"
+
+    def __str__(self):
+        return f"Settings of {self.user.email}"
+
+    def deactivate(self) -> None:
+        """Transitions user profile to deactivated state and records timestamp."""
+        self.is_deactivated = True
+        self.deactivated_at = timezone.now()
+
+    def reactivate(self) -> None:
+        """Reactivates user profile and resets deactivated timestamp."""
+        self.is_deactivated = False
+        self.deactivated_at = None
+
+    def soft_delete(self) -> None:
+        """Marks user account as soft-deleted and records timestamp."""
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+
+    def restore(self) -> None:
+        """Restores soft-deleted user account and resets deleted timestamp."""
+        self.is_deleted = False
+        self.deleted_at = None
+
+
+class UserBlockedUser(models.Model):
+    """
+    Represents an intentional block relationship where blocker blocks blocked_user.
+    Blocked users cannot view the blocker's profile, follow them, or send messages.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    blocker = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="blocked_users_relations",
+    )
+    blocked_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="blocked_by_relations",
+    )
+    reason = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "user_blocked_users"
+        verbose_name = "User Blocked User"
+        verbose_name_plural = "User Blocked Users"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["blocker", "blocked_user"],
+                name="unique_user_block",
+            ),
+            models.CheckConstraint(
+                check=~models.Q(blocker=models.F("blocked_user")),
+                name="prevent_self_user_block",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["blocker", "-created_at"], name="idx_ublk_blkr_created"),
+            models.Index(fields=["blocked_user", "-created_at"], name="idx_ublk_trgt_created"),
+        ]
+
+    def __str__(self):
+        return f"{self.blocker.email} blocked {self.blocked_user.email}"

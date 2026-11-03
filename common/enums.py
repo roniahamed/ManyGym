@@ -5,6 +5,22 @@ class UserStatus(models.TextChoices):
     ACTIVE = "active", "Active"
     INACTIVE = "inactive", "Inactive"
     SUSPENDED = "suspended", "Suspended"
+    DEACTIVATED = "deactivated", "Deactivated"
+    DELETED = "deleted", "Deleted"
+
+
+class UserAudienceMessagingEnum(models.TextChoices):
+    """User audience setting: Who can send direct messages to the user profile."""
+    EVERYONE = "everyone", "Everyone"
+    FOLLOWERS = "followers", "Followers"
+    NO_ONE = "no_one", "No one"
+
+
+class UserAudienceVisibilityEnum(models.TextChoices):
+    """User audience setting: Who can see followers or following lists of the user profile."""
+    EVERYONE = "everyone", "Everyone"
+    FOLLOWERS = "followers", "Followers"
+    PRIVATE = "private", "Private"
 
 
 class TokenContextType(models.TextChoices):

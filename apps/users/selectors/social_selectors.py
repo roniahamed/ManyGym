@@ -29,10 +29,34 @@ def list_user_followers(user_id, requesting_user: Optional[User] = None) -> Quer
         if not target_user:
             raise ResourceNotFoundError("User not found.")
 
+    target_setting = target_user.get_settings()
+    if target_setting.is_deleted:
+        raise ResourceNotFoundError("User not found.")
+
+    if target_setting.is_deactivated:
+        if not requesting_user or requesting_user.id != target_user.id:
+            raise DomainValidationError("This user account is deactivated.")
+
+    from apps.users.models import UserBlockedUser
+    from common.enums import UserAudienceVisibilityEnum
+
+    if requesting_user and requesting_user.is_authenticated and requesting_user.id != target_user.id:
+        if UserBlockedUser.objects.filter(blocker=target_user, blocked_user=requesting_user).exists():
+            raise PermissionDeniedError("You have been blocked by this user.")
+
     profile = getattr(target_user, "profile", None)
     if profile and profile.is_private:
         if not requesting_user or requesting_user.id != target_user.id:
             raise PermissionDeniedError("This user account is private.")
+
+    policy = target_setting.who_can_see_followers
+    if policy == UserAudienceVisibilityEnum.PRIVATE and (not requesting_user or requesting_user.id != target_user.id):
+        raise PermissionDeniedError("This user's followers list is private.")
+    elif policy == UserAudienceVisibilityEnum.FOLLOWERS and (
+        not requesting_user
+        or (requesting_user.id != target_user.id and not is_following_user(requesting_user, target_user))
+    ):
+        raise PermissionDeniedError("Only followers can view this user's followers list.")
 
     return (
         UserFollow.objects.filter(followed_user=target_user)
@@ -76,10 +100,34 @@ def list_user_following(user_id, requesting_user: Optional[User] = None) -> Quer
         if not target_user:
             raise ResourceNotFoundError("User not found.")
 
+    target_setting = target_user.get_settings()
+    if target_setting.is_deleted:
+        raise ResourceNotFoundError("User not found.")
+
+    if target_setting.is_deactivated:
+        if not requesting_user or requesting_user.id != target_user.id:
+            raise DomainValidationError("This user account is deactivated.")
+
+    from apps.users.models import UserBlockedUser
+    from common.enums import UserAudienceVisibilityEnum
+
+    if requesting_user and requesting_user.is_authenticated and requesting_user.id != target_user.id:
+        if UserBlockedUser.objects.filter(blocker=target_user, blocked_user=requesting_user).exists():
+            raise PermissionDeniedError("You have been blocked by this user.")
+
     profile = getattr(target_user, "profile", None)
     if profile and profile.is_private:
         if not requesting_user or requesting_user.id != target_user.id:
             raise PermissionDeniedError("This user account is private.")
+
+    policy = target_setting.who_can_see_following
+    if policy == UserAudienceVisibilityEnum.PRIVATE and (not requesting_user or requesting_user.id != target_user.id):
+        raise PermissionDeniedError("This user's following list is private.")
+    elif policy == UserAudienceVisibilityEnum.FOLLOWERS and (
+        not requesting_user
+        or (requesting_user.id != target_user.id and not is_following_user(requesting_user, target_user))
+    ):
+        raise PermissionDeniedError("Only followers can view this user's following list.")
 
     return (
         UserFollow.objects.filter(follower=target_user)

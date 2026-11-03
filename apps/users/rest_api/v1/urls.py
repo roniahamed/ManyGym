@@ -12,6 +12,12 @@ from apps.users.rest_api.v1.views import (
     UserFollowersListView,
     UserFollowingListView,
     UnifiedFollowView,
+    UserFollowerBlockView,
+    UserSettingsView,
+    UserAccessControlActionView,
+    UserBlockedUsersListView,
+    UserSearchUsersToBlockView,
+    UserBlockedUserDetailView,
 )
 
 urlpatterns = [
@@ -28,5 +34,12 @@ urlpatterns = [
     path("<uuid:user_id>/follow/", UserFollowToggleView.as_view(), name="user-follow-toggle"),
     path("<uuid:user_id>/followers/", UserFollowersListView.as_view(), name="user-followers-list"),
     path("<uuid:user_id>/following/", UserFollowingListView.as_view(), name="user-following-list"),
+    path("followers/<uuid:user_id>/block/", UserFollowerBlockView.as_view(), name="user-follower-block"),
+    # Settings & Access Control routes
+    path("settings/", UserSettingsView.as_view(), name="user-settings"),
+    path("settings/access-control/", UserAccessControlActionView.as_view(), name="user-settings-access-control"),
+    path("settings/blocked-users/", UserBlockedUsersListView.as_view(), name="user-settings-blocked-users"),
+    path("settings/blocked-users/search/", UserSearchUsersToBlockView.as_view(), name="user-settings-blocked-users-search"),
+    path("settings/blocked-users/<uuid:user_id>/", UserBlockedUserDetailView.as_view(), name="user-settings-blocked-user-detail"),
 ]
 

@@ -38,6 +38,18 @@ def follow_user(follower: User, target_user_id) -> tuple[UserFollow, bool]:
     if not getattr(target_user, "is_active", True):
         raise ResourceNotFoundError("Target user not found or is inactive.")
 
+    setting = target_user.get_settings()
+    if setting.is_deleted:
+        raise ResourceNotFoundError("Target user not found.")
+    if setting.is_deactivated:
+        raise DomainValidationError("This user account is deactivated.")
+
+    from apps.users.models import UserBlockedUser
+    if UserBlockedUser.objects.filter(blocker=target_user, blocked_user=follower).exists():
+        raise PermissionDeniedError("You have been blocked by this user.")
+    if UserBlockedUser.objects.filter(blocker=follower, blocked_user=target_user).exists():
+        raise DomainValidationError("You cannot follow a user you have blocked. Unblock them first.")
+
     profile = getattr(target_user, "profile", None)
     if profile and profile.is_private:
         raise PermissionDeniedError("This user account is private.")

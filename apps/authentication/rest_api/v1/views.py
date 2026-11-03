@@ -111,17 +111,27 @@ Authenticates user credentials and issues a contextual JWT access & refresh toke
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        reactivate = serializer.validated_data.get("reactivate", False)
+        restore = serializer.validated_data.get("restore", False)
         user, tokens = authenticate_user(
             email=serializer.validated_data["email"],
             password=serializer.validated_data["password"],
+            reactivate=reactivate,
+            restore=restore,
         )
         from apps.gyms.models import Gym
         deactivated_gyms = list(
             Gym.objects.filter(owner_user=user, settings__is_deactivated=True)
             .values("id", "name")
         )
+        if restore:
+            message = "Your account has been restored successfully."
+        elif reactivate:
+            message = "Your account has been reactivated successfully."
+        else:
+            message = "Login successful."
         response_data = {
-            "message": "Login successful.",
+            "message": message,
             "user": UserSerializer(user).data,
             "tokens": tokens,
         }
