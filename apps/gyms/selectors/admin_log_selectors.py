@@ -37,47 +37,69 @@ def list_admin_logs(
         qs = qs.filter(action_type=action_type.strip())
 
     if actor_id:
+        clean_actor_id = str(actor_id).replace("\x00", "").strip()
         try:
-            uuid.UUID(str(actor_id))
-            qs = qs.filter(actor_id=actor_id)
+            uuid.UUID(clean_actor_id)
+            qs = qs.filter(actor_id=clean_actor_id)
         except (ValueError, TypeError):
             raise DomainValidationError("Invalid actor_id UUID.")
 
     if start_date:
-        parsed_start = parse_datetime(start_date) or parse_date(start_date)
-        if parsed_start:
-            if not hasattr(parsed_start, "hour"):
-                parsed_start = timezone.datetime.combine(
-                    parsed_start,
-                    timezone.datetime.min.time(),
-                    tzinfo=timezone.get_current_timezone(),
-                )
-            qs = qs.filter(created_at__gte=parsed_start)
+        clean_start = str(start_date).replace("\x00", "").strip()
+        try:
+            parsed_start = parse_datetime(clean_start) or parse_date(clean_start)
+        except (ValueError, TypeError, OverflowError):
+            raise DomainValidationError("Invalid start_date format. Expected ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).")
+        if not parsed_start:
+            raise DomainValidationError("Invalid start_date format. Expected ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).")
+        if not hasattr(parsed_start, "hour"):
+            parsed_start = timezone.datetime.combine(
+                parsed_start,
+                timezone.datetime.min.time(),
+                tzinfo=timezone.get_current_timezone(),
+            )
+        qs = qs.filter(created_at__gte=parsed_start)
 
     if end_date:
-        parsed_end = parse_datetime(end_date) or parse_date(end_date)
-        if parsed_end:
-            if not hasattr(parsed_end, "hour"):
-                parsed_end = timezone.datetime.combine(
-                    parsed_end,
-                    timezone.datetime.max.time(),
-                    tzinfo=timezone.get_current_timezone(),
-                )
-            qs = qs.filter(created_at__lte=parsed_end)
+        clean_end = str(end_date).replace("\x00", "").strip()
+        try:
+            parsed_end = parse_datetime(clean_end) or parse_date(clean_end)
+        except (ValueError, TypeError, OverflowError):
+            raise DomainValidationError("Invalid end_date format. Expected ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).")
+        if not parsed_end:
+            raise DomainValidationError("Invalid end_date format. Expected ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).")
+        if not hasattr(parsed_end, "hour"):
+            parsed_end = timezone.datetime.combine(
+                parsed_end,
+                timezone.datetime.max.time(),
+                tzinfo=timezone.get_current_timezone(),
+            )
+        qs = qs.filter(created_at__lte=parsed_end)
 
     if search:
-        search_term = search.strip()
-        qs = qs.filter(
-            Q(action__icontains=search_term)
-            | Q(details__icontains=search_term)
-            | Q(actor_name__icontains=search_term)
-            | Q(actor_email__icontains=search_term)
-        )
+        search_term = str(search).replace("\x00", "").strip()
+        if search_term:
+            qs = qs.filter(
+                Q(action__icontains=search_term)
+                | Q(details__icontains=search_term)
+                | Q(actor_name__icontains=search_term)
+                | Q(actor_email__icontains=search_term)
+            )
 
     total_count = qs.count()
 
-    safe_page_size = max(1, min(page_size, 100))
-    safe_page = max(1, page)
+    try:
+        raw_page = int(page)
+    except (ValueError, TypeError, OverflowError):
+        raw_page = 1
+
+    try:
+        raw_page_size = int(page_size)
+    except (ValueError, TypeError, OverflowError):
+        raw_page_size = 20
+
+    safe_page_size = max(1, min(raw_page_size, 100))
+    safe_page = max(1, min(raw_page, 100_000))
     offset = (safe_page - 1) * safe_page_size
     total_pages = (total_count + safe_page_size - 1) // safe_page_size if total_count > 0 else 1
 
@@ -90,14 +112,15 @@ def get_admin_log_by_id(gym: Gym, log_id: str) -> GymAdminLog:
     Retrieves a single administration log record for the specified gym.
     """
     try:
-        uuid.UUID(str(log_id))
+        clean_id = str(log_id).replace("\x00", "").strip()
+        uuid.UUID(clean_id)
     except (ValueError, TypeError):
         raise DomainValidationError("Invalid log_id UUID.")
 
     try:
         return (
             GymAdminLog.objects.select_related("actor", "actor__profile")
-            .get(gym=gym, id=log_id)
+            .get(gym=gym, id=clean_id)
         )
     except GymAdminLog.DoesNotExist:
         raise ResourceNotFoundError("Admin log entry not found.")

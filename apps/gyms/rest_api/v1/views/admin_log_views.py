@@ -123,14 +123,17 @@ Matches the Alerts & Logs sidebar menu UI table:
         search = request.query_params.get("search")
 
         try:
-            page = int(request.query_params.get("page", 1))
-        except (ValueError, TypeError):
-            page = 1
+            raw_page = int(request.query_params.get("page", 1))
+        except (ValueError, TypeError, OverflowError):
+            raw_page = 1
 
         try:
-            page_size = int(request.query_params.get("page_size", 20))
-        except (ValueError, TypeError):
-            page_size = 20
+            raw_page_size = int(request.query_params.get("page_size", 20))
+        except (ValueError, TypeError, OverflowError):
+            raw_page_size = 20
+
+        safe_page = max(1, min(raw_page, 100_000))
+        safe_page_size = max(1, min(raw_page_size, 100))
 
         logs, total_count, total_pages = list_admin_logs(
             gym=gym,
@@ -140,14 +143,14 @@ Matches the Alerts & Logs sidebar menu UI table:
             start_date=start_date,
             end_date=end_date,
             search=search,
-            page=page,
-            page_size=page_size,
+            page=safe_page,
+            page_size=safe_page_size,
         )
 
         response_data = {
             "count": total_count,
-            "page": page,
-            "page_size": page_size,
+            "page": safe_page,
+            "page_size": safe_page_size,
             "total_pages": total_pages,
             "results": GymAdminLogSerializer(logs, many=True).data,
         }
@@ -353,6 +356,9 @@ Accepts the same filtering parameters as the list endpoint.
         end_date = request.query_params.get("end_date")
         search = request.query_params.get("search")
         export_format = (request.query_params.get("format") or "csv").strip().lower()
+        if export_format not in ["csv", "json"]:
+            from common.exceptions import DomainValidationError
+            raise DomainValidationError(f"Unsupported export format '{export_format}'. Supported formats: 'csv', 'json'.")
 
         logs, _, _ = list_admin_logs(
             gym=gym,

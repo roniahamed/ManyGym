@@ -88,6 +88,19 @@ class GymAdminLogCreateSerializer(serializers.Serializer):
     target_id = serializers.CharField(max_length=100, allow_null=True, required=False, default=None)
     metadata = serializers.DictField(required=False, default=dict)
 
+    def validate_action(self, value):
+        cleaned = value.strip() if value else ""
+        if not cleaned:
+            raise serializers.ValidationError("Action cannot be blank.")
+        if "\x00" in value:
+            raise serializers.ValidationError("Null characters are not allowed.")
+        return cleaned
+
+    def validate_details(self, value):
+        if value and "\x00" in value:
+            raise serializers.ValidationError("Null characters are not allowed.")
+        return value
+
 
 class GymAdminLogsPaginatedResponseSerializer(serializers.Serializer):
     count = serializers.IntegerField()
