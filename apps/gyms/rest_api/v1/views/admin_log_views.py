@@ -1,17 +1,24 @@
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 
-from apps.gyms.rest_api.v1.serializers.admin_log_serializers import (
+from apps.gyms.rest_api.v1.serializers import (
     GymAdminLogSerializer,
     GymAdminLogCreateSerializer,
+    GymAdminLogsFilterSerializer,
+    GymAdminLogsExportFilterSerializer,
     GymAdminLogsPaginatedResponseSerializer,
     GymAdminLogsMetricsSerializer,
     AdminLogOptionsResponseSerializer,
 )
-from apps.gyms.services.admin_log_services import log_admin_action
+from apps.gyms.services.admin_log_services import (
+    log_admin_action,
+    generate_admin_logs_csv_content,
+    get_admin_logs_export_filename,
+)
 from apps.gyms.selectors.admin_log_selectors import (
     list_admin_logs,
     get_admin_log_by_id,
@@ -106,6 +113,7 @@ Matches the Alerts & Logs sidebar menu UI table:
         ],
         responses={
             200: OpenApiResponse(response=GymAdminLogsPaginatedResponseSerializer, description="Paginated admin logs."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure."),
             401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
             403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
             404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
@@ -115,42 +123,29 @@ Matches the Alerts & Logs sidebar menu UI table:
         gym = resolve_gym_context(request)
         check_gym_permission(request, gym, required_scope="admin_logs:read")
 
-        category = request.query_params.get("category")
-        action_type = request.query_params.get("action_type")
-        actor_id = request.query_params.get("actor_id")
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
-        search = request.query_params.get("search")
+        filter_serializer = GymAdminLogsFilterSerializer(data=request.query_params)
+        filter_serializer.is_valid(raise_exception=True)
+        params = filter_serializer.validated_data
 
-        try:
-            raw_page = int(request.query_params.get("page", 1))
-        except (ValueError, TypeError, OverflowError):
-            raw_page = 1
-
-        try:
-            raw_page_size = int(request.query_params.get("page_size", 20))
-        except (ValueError, TypeError, OverflowError):
-            raw_page_size = 20
-
-        safe_page = max(1, min(raw_page, 100_000))
-        safe_page_size = max(1, min(raw_page_size, 100))
+        page = params.get("page", 1)
+        page_size = params.get("page_size", 20)
 
         logs, total_count, total_pages = list_admin_logs(
             gym=gym,
-            category=category,
-            action_type=action_type,
-            actor_id=actor_id,
-            start_date=start_date,
-            end_date=end_date,
-            search=search,
-            page=safe_page,
-            page_size=safe_page_size,
+            category=params.get("category"),
+            action_type=params.get("action_type"),
+            actor_id=params.get("actor_id"),
+            start_date=params.get("start_date"),
+            end_date=params.get("end_date"),
+            search=params.get("search"),
+            page=page,
+            page_size=page_size,
         )
 
         response_data = {
             "count": total_count,
-            "page": safe_page,
-            "page_size": safe_page_size,
+            "page": page,
+            "page_size": page_size,
             "total_pages": total_pages,
             "results": GymAdminLogSerializer(logs, many=True).data,
         }
@@ -227,6 +222,7 @@ class GymAdminLogDetailView(APIView):
         ],
         responses={
             200: OpenApiResponse(response=GymAdminLogSerializer, description="Admin log detail retrieved successfully."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Invalid UUID."),
             401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
             403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
             404: OpenApiResponse(response=ErrorDetailSerializer, description="Log entry not found."),
@@ -277,15 +273,8 @@ Returns aggregate statistics for gym administration logs:
         check_gym_permission(request, gym, required_scope="admin_logs:read")
 
         metrics_data = get_admin_logs_metrics(gym=gym)
-        serialized_recent = GymAdminLogSerializer(metrics_data["recent_logs"], many=True).data
-
-        payload = {
-            "total_logs": metrics_data["total_logs"],
-            "logs_today": metrics_data["logs_today"],
-            "by_category": metrics_data["by_category"],
-            "recent_logs": serialized_recent,
-        }
-        return Response(payload, status=status.HTTP_200_OK)
+        serializer = GymAdminLogsMetricsSerializer(metrics_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class GymAdminLogsActionTypesView(APIView):
@@ -305,7 +294,9 @@ class GymAdminLogsActionTypesView(APIView):
     def get(self, request):
         categories = [{"value": choice[0], "label": choice[1]} for choice in AdminLogCategory.choices]
         action_types = [{"value": choice[0], "label": choice[1]} for choice in AdminLogActionType.choices]
-        return Response({"categories": categories, "action_types": action_types}, status=status.HTTP_200_OK)
+        payload = {"categories": categories, "action_types": action_types}
+        serializer = AdminLogOptionsResponseSerializer(payload)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class GymAdminLogsExportView(APIView):
@@ -315,7 +306,10 @@ class GymAdminLogsExportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def perform_content_negotiation(self, request, force=False):
-        """Bypasses default content negotiation so format=csv does not trigger 404."""
+        """
+        Bypasses default content negotiation so query parameter format=csv
+        does not trigger DRF's 404/406 when CSVRenderer is not registered globally.
+        """
         renderers = self.get_renderers()
         return renderers[0], renderers[0].media_type
 
@@ -338,61 +332,40 @@ Accepts the same filtering parameters as the list endpoint.
             OpenApiParameter(name="search", type=str, required=False),
         ],
         responses={
-            200: OpenApiResponse(description="File download attachment or JSON array."),
+            200: OpenApiResponse(description="File download attachment (CSV) or JSON array."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            403: OpenApiResponse(response=ErrorDetailSerializer, description="Permission denied."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Gym not found."),
         },
     )
     def get(self, request):
-        import csv
-        from django.http import HttpResponse
-        from django.utils import timezone
-
         gym = resolve_gym_context(request)
         check_gym_permission(request, gym, required_scope="admin_logs:read")
 
-        category = request.query_params.get("category")
-        action_type = request.query_params.get("action_type")
-        actor_id = request.query_params.get("actor_id")
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
-        search = request.query_params.get("search")
-        export_format = (request.query_params.get("format") or "csv").strip().lower()
-        if export_format not in ["csv", "json"]:
-            from common.exceptions import DomainValidationError
-            raise DomainValidationError(f"Unsupported export format '{export_format}'. Supported formats: 'csv', 'json'.")
+        export_filter = GymAdminLogsExportFilterSerializer(data=request.query_params)
+        export_filter.is_valid(raise_exception=True)
+        params = export_filter.validated_data
 
         logs, _, _ = list_admin_logs(
             gym=gym,
-            category=category,
-            action_type=action_type,
-            actor_id=actor_id,
-            start_date=start_date,
-            end_date=end_date,
-            search=search,
+            category=params.get("category"),
+            action_type=params.get("action_type"),
+            actor_id=params.get("actor_id"),
+            start_date=params.get("start_date"),
+            end_date=params.get("end_date"),
+            search=params.get("search"),
             page=1,
             page_size=1000,
         )
 
+        export_format = params.get("format", "csv")
         if export_format == "json":
-            data = GymAdminLogSerializer(logs, many=True).data
-            return Response(data, status=status.HTTP_200_OK)
+            serializer = GymAdminLogSerializer(logs, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
 
-        response = HttpResponse(content_type="text/csv; charset=utf-8")
-        filename = f"admin_logs_{gym.id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_content = generate_admin_logs_csv_content(logs)
+        filename = get_admin_logs_export_filename(gym=gym, format_type="csv")
+        response = HttpResponse(csv_content, content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
-
-        writer = csv.writer(response)
-        writer.writerow(["Admin", "Action", "Details", "Date and Time", "Category", "Action Type", "Target Type", "Target ID"])
-        for item in logs:
-            admin_name = item.actor_name or (item.actor.email if item.actor else "System")
-            writer.writerow([
-                admin_name,
-                item.action,
-                item.details,
-                item.formatted_date_time,
-                item.get_category_display(),
-                item.action_type,
-                item.target_type or "",
-                item.target_id or "",
-            ])
-
         return response

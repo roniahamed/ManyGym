@@ -1,6 +1,9 @@
+import csv
+import io
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Iterable
 from django.db import transaction
+from django.utils import timezone
 from apps.gyms.models import Gym, GymAdminLog
 from apps.users.models import User
 from common.enums import AdminLogCategory, AdminLogActionType
@@ -104,3 +107,42 @@ def log_admin_action(
             raise exc
         return None
 
+
+def generate_admin_logs_csv_content(logs: Iterable[GymAdminLog]) -> str:
+    """
+    Encapsulates CSV generation logic for administrative logs export.
+    Returns the serialized CSV text string.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Admin",
+        "Action",
+        "Details",
+        "Date and Time",
+        "Category",
+        "Action Type",
+        "Target Type",
+        "Target ID",
+    ])
+    for item in logs:
+        admin_name = item.actor_name or (item.actor.email if item.actor else "System")
+        writer.writerow([
+            admin_name,
+            item.action,
+            item.details,
+            item.formatted_date_time,
+            item.get_category_display(),
+            item.action_type,
+            item.target_type or "",
+            item.target_id or "",
+        ])
+    return output.getvalue()
+
+
+def get_admin_logs_export_filename(gym: Gym, format_type: str = "csv") -> str:
+    """
+    Generates a standardized filename for downloaded log exports.
+    """
+    timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+    return f"admin_logs_{gym.id}_{timestamp}.{format_type}"
