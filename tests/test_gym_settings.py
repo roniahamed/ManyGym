@@ -295,7 +295,7 @@ class TestGymSettings:
 
         url = reverse("gyms_v1:gym-settings-blocked-users-search")
         t0 = time.perf_counter()
-        with django_assert_num_queries(4):
+        with django_assert_num_queries(3):
             res = auth_client.get(f"{url}?gym_id={test_gym.id}&q=spam")
             assert res.status_code == status.HTTP_200_OK
         latency_ms = (time.perf_counter() - t0) * 1000

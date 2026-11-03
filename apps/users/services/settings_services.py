@@ -36,6 +36,7 @@ def update_user_settings(user: User, **data: Any) -> UserSetting:
         "is_private",
     }
 
+    settings_dirty = False
     for field, val in data.items():
         if field not in allowed_fields or val is None:
             continue
@@ -46,10 +47,22 @@ def update_user_settings(user: User, **data: Any) -> UserSetting:
                 user.profile.save(update_fields=["is_private"])
         else:
             setattr(settings_obj, field, val)
+            settings_dirty = True
 
-    settings_obj.save()
+    if settings_dirty:
+        update_fields = [f for f in data if f in allowed_fields and f != "is_private" and data[f] is not None]
+        update_fields.append("updated_at")
+        settings_obj.save(update_fields=update_fields)
+    else:
+        settings_obj.save(update_fields=["updated_at"])
+
     logger.info("Updated settings for user %s (%s)", user.email, user.id)
-    return settings_obj
+
+    # Re-fetch with select_related to avoid N+1 lazy loads in response serializer
+    return (
+        UserSetting.objects.select_related("user", "user__profile")
+        .get(pk=settings_obj.pk)
+    )
 
 
 @transaction.atomic
@@ -67,7 +80,7 @@ def block_user_for_user(
     except (ValueError, TypeError, AttributeError):
         raise DomainValidationError("Invalid user_id.")
 
-    target_user = User.objects.filter(id=user_id).first()
+    target_user = User.objects.filter(id=user_id).select_related("profile").first()
     if not target_user:
         raise ResourceNotFoundError("User to block not found.")
 
@@ -91,10 +104,14 @@ def block_user_for_user(
             "reason": cleaned_reason,
         },
     )
+    blocked_obj.blocked_user = target_user
 
-    # Automatically remove follow relations in both directions
-    UserFollow.objects.filter(follower=blocker, followed_user=target_user).delete()
-    UserFollow.objects.filter(follower=target_user, followed_user=blocker).delete()
+    # Automatically remove follow relations in both directions in a single query
+    from django.db.models import Q
+    UserFollow.objects.filter(
+        Q(follower=blocker, followed_user=target_user)
+        | Q(follower=target_user, followed_user=blocker)
+    ).delete()
 
     if created:
         logger.info("User %s blocked user %s", blocker.email, target_user.email)
@@ -155,7 +172,7 @@ def apply_user_access_control_action(
         # Revoke all session tokens
         AuthToken.objects.filter(user=user).delete()
         logger.info("Soft-deleted user account %s (%s)", user.email, user.id)
-        return settings_obj
+        return UserSetting.objects.select_related("user", "user__profile").get(pk=settings_obj.pk)
 
     elif action == "restore":
         if not password or not user.check_password(password):
@@ -168,7 +185,7 @@ def apply_user_access_control_action(
         user.is_active = True
         user.save(update_fields=["status", "is_active", "updated_at"])
         logger.info("Restored user account %s (%s)", user.email, user.id)
-        return settings_obj
+        return UserSetting.objects.select_related("user", "user__profile").get(pk=settings_obj.pk)
 
     elif action == "deactivate":
         settings_obj.deactivate()
@@ -181,7 +198,7 @@ def apply_user_access_control_action(
         # Invalidate active auth sessions
         AuthToken.objects.filter(user=user).delete()
         logger.info("Deactivated user account %s (%s)", user.email, user.id)
-        return settings_obj
+        return UserSetting.objects.select_related("user", "user__profile").get(pk=settings_obj.pk)
 
     elif action == "reactivate":
         settings_obj.reactivate()
@@ -191,7 +208,7 @@ def apply_user_access_control_action(
         user.is_active = True
         user.save(update_fields=["status", "is_active", "updated_at"])
         logger.info("Reactivated user account %s (%s)", user.email, user.id)
-        return settings_obj
+        return UserSetting.objects.select_related("user", "user__profile").get(pk=settings_obj.pk)
 
     else:
         raise DomainValidationError(f"Invalid access control action '{action}'.")

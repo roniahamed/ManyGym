@@ -73,7 +73,7 @@ Retrieves comprehensive gym workspace settings spanning Display preferences, Ale
     def get(self, request):
         gym = resolve_gym_context(request)
         check_gym_permission(request, gym, required_scope="gym_profile:read")
-        settings_obj = get_gym_settings(str(gym.id))
+        settings_obj = get_gym_settings(gym)
         return Response(GymSettingSerializer(settings_obj).data, status=status.HTTP_200_OK)
 
     @extend_schema(
@@ -303,7 +303,7 @@ Searches active Manygym users by name or email to select for blocking. Automatic
         gym = resolve_gym_context(request)
         check_gym_permission(request, gym, required_scope="gym_profile:read")
         query = request.query_params.get("q", "")
-        users = search_users_to_block_for_gym(str(gym.id), query=query)
+        users = search_users_to_block_for_gym(gym, query=query)
         return Response(GymUserSearchToBlockSerializer(users, many=True).data, status=status.HTTP_200_OK)
 
 

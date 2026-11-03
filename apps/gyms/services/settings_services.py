@@ -77,7 +77,7 @@ def block_user_for_gym(
     except (ValueError, TypeError, AttributeError):
         raise DomainValidationError("Invalid user_id.")
 
-    target_user = User.objects.filter(id=user_id).first()
+    target_user = User.objects.filter(id=user_id).select_related("profile").first()
     if not target_user:
         raise ResourceNotFoundError("User to block not found.")
 
@@ -102,6 +102,11 @@ def block_user_for_gym(
             "reason": cleaned_reason,
         },
     )
+    blocked_obj.user = target_user
+    if blocked_by_user:
+        blocked_obj.blocked_by = blocked_by_user
+    blocked_obj.gym = gym
+
     # Remove follow relationship if user was following the gym
     GymFollow.objects.filter(gym=gym, user=target_user).delete()
 

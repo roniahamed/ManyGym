@@ -6,14 +6,21 @@ from apps.gyms.models import Gym, GymSetting, GymBlockedUser
 from apps.users.models import User
 
 
-def get_gym_settings(gym_id: str) -> Optional[GymSetting]:
+def get_gym_settings(gym_id_or_gym: "str | Gym") -> Optional[GymSetting]:
     """
     Retrieves gym settings with field projections, auto-creating default settings if not present.
+    Accepts either a Gym instance or UUID string.
     """
-    try:
-        uuid.UUID(str(gym_id))
-    except (ValueError, TypeError, AttributeError):
-        return None
+    if isinstance(gym_id_or_gym, Gym):
+        gym = gym_id_or_gym
+        gym_id = str(gym.id)
+    else:
+        gym = None
+        gym_id = str(gym_id_or_gym)
+        try:
+            uuid.UUID(gym_id)
+        except (ValueError, TypeError, AttributeError):
+            return None
 
     settings_obj = (
         GymSetting.objects.filter(gym_id=gym_id)
@@ -43,7 +50,8 @@ def get_gym_settings(gym_id: str) -> Optional[GymSetting]:
         .first()
     )
     if not settings_obj:
-        gym = Gym.objects.filter(id=gym_id).only("id", "name").first()
+        if not gym:
+            gym = Gym.objects.filter(id=gym_id).only("id", "name").first()
         if gym:
             settings_obj, _ = GymSetting.objects.get_or_create(gym=gym)
     return settings_obj
@@ -82,28 +90,35 @@ def list_blocked_users_for_gym(gym_id: str) -> "models.QuerySet[GymBlockedUser]"
 
 
 def search_users_to_block_for_gym(
-    gym_id: str,
+    gym_id_or_gym: "str | Gym",
     query: Optional[str] = None,
     limit: int = 20,
 ) -> "models.QuerySet[User]":
     """
     Searches active Manygym users eligible for blocking.
     Excludes the gym owner and already blocked accounts.
+    Accepts either a Gym instance (avoiding an extra DB lookup) or a UUID string.
     """
-    try:
-        uuid.UUID(str(gym_id))
-    except (ValueError, TypeError, AttributeError):
-        return User.objects.none()
+    if isinstance(gym_id_or_gym, Gym):
+        gym_id = str(gym_id_or_gym.id)
+        owner_user_id = gym_id_or_gym.owner_user_id
+    else:
+        gym_id = str(gym_id_or_gym)
+        try:
+            uuid.UUID(gym_id)
+        except (ValueError, TypeError, AttributeError):
+            return User.objects.none()
 
-    gym = Gym.objects.filter(id=gym_id).only("id", "owner_user_id").first()
-    if not gym:
-        return User.objects.none()
+        gym = Gym.objects.filter(id=gym_id).only("id", "owner_user_id").first()
+        if not gym:
+            return User.objects.none()
+        owner_user_id = gym.owner_user_id
 
     blocked_user_ids = GymBlockedUser.objects.filter(gym_id=gym_id).values_list("user_id", flat=True)
 
     qs = (
         User.objects.filter(is_active=True)
-        .exclude(id=gym.owner_user_id)
+        .exclude(id=owner_user_id)
         .exclude(id__in=blocked_user_ids)
         .select_related("profile")
         .only(
