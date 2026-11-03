@@ -44,6 +44,13 @@ def log_admin_action(
         The created GymAdminLog instance, or None if an error occurred and raise_on_error is False.
     """
     try:
+        if actor is None:
+            try:
+                from common.context import get_current_user
+                actor = get_current_user()
+            except Exception:
+                pass
+
         actor_name = ""
         actor_email = ""
         if actor is not None:

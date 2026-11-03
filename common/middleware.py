@@ -35,3 +35,8 @@ class GymContextMiddleware(MiddlewareMixin):
             request.token_context = "gym"
 
         return None
+
+    def process_response(self, request, response):
+        from common.context import clear_current_user
+        clear_current_user()
+        return response

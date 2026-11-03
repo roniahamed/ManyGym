@@ -27,6 +27,9 @@ class FastJWTAuthentication(JWTAuthentication):
         if not user.is_active:
             raise AuthenticationFailed(_("User is inactive"), code="user_inactive")
 
+        from common.context import set_current_user
+        set_current_user(user)
+
         return user
 
 

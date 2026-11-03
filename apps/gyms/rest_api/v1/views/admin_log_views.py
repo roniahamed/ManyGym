@@ -311,6 +311,11 @@ class GymAdminLogsExportView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    def perform_content_negotiation(self, request, force=False):
+        """Bypasses default content negotiation so format=csv does not trigger 404."""
+        renderers = self.get_renderers()
+        return renderers[0], renderers[0].media_type
+
     @extend_schema(
         tags=["Alerts & Logs - Admin Logs"],
         summary="Export Admin Logs",
