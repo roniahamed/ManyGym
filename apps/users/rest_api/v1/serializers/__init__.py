@@ -32,6 +32,7 @@ from apps.users.rest_api.v1.serializers.settings_serializers import (
     UserSettingUpdateSerializer,
     UserBlockedUserSerializer,
     UserBlockUserCreateSerializer,
+    UserFollowerBlockCreateSerializer,
     UserSearchToBlockSerializer,
     UserAccessControlActionSerializer,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "UserSettingUpdateSerializer",
     "UserBlockedUserSerializer",
     "UserBlockUserCreateSerializer",
+    "UserFollowerBlockCreateSerializer",
     "UserSearchToBlockSerializer",
     "UserAccessControlActionSerializer",
 ]

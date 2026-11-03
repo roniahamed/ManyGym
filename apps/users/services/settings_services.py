@@ -2,6 +2,7 @@ import uuid
 import logging
 from typing import Optional, Any
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from apps.users.models import User, UserSetting, UserBlockedUser, UserFollow
 from apps.authentication.models import AuthToken
@@ -107,7 +108,6 @@ def block_user_for_user(
     blocked_obj.blocked_user = target_user
 
     # Automatically remove follow relations in both directions in a single query
-    from django.db.models import Q
     UserFollow.objects.filter(
         Q(follower=blocker, followed_user=target_user)
         | Q(follower=target_user, followed_user=blocker)

@@ -119,6 +119,25 @@ class UserBlockUserCreateSerializer(serializers.Serializer):
         return value.strip()
 
 
+class UserFollowerBlockCreateSerializer(serializers.Serializer):
+    """
+    Request payload serializer for blocking directly from the followers list.
+    """
+    reason = StrictCharField(
+        required=False,
+        allow_blank=True,
+        default="Blocked from followers list",
+        max_length=255,
+        help_text="Optional rationale for blocking from followers list.",
+    )
+
+    def validate_reason(self, value: str | None) -> str:
+        if value is None:
+            return "Blocked from followers list"
+        cleaned = value.strip()
+        return cleaned if cleaned else "Blocked from followers list"
+
+
 class UserSearchToBlockSerializer(serializers.ModelSerializer):
     """
     Lightweight projection serializer for searching active users to block.
