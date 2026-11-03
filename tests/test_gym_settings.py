@@ -211,7 +211,15 @@ class TestGymSettings:
         assert res_pub.data["unpublished_at"] is None
 
         # Delete
-        res_del = auth_client.post(f"{url}?gym_id={test_gym.id}", {"action": "delete"}, format="json")
+        res_del = auth_client.post(
+            f"{url}?gym_id={test_gym.id}",
+            {
+                "action": "delete",
+                "password": "SecurePassword123!",
+                "confirmation": "delete",
+            },
+            format="json",
+        )
         assert res_del.status_code == status.HTTP_200_OK
         assert res_del.data["is_deleted"] is True
         assert res_del.data["deleted_at"] is not None

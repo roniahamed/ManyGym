@@ -115,14 +115,29 @@ Authenticates user credentials and issues a contextual JWT access & refresh toke
             email=serializer.validated_data["email"],
             password=serializer.validated_data["password"],
         )
-        return Response(
-            {
-                "message": "Login successful.",
-                "user": UserSerializer(user).data,
-                "tokens": tokens,
-            },
-            status=status.HTTP_200_OK,
+        from apps.gyms.models import Gym
+        deactivated_gyms = list(
+            Gym.objects.filter(owner_user=user, settings__is_deactivated=True)
+            .values("id", "name")
         )
+        response_data = {
+            "message": "Login successful.",
+            "user": UserSerializer(user).data,
+            "tokens": tokens,
+        }
+        if deactivated_gyms:
+            notice = f"Your gym '{deactivated_gyms[0]['name']}' is deactivated. Do you want to reactivate it? If so, please reactivate it from Settings."
+            response_data["deactivation_notice"] = notice
+            response_data["has_deactivated_gym"] = True
+            response_data["deactivated_gyms"] = [
+                {
+                    "id": str(g["id"]),
+                    "name": g["name"],
+                    "message": f"Gym '{g['name']}' is deactivated. Do you want to reactivate it? If so, please reactivate it from Settings.",
+                }
+                for g in deactivated_gyms
+            ]
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class SwitchContextView(APIView):
@@ -222,16 +237,38 @@ Dynamically switches user operational context between Personal Profile and speci
 
         if context_type == TokenContextType.GYM:
             tokens = switch_gym_context(user=request.user, gym_id=str(gym_id))
+            from apps.gyms.models import Gym
+            gym_obj = Gym.objects.filter(id=gym_id).first()
+            is_deactivated = False
+            if gym_obj:
+                is_deactivated = getattr(gym_obj.get_settings(), "is_deactivated", False)
+            if is_deactivated:
+                notice = "This gym is deactivated. Do you want to reactivate it? If so, please reactivate it from Settings."
+                return Response(
+                    {
+                        "message": notice,
+                        "deactivation_notice": notice,
+                        "is_deactivated": True,
+                        "tokens": tokens,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            return Response(
+                {
+                    "message": f"Successfully switched to {context_type} context.",
+                    "tokens": tokens,
+                },
+                status=status.HTTP_200_OK,
+            )
         else:
             tokens = switch_to_personal_context(user=request.user)
-
-        return Response(
-            {
-                "message": f"Successfully switched to {context_type} context.",
-                "tokens": tokens,
-            },
-            status=status.HTTP_200_OK,
-        )
+            return Response(
+                {
+                    "message": f"Successfully switched to {context_type} context.",
+                    "tokens": tokens,
+                },
+                status=status.HTTP_200_OK,
+            )
 
 
 class LogoutView(APIView):

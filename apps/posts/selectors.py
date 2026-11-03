@@ -76,6 +76,16 @@ def list_gym_feed(
     if setting and setting.is_deleted:
         raise ResourceNotFoundError("Gym not found.")
 
+    is_owner_or_staff = False
+    if requesting_user and requesting_user.is_authenticated:
+        if gym.owner_user_id == requesting_user.id or requesting_user.is_superuser:
+            is_owner_or_staff = True
+        elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+            is_owner_or_staff = True
+
+    if setting and not setting.is_published and not is_owner_or_staff:
+        raise ResourceNotFoundError("Gym not found.")
+
     if setting and setting.is_deactivated and not is_member_or_staff:
         return GymPost.objects.none()
 
@@ -135,6 +145,16 @@ def get_post_detail(
         setting = GymSetting.objects.filter(gym=gym).first()
 
     if setting and setting.is_deleted:
+        raise ResourceNotFoundError("Gym not found.")
+
+    is_owner_or_staff = False
+    if requesting_user and requesting_user.is_authenticated:
+        if gym.owner_user_id == requesting_user.id or requesting_user.is_superuser:
+            is_owner_or_staff = True
+        elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+            is_owner_or_staff = True
+
+    if setting and not setting.is_published and not is_owner_or_staff:
         raise ResourceNotFoundError("Gym not found.")
 
     if setting and setting.is_deactivated and not is_member_or_staff:

@@ -182,6 +182,7 @@ class GymUserSearchToBlockSerializer(serializers.ModelSerializer):
 class GymAccessControlActionSerializer(serializers.Serializer):
     """
     Request payload serializer for gym lifecycle state transitions.
+    For 'delete' action, requires account password and confirmation keyword 'delete'.
     """
     action = serializers.ChoiceField(
         choices=[
@@ -195,3 +196,25 @@ class GymAccessControlActionSerializer(serializers.Serializer):
         required=True,
         help_text="Lifecycle state transition action.",
     )
+    password = serializers.CharField(
+        required=False,
+        write_only=True,
+        help_text="Account password required for delete confirmation.",
+    )
+    confirmation = serializers.CharField(
+        required=False,
+        help_text="Confirmation keyword ('delete') required for delete confirmation.",
+    )
+
+    def validate(self, attrs):
+        action = attrs.get("action")
+        if action == "delete":
+            password = attrs.get("password")
+            confirmation = attrs.get("confirmation")
+            if not password:
+                raise serializers.ValidationError({"password": "Password is required to delete gym."})
+            if not confirmation:
+                raise serializers.ValidationError({"confirmation": "Confirmation text is required. Please type 'delete' to confirm."})
+            if confirmation.strip().lower() != "delete":
+                raise serializers.ValidationError({"confirmation": "Please type 'delete' to confirm deletion."})
+        return attrs

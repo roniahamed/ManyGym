@@ -660,7 +660,15 @@ class TestGymSettingsBusinessLogicAndStateTransitions:
         assert test_gym.settings.unpublished_at is None
 
         # Delete -> Restore -> Repeat Restore
-        auth_client.post(f"{url}?gym_id={test_gym.id}", {"action": "delete"}, format="json")
+        auth_client.post(
+            f"{url}?gym_id={test_gym.id}",
+            {
+                "action": "delete",
+                "password": "SecurePassword123!",
+                "confirmation": "delete",
+            },
+            format="json",
+        )
         test_gym.settings.refresh_from_db()
         assert test_gym.settings.is_deleted is True
         assert test_gym.settings.deleted_at is not None

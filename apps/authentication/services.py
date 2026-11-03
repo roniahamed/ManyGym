@@ -113,6 +113,9 @@ def switch_gym_context(user: User, gym_id: str) -> dict:
     except Exception:
         raise ResourceNotFoundError("Gym not found.")
 
+    if getattr(gym.get_settings(), "is_deleted", False):
+        raise ResourceNotFoundError("Gym not found.")
+
     # Check if user is the gym owner
     is_owner = (gym.owner_user_id == user.id) or user.is_superuser
 

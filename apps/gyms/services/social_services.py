@@ -2,7 +2,9 @@ import uuid
 from typing import Optional, Tuple
 from django.db import transaction
 from apps.gyms.models import Gym, GymFollow, GymBlockedUser
+from apps.access_control.models import GymStaffAssignment
 from apps.users.models import User
+from common.enums import StaffStatus
 from common.exceptions import DomainValidationError, ResourceNotFoundError, PermissionDeniedError
 
 
@@ -30,8 +32,18 @@ def follow_gym(user: User, gym_id) -> Tuple[GymFollow, bool]:
             raise ResourceNotFoundError("Gym not found.")
 
     settings_obj = gym.get_settings()
-    if settings_obj.is_deleted or settings_obj.is_deactivated:
+    if settings_obj.is_deleted:
+        raise ResourceNotFoundError("Gym not found.")
+    if settings_obj.is_deactivated:
         raise DomainValidationError("This gym is currently inactive or unavailable.")
+
+    is_owner_or_staff = (
+        gym.owner_user_id == user.id
+        or user.is_superuser
+        or GymStaffAssignment.objects.filter(gym=gym, user=user, status=StaffStatus.ACTIVE).exists()
+    )
+    if not settings_obj.is_published and not is_owner_or_staff:
+        raise ResourceNotFoundError("Gym not found.")
 
     # Check if user is blocked by gym
     if GymBlockedUser.objects.filter(gym=gym, user=user).exists():
@@ -110,6 +122,14 @@ def send_member_joining_request(
         raise ResourceNotFoundError("Gym not found.")
     if settings_obj.is_deactivated:
         raise DomainValidationError("This gym is currently deactivated.")
+
+    is_owner_or_staff = (
+        gym.owner_user_id == user.id
+        or user.is_superuser
+        or GymStaffAssignment.objects.filter(gym=gym, user=user, status=StaffStatus.ACTIVE).exists()
+    )
+    if not settings_obj.is_published and not is_owner_or_staff:
+        raise ResourceNotFoundError("Gym not found.")
 
     # 1. Blocklist check
     if GymBlockedUser.objects.filter(gym=gym, user=user).exists():

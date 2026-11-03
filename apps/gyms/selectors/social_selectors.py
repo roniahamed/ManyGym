@@ -36,6 +36,7 @@ def list_gym_followers(gym_id, requesting_user: Optional[User] = None) -> models
                     "settings__who_can_see_followers",
                     "settings__who_can_see_following",
                     "settings__is_deactivated",
+                    "settings__is_published",
                     "settings__is_deleted",
                 )
                 .get(id=gym_uuid)
@@ -50,15 +51,18 @@ def list_gym_followers(gym_id, requesting_user: Optional[User] = None) -> models
     if getattr(setting, "is_deleted", False):
         raise ResourceNotFoundError("Gym not found.")
 
-    if getattr(setting, "is_deactivated", False):
-        is_owner_or_staff = False
-        if requesting_user and requesting_user.is_authenticated:
-            if gym.owner_user_id == requesting_user.id:
-                is_owner_or_staff = True
-            elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
-                is_owner_or_staff = True
-        if not is_owner_or_staff:
-            raise DomainValidationError("This gym is deactivated.")
+    is_owner_or_staff = False
+    if requesting_user and requesting_user.is_authenticated:
+        if gym.owner_user_id == requesting_user.id or requesting_user.is_superuser:
+            is_owner_or_staff = True
+        elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+            is_owner_or_staff = True
+
+    if not getattr(setting, "is_published", True) and not is_owner_or_staff:
+        raise ResourceNotFoundError("Gym not found.")
+
+    if getattr(setting, "is_deactivated", False) and not is_owner_or_staff:
+        raise DomainValidationError("This gym is deactivated.")
 
     if requesting_user and requesting_user.is_authenticated:
         if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():
@@ -165,6 +169,7 @@ def list_gym_following(gym_id, requesting_user: Optional[User] = None) -> list:
                     "settings__id",
                     "settings__who_can_see_following",
                     "settings__is_deactivated",
+                    "settings__is_published",
                     "settings__is_deleted",
                 )
                 .get(id=gym_uuid)
@@ -179,15 +184,18 @@ def list_gym_following(gym_id, requesting_user: Optional[User] = None) -> list:
     if getattr(setting, "is_deleted", False):
         raise ResourceNotFoundError("Gym not found.")
 
-    if getattr(setting, "is_deactivated", False):
-        is_owner_or_staff = False
-        if requesting_user and requesting_user.is_authenticated:
-            if gym.owner_user_id == requesting_user.id:
-                is_owner_or_staff = True
-            elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
-                is_owner_or_staff = True
-        if not is_owner_or_staff:
-            raise DomainValidationError("This gym is deactivated.")
+    is_owner_or_staff = False
+    if requesting_user and requesting_user.is_authenticated:
+        if gym.owner_user_id == requesting_user.id or requesting_user.is_superuser:
+            is_owner_or_staff = True
+        elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+            is_owner_or_staff = True
+
+    if not getattr(setting, "is_published", True) and not is_owner_or_staff:
+        raise ResourceNotFoundError("Gym not found.")
+
+    if getattr(setting, "is_deactivated", False) and not is_owner_or_staff:
+        raise DomainValidationError("This gym is deactivated.")
 
     if requesting_user and requesting_user.is_authenticated:
         if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():
@@ -253,6 +261,7 @@ def list_gym_members_for_audience(
                     "settings__id",
                     "settings__who_can_see_members",
                     "settings__is_deactivated",
+                    "settings__is_published",
                     "settings__is_deleted",
                 )
                 .get(id=gym_uuid)
@@ -267,15 +276,18 @@ def list_gym_members_for_audience(
     if getattr(setting, "is_deleted", False):
         raise ResourceNotFoundError("Gym not found.")
 
-    if getattr(setting, "is_deactivated", False):
-        is_owner_or_staff = False
-        if requesting_user and requesting_user.is_authenticated:
-            if gym.owner_user_id == requesting_user.id:
-                is_owner_or_staff = True
-            elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
-                is_owner_or_staff = True
-        if not is_owner_or_staff:
-            raise DomainValidationError("This gym is deactivated.")
+    is_owner_or_staff = False
+    if requesting_user and requesting_user.is_authenticated:
+        if gym.owner_user_id == requesting_user.id or requesting_user.is_superuser:
+            is_owner_or_staff = True
+        elif GymStaffAssignment.objects.filter(gym=gym, user=requesting_user, status=StaffStatus.ACTIVE).exists():
+            is_owner_or_staff = True
+
+    if not getattr(setting, "is_published", True) and not is_owner_or_staff:
+        raise ResourceNotFoundError("Gym not found.")
+
+    if getattr(setting, "is_deactivated", False) and not is_owner_or_staff:
+        raise DomainValidationError("This gym is deactivated.")
 
     if requesting_user and requesting_user.is_authenticated:
         if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():

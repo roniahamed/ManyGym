@@ -124,6 +124,27 @@ def test_gym(owner_user):
 
 
 @pytest.fixture
+def staff_user(db, test_gym):
+    user = User.objects.create_user(
+        email="staff.sam@example.com",
+        password="SecurePassword123!",
+        first_name="Sam",
+        last_name="Staff",
+        is_verified=True,
+    )
+    from apps.access_control.models import GymStaffAssignment, Role
+    from common.enums import StaffStatus
+    role, _ = Role.objects.get_or_create(gym=test_gym, name="Trainer", defaults={"slug": "trainer"})
+    GymStaffAssignment.objects.create(gym=test_gym, user=user, role=role, status=StaffStatus.ACTIVE)
+    return user
+
+
+@pytest.fixture
+def staff_client(staff_user):
+    return make_client(staff_user)
+
+
+@pytest.fixture
 def active_member(test_gym, member_user):
     return Member.objects.create(
         gym=test_gym,
@@ -526,8 +547,48 @@ class TestAccessAndControlLifecycleTransitions:
     def test_soft_delete_and_restore_gym(self, auth_client, test_gym, outsider_client):
         url = reverse("gyms_v1:gym-settings-access-control")
 
-        # Delete
-        res = auth_client.post(f"{url}?gym_id={test_gym.id}", {"action": "delete"}, format="json")
+        # 1. Missing password
+        res_no_pw = auth_client.post(
+            f"{url}?gym_id={test_gym.id}",
+            {"action": "delete", "confirmation": "delete"},
+            format="json",
+        )
+        assert res_no_pw.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 2. Wrong password
+        res_wrong_pw = auth_client.post(
+            f"{url}?gym_id={test_gym.id}",
+            {"action": "delete", "password": "WrongPassword!", "confirmation": "delete"},
+            format="json",
+        )
+        assert res_wrong_pw.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 3. Missing confirmation text
+        res_no_conf = auth_client.post(
+            f"{url}?gym_id={test_gym.id}",
+            {"action": "delete", "password": "SecurePassword123!"},
+            format="json",
+        )
+        assert res_no_conf.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 4. Wrong confirmation word
+        res_wrong_conf = auth_client.post(
+            f"{url}?gym_id={test_gym.id}",
+            {"action": "delete", "password": "SecurePassword123!", "confirmation": "remove"},
+            format="json",
+        )
+        assert res_wrong_conf.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 5. Successful Delete with password + 'delete' confirmation
+        res = auth_client.post(
+            f"{url}?gym_id={test_gym.id}",
+            {
+                "action": "delete",
+                "password": "SecurePassword123!",
+                "confirmation": "delete",
+            },
+            format="json",
+        )
         assert res.status_code == status.HTTP_200_OK
         assert res.data["is_deleted"] is True
         assert res.data["deleted_at"] is not None
@@ -541,3 +602,85 @@ class TestAccessAndControlLifecycleTransitions:
         assert res_rest.status_code == status.HTTP_200_OK
         assert res_rest.data["is_deleted"] is False
         assert res_rest.data["deleted_at"] is None
+
+    def test_unpublished_gym_visibility_rules(self, auth_client, outsider_client, member_client, staff_client, test_gym, active_member):
+        """
+        Unpublished gym rule:
+        Staff and gym admin/owner can access and perform all actions.
+        Outsiders and even regular members CANNOT view or access (404 Not Found).
+        """
+        url = reverse("gyms_v1:gym-settings-access-control")
+
+        # Unpublish gym
+        res_unpub = auth_client.post(f"{url}?gym_id={test_gym.id}", {"action": "unpublish"}, format="json")
+        assert res_unpub.status_code == status.HTTP_200_OK
+        assert res_unpub.data["is_published"] is False
+
+        members_url = reverse("gyms_v1:gym-members-list", kwargs={"gym_id": test_gym.id})
+        followers_url = reverse("gyms_v1:gym-followers-list", kwargs={"gym_id": test_gym.id})
+        following_url = reverse("gyms_v1:gym-following-list", kwargs={"gym_id": test_gym.id})
+        feed_url = f"/api/v1/posts/?gym_id={test_gym.id}"
+
+        # 1. Outsider gets 404 on all endpoints
+        assert outsider_client.get(members_url).status_code == status.HTTP_404_NOT_FOUND
+        assert outsider_client.get(followers_url).status_code == status.HTTP_404_NOT_FOUND
+        assert outsider_client.get(following_url).status_code == status.HTTP_404_NOT_FOUND
+        assert outsider_client.get(feed_url).status_code == status.HTTP_404_NOT_FOUND
+
+        # 2. Regular enrolled member ALSO gets 404
+        assert member_client.get(members_url).status_code == status.HTTP_404_NOT_FOUND
+        assert member_client.get(followers_url).status_code == status.HTTP_404_NOT_FOUND
+        assert member_client.get(following_url).status_code == status.HTTP_404_NOT_FOUND
+        assert member_client.get(feed_url).status_code == status.HTTP_404_NOT_FOUND
+
+        # 3. Active Staff member CAN access normally (200 OK)
+        assert staff_client.get(members_url).status_code == status.HTTP_200_OK
+        assert staff_client.get(followers_url).status_code == status.HTTP_200_OK
+        assert staff_client.get(following_url).status_code == status.HTTP_200_OK
+        assert staff_client.get(feed_url).status_code == status.HTTP_200_OK
+
+        # 4. Gym Owner / Admin CAN access normally (200 OK)
+        assert auth_client.get(members_url).status_code == status.HTTP_200_OK
+        assert auth_client.get(followers_url).status_code == status.HTTP_200_OK
+        assert auth_client.get(following_url).status_code == status.HTTP_200_OK
+        assert auth_client.get(feed_url).status_code == status.HTTP_200_OK
+
+    def test_deactivated_gym_login_notice_and_switch_context_prompt(self, auth_client, owner_user, test_gym):
+        """
+        Deactivated gym rule:
+        - When logging in, shows notice asking if user wants to reactivate.
+        - When switching context to deactivated gym, returns prominent reactivation prompt message.
+        """
+        from rest_framework.test import APIClient
+        url_access = reverse("gyms_v1:gym-settings-access-control")
+
+        # Deactivate gym
+        res_deact = auth_client.post(f"{url_access}?gym_id={test_gym.id}", {"action": "deactivate"}, format="json")
+        assert res_deact.status_code == status.HTTP_200_OK
+        assert res_deact.data["is_deactivated"] is True
+
+        # 1. Login attempt by owner: returns deactivation notice
+        anon_client = APIClient()
+        login_url = "/api/v1/auth/login/"
+        res_login = anon_client.post(
+            login_url,
+            {"email": owner_user.email, "password": "SecurePassword123!"},
+            format="json",
+        )
+        assert res_login.status_code == status.HTTP_200_OK
+        assert res_login.data.get("has_deactivated_gym") is True
+        assert "deactivation_notice" in res_login.data
+        assert "is deactivated" in res_login.data["deactivation_notice"]
+        assert "reactivate" in res_login.data["deactivation_notice"]
+
+        # 2. Switch context to deactivated gym: returns message prompting reactivation
+        switch_url = "/api/v1/auth/switch-context/"
+        res_switch = auth_client.post(
+            switch_url,
+            {"context_type": "gym", "gym_id": str(test_gym.id)},
+            format="json",
+        )
+        assert res_switch.status_code == status.HTTP_200_OK
+        assert res_switch.data.get("is_deactivated") is True
+        assert "deactivated" in res_switch.data["message"]
+        assert "reactivate" in res_switch.data["message"]

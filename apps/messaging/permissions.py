@@ -37,7 +37,16 @@ def can_user_message_gym(user, gym: Gym) -> bool:
     if setting:
         if getattr(setting, "is_deleted", False):
             raise ResourceNotFoundError("Gym not found.")
-        if getattr(setting, "is_deactivated", False) and gym.owner_user_id != getattr(user, "id", None):
+
+        is_owner_or_staff = (
+            gym.owner_user_id == getattr(user, "id", None)
+            or getattr(user, "is_superuser", False)
+            or GymStaffAssignment.objects.filter(gym=gym, user=user, status=StaffStatus.ACTIVE).exists()
+        )
+        if not getattr(setting, "is_published", True) and not is_owner_or_staff:
+            raise ResourceNotFoundError("Gym not found.")
+
+        if getattr(setting, "is_deactivated", False) and not is_owner_or_staff:
             raise DomainValidationError("This gym is deactivated and cannot receive new messages.")
         policy = setting.who_can_message
     else:

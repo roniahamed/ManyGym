@@ -363,5 +363,7 @@ Executes administrative lifecycle transitions on a gym workspace:
             gym=gym,
             action=serializer.validated_data["action"],
             user=request.user,
+            password=serializer.validated_data.get("password"),
+            confirmation=serializer.validated_data.get("confirmation"),
         )
         return Response(GymSettingSerializer(updated_settings).data, status=status.HTTP_200_OK)

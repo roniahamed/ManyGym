@@ -4,7 +4,7 @@ from typing import Optional, Any
 from django.db import transaction
 from apps.gyms.models import Gym, GymSetting, GymBlockedUser, GymFollow
 from apps.users.models import User
-from common.exceptions import DomainValidationError, ResourceNotFoundError
+from common.exceptions import DomainValidationError, ResourceNotFoundError, PermissionDeniedError
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +119,31 @@ def unblock_user_for_gym(gym: Gym, user_id: str) -> bool:
 
 
 @transaction.atomic
-def apply_access_control_action(gym: Gym, action: str, user: User) -> GymSetting:
+def apply_access_control_action(
+    gym: Gym,
+    action: str,
+    user: User,
+    password: Optional[str] = None,
+    confirmation: Optional[str] = None,
+) -> GymSetting:
     """
     Applies an administrative lifecycle state transition to the gym.
+    For 'delete' action:
+    - Enforces gym owner or superuser permission.
+    - Validates user password.
+    - Validates confirmation text matches 'delete'.
     """
     settings_obj = get_or_create_gym_settings(gym)
+
+    if action == "delete":
+        if gym.owner_user_id != user.id and not user.is_superuser:
+            raise PermissionDeniedError("Only the gym owner can delete this gym account.")
+
+        if not password or not user.check_password(password):
+            raise DomainValidationError("Invalid password confirmation.")
+
+        if not confirmation or confirmation.strip().lower() != "delete":
+            raise DomainValidationError("Please type 'delete' to confirm deletion.")
 
     action_handlers = {
         "deactivate": settings_obj.deactivate,
