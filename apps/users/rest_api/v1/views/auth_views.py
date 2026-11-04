@@ -147,6 +147,8 @@ Validates the 6-digit registration OTP, marks the account as verified, and immed
 3. Sets `user.is_verified = True`.
 4. Invalidates the used OTP.
 5. Issues a JWT access and refresh token pair signed with `context_type: personal`.
+6. Enforces maximum 5 attempts per OTP code; invalidates code upon 5 failed attempts.
+7. Throttled via `OTPVerifyRateThrottle` (returns 429 when rate limit is exceeded).
         """,
         request=VerifySignupOTPSerializer,
         responses={
@@ -192,21 +194,33 @@ Validates the 6-digit registration OTP, marks the account as verified, and immed
             ),
             400: OpenApiResponse(
                 response=ErrorDetailSerializer,
-                description="Invalid or expired OTP code.",
+                description="Invalid or expired OTP code, or max attempts exceeded.",
                 examples=[
                     OpenApiExample(
                         name="Invalid OTP Example",
                         value={
                             "code": "VALIDATION_ERROR",
-                            "message": "Invalid or expired verification OTP.",
+                            "message": "Invalid verification OTP. 4 attempt(s) remaining.",
                             "details": {},
                         },
-                    )
+                    ),
+                    OpenApiExample(
+                        name="Max Attempts Exceeded Example",
+                        value={
+                            "code": "VALIDATION_ERROR",
+                            "message": "Too many failed attempts. This verification code has been invalidated. Please request a new code.",
+                            "details": {},
+                        },
+                    ),
                 ],
             ),
             404: OpenApiResponse(
                 response=ErrorDetailSerializer,
                 description="User with this email was not found.",
+            ),
+            429: OpenApiResponse(
+                response=ErrorDetailSerializer,
+                description="Too many verification attempts; rate limit throttled.",
             ),
         },
         examples=[
@@ -332,6 +346,7 @@ class VerifyResetOTPView(APIView):
         description="""
 ### Summary
 Pre-checks if a provided password reset OTP is currently valid and unexpired before presenting the new password entry form.
+Enforces maximum 5 attempts per OTP code to prevent brute forcing; throttled via `OTPVerifyRateThrottle`.
         """,
         request=VerifyResetOTPSerializer,
         responses={
@@ -341,7 +356,11 @@ Pre-checks if a provided password reset OTP is currently valid and unexpired bef
             ),
             400: OpenApiResponse(
                 response=ErrorDetailSerializer,
-                description="Invalid or expired reset code.",
+                description="Invalid or expired reset code, or max attempts reached.",
+            ),
+            429: OpenApiResponse(
+                response=ErrorDetailSerializer,
+                description="Too many verification attempts; rate limit throttled.",
             ),
         },
         examples=[

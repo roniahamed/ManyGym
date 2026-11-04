@@ -4,7 +4,7 @@ from apps.users.rest_api.v1.serializers.profile_serializers import UserSerialize
 
 
 class UserRegistrationSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=True, max_length=255)
     password = StrictCharField(write_only=True, required=True, min_length=8)
     first_name = StrictCharField(required=True, max_length=100)
     last_name = StrictCharField(required=True, max_length=100)
@@ -12,25 +12,25 @@ class UserRegistrationSerializer(serializers.Serializer):
 
 
 class VerifySignupOTPSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=True, max_length=255)
     otp_code = StrictCharField(required=True, min_length=6, max_length=6)
 
 
 class ResendOTPSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=True, max_length=255)
 
 
 class ForgotPasswordSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=True, max_length=255)
 
 
 class VerifyResetOTPSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=True, max_length=255)
     otp_code = StrictCharField(required=True, min_length=6, max_length=6)
 
 
 class ResetPasswordSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=True, max_length=255)
     otp_code = StrictCharField(required=True, min_length=6, max_length=6)
     new_password = StrictCharField(required=True, min_length=8)
 

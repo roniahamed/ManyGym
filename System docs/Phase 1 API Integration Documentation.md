@@ -20,6 +20,7 @@ This document provides complete, production-grade documentation for the **Phase 
    - [POST /api/v1/auth/login/](#8-post-apiv1authlogin)
    - [POST /api/v1/auth/switch-context/](#9-post-apiv1authswitch-context)
    - [POST /api/v1/auth/logout/](#10-post-apiv1authlogout)
+   - [POST /api/v1/auth/refresh/](#10b-post-apiv1authrefresh)
 6. [User Profile APIs](#user-profile-apis)
    - [GET /api/v1/auth/me/](#11-get-apiv1authme)
    - [PATCH /api/v1/auth/me/](#12-patch-apiv1authme)
@@ -226,8 +227,9 @@ Public.
 ```
 
 #### 10. Error Responses
-- `400 Bad Request`: Invalid or expired OTP.
+- `400 Bad Request`: Invalid or expired OTP, or maximum 5 attempts reached (code invalidated to prevent brute force).
 - `404 Not Found`: User not found.
+- `429 Too Many Requests`: Verification rate limit throttled (`code: "THROTTLED"`).
 
 ---
 
@@ -338,6 +340,7 @@ Authenticates user credentials and issues a contextual JWT token pair.
 
 #### 10. Error Responses
 - `400 Bad Request`: Invalid credentials or unverified account (`"Your account has not been verified yet. Please verify your OTP."`).
+- `429 Too Many Requests`: Account locked after 5 consecutive failed login attempts or rate limit exceeded (`code: "THROTTLED"`, returns `Retry-After` header).
 
 ---
 
@@ -403,9 +406,60 @@ To switch to a gym context, user must be:
 ---
 
 ### 10. POST `/api/v1/auth/logout/`
-- **Summary**: Invalidates current access token.
+- **Summary**: Invalidates current access token and optional refresh token by registering them in the server-side Redis denylist and removing them from the `auth_tokens` registry.
 - **Authentication**: Required (`Bearer <JWT>`).
+- **Request Body**:
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `refresh` | String | No | Refresh token to also revoke from the active session. |
+- **Request Example**:
+```json
+{
+  "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
 - **Success (200)**: `{"message": "Logged out successfully."}`
+- **Error Responses**:
+  - `401 Unauthorized`: Token is missing, expired, or already revoked (replays rejected).
+
+---
+
+### 10b. POST `/api/v1/auth/refresh/`
+- **Aliases**: `POST /api/v1/auth/token/refresh/`, `POST /api/v1/token/refresh/`
+- **Summary**: Exchanges an active refresh token for a fresh access & refresh token pair while preserving all tenant context claims (`context_type`, `gym_id`, and `scopes`). Rotates the refresh token (the previous refresh token is revoked).
+- **Authentication**: None (refresh token passed in request body).
+- **Rate Limiting**: Throttled via `TokenRefreshRateThrottle`.
+- **Request Body**:
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `refresh` | String | Yes | Valid JWT refresh token. |
+- **Request Example**:
+```json
+{
+  "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+- **Success (200 OK)**:
+```json
+{
+  "message": "Token refreshed successfully.",
+  "tokens": {
+    "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "context_type": "gym",
+    "gym_id": "31d57929-e58f-49b0-9bf7-fa5d07c08285",
+    "gym_name": "Apex Fitness Club",
+    "scopes": [
+      "members:read",
+      "members:edit"
+    ]
+  }
+}
+```
+- **Error Responses**:
+  - `400 Bad Request`: Missing or invalid refresh token payload (`code: "VALIDATION_ERROR"`).
+  - `401 Unauthorized`: Token expired, malformed, or previously revoked (`code: "AUTHENTICATION_FAILED"`).
+  - `429 Too Many Requests`: Refresh request rate limit exceeded (`code: "THROTTLED"`).
 
 ---
 

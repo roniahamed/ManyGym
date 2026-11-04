@@ -47,6 +47,7 @@ Authenticates user credentials and issues a contextual JWT access & refresh toke
 3. Checks that user status is `active`.
 4. Registers session in `auth_tokens` registry.
 5. Returns Personal context JWT tokens.
+6. Enforces rate limiting and account lockout after 5 consecutive failed login attempts (returns 429 with `Retry-After` backoff).
         """,
         request=LoginSerializer,
         responses={
@@ -99,6 +100,22 @@ Authenticates user credentials and issues a contextual JWT access & refresh toke
                             "details": {},
                         },
                     ),
+                ],
+            ),
+            429: OpenApiResponse(
+                response=ErrorDetailSerializer,
+                description="Account locked or rate limit exceeded due to consecutive failed attempts.",
+                examples=[
+                    OpenApiExample(
+                        name="Account Lockout Example",
+                        value={
+                            "code": "THROTTLED",
+                            "message": "Request was throttled due to rate limiting.",
+                            "details": {
+                                "detail": "Account locked due to consecutive failed login attempts. Try again in 300 seconds."
+                            },
+                        },
+                    )
                 ],
             ),
         },
@@ -311,12 +328,18 @@ Invalidates the current session access token and optional refresh token by addin
                 description="Authentication required or token revoked.",
             ),
         },
+        examples=[
+            OpenApiExample(
+                name="Logout Payload Example",
+                value={"refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."},
+                request_only=True,
+            )
+        ],
     )
     def post(self, request):
         serializer = LogoutSerializer(data=request.data)
-        refresh_token = ""
-        if serializer.is_valid():
-            refresh_token = serializer.validated_data.get("refresh", "")
+        serializer.is_valid(raise_exception=True)
+        refresh_token = serializer.validated_data.get("refresh", "")
 
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
         access_token = ""
@@ -359,6 +382,10 @@ Exchanges an active refresh token for a fresh access and refresh token pair whil
             401: OpenApiResponse(
                 response=ErrorDetailSerializer,
                 description="Refresh token has expired or was revoked.",
+            ),
+            429: OpenApiResponse(
+                response=ErrorDetailSerializer,
+                description="Too many refresh requests; rate limit throttled.",
             ),
         },
         examples=[

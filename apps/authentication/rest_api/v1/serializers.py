@@ -5,7 +5,7 @@ from apps.users.rest_api.v1.serializers import UserSerializer, TokenResponseSeri
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=True, max_length=255)
     password = StrictCharField(required=True, write_only=True)
     reactivate = serializers.BooleanField(
         required=False,

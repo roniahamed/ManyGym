@@ -1,10 +1,11 @@
+import hashlib
 from rest_framework.throttling import SimpleRateThrottle
 
 
 class AuthRateThrottle(SimpleRateThrottle):
     """
     Base rate throttle for sensitive authentication and OTP endpoints.
-    Combines client IP and normalized email from request body when present
+    Combines client IP and normalized email hash from request body when present
     to prevent credential stuffing and targeted brute-force attacks.
     """
 
@@ -17,7 +18,8 @@ class AuthRateThrottle(SimpleRateThrottle):
                 email = email_val.strip().lower()
 
         if email:
-            ident = f"{ident}:{email}"
+            email_hash = hashlib.sha256(email.encode("utf-8")).hexdigest()[:16]
+            ident = f"{ident}:{email_hash}"
 
         return self.cache_format % {
             "scope": self.scope,
