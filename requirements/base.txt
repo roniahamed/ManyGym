@@ -31,3 +31,6 @@ channels-redis>=4.2.0
 # Cryptography & E2EE
 cryptography>=42.0.0
 pynacl>=1.5.0
+
+# Email Delivery
+django-sendgrid-v5>=1.3.1

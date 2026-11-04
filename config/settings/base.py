@@ -16,7 +16,7 @@ env = environ.Env(
 # Read .env file if present
 env_file = BASE_DIR / ".env"
 if env_file.exists():
-    environ.Env.read_env(env_file)
+    environ.Env.read_env(env_file, overwrite=True)
 
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
@@ -237,6 +237,10 @@ EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@manygym.com")
+
+# SendGrid Configuration
+SENDGRID_API_KEY = env("SENDGRID_API_KEY", default="")
+SENDGRID_SANDBOX_MODE_IN_DEBUG = env.bool("SENDGRID_SANDBOX_MODE_IN_DEBUG", default=False)
 
 # Simple JWT Configuration
 from datetime import timedelta
