@@ -3,10 +3,13 @@ from apps.authentication.rest_api.v1.views import (
     LoginView,
     SwitchContextView,
     LogoutView,
+    TokenRefreshView,
 )
 
 urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
     path("switch-context/", SwitchContextView.as_view(), name="switch-context"),
     path("logout/", LogoutView.as_view(), name="logout"),
+    path("refresh/", TokenRefreshView.as_view(), name="token-refresh"),
+    path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh-alias"),
 ]

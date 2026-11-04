@@ -83,10 +83,10 @@ def register_user(email: str, password: str, first_name: str, last_name: str, ph
     return user
 
 
-@transaction.atomic
 def verify_signup_otp(email: str, otp_code: str) -> User:
     """
     Validates signup OTP and activates account verification status.
+    Enforces maximum 5 attempts per OTP code to prevent brute-forcing.
     """
     email_clean = email.lower().strip()
     try:
@@ -97,10 +97,8 @@ def verify_signup_otp(email: str, otp_code: str) -> User:
     if user.is_verified:
         raise DomainValidationError("This account is already verified. Please proceed to login.")
 
-    hashed_otp = hash_otp(email_clean, otp_code.strip())
     otp_record = (
         OTPVerification.objects.filter(
-            Q(otp_code=hashed_otp) | Q(otp_code=otp_code.strip()),
             email=email_clean,
             purpose=OTPVerification.Purpose.SIGNUP_VERIFICATION,
             is_used=False,
@@ -109,16 +107,44 @@ def verify_signup_otp(email: str, otp_code: str) -> User:
         .first()
     )
 
-    if not otp_record or not otp_record.is_valid():
+    from django.core.cache import cache
+    if not otp_record or not otp_record.is_valid() or (otp_record and cache.get(f"otp_burned:{otp_record.id}")):
         raise DomainValidationError("Invalid or expired verification OTP.")
 
-    otp_record.is_used = True
-    otp_record.save(update_fields=["is_used"])
+    cache_key = f"otp_failed:{otp_record.id}"
+    failed_attempts = cache.get(cache_key, 0)
+    if failed_attempts >= 5 or cache.get(f"otp_burned:{otp_record.id}"):
+        OTPVerification.objects.filter(id=otp_record.id).update(is_used=True)
+        cache.set(f"otp_burned:{otp_record.id}", True, timeout=900)
+        raise DomainValidationError("Too many failed attempts. This verification code has been invalidated. Please request a new code.")
 
-    user.is_verified = True
-    user.status = UserStatus.ACTIVE
-    user.save(update_fields=["is_verified", "status"])
+    hashed_otp = hash_otp(email_clean, otp_code.strip())
+    is_valid_otp = (
+        otp_record.check_otp(otp_code.strip())
+        or (otp_record.otp_code == hashed_otp)
+        or (otp_record.otp_code == otp_code.strip())
+    )
 
+    if not is_valid_otp:
+        failed_attempts += 1
+        cache.set(cache_key, failed_attempts, timeout=900)
+        if failed_attempts >= 5:
+            OTPVerification.objects.filter(id=otp_record.id).update(is_used=True)
+            cache.set(f"otp_burned:{otp_record.id}", True, timeout=900)
+            raise DomainValidationError("Too many failed attempts. This verification code has been invalidated. Please request a new code.")
+        remaining = 5 - failed_attempts
+        raise DomainValidationError(f"Invalid verification OTP. {remaining} attempt(s) remaining.")
+
+    with transaction.atomic():
+        otp_record.is_used = True
+        otp_record.save(update_fields=["is_used"])
+
+        user.is_verified = True
+        user.status = UserStatus.ACTIVE
+        user.save(update_fields=["is_verified", "status"])
+
+    cache.delete(cache_key)
+    cache.delete(f"otp_burned:{otp_record.id}")
     return user
 
 
@@ -206,16 +232,14 @@ def request_password_reset(email: str) -> None:
     transaction.on_commit(lambda: send_email_task.delay(subject, [email_clean], message, html_message))
 
 
-@transaction.atomic
 def verify_password_reset_otp(email: str, otp_code: str) -> bool:
     """
     Verifies that the password reset OTP is currently valid.
+    Enforces maximum 5 attempts per OTP code to prevent brute-forcing.
     """
     email_clean = email.lower().strip()
-    hashed_otp = hash_otp(email_clean, otp_code.strip())
     otp_record = (
         OTPVerification.objects.filter(
-            Q(otp_code=hashed_otp) | Q(otp_code=otp_code.strip()),
             email=email_clean,
             purpose=OTPVerification.Purpose.PASSWORD_RESET,
             is_used=False,
@@ -224,15 +248,41 @@ def verify_password_reset_otp(email: str, otp_code: str) -> bool:
         .first()
     )
 
-    if not otp_record or not otp_record.is_valid():
+    from django.core.cache import cache
+    if not otp_record or not otp_record.is_valid() or (otp_record and cache.get(f"otp_burned:{otp_record.id}")):
         raise DomainValidationError("Invalid or expired password reset code.")
+
+    cache_key = f"otp_failed:{otp_record.id}"
+    failed_attempts = cache.get(cache_key, 0)
+    if failed_attempts >= 5 or cache.get(f"otp_burned:{otp_record.id}"):
+        OTPVerification.objects.filter(id=otp_record.id).update(is_used=True)
+        cache.set(f"otp_burned:{otp_record.id}", True, timeout=900)
+        raise DomainValidationError("Too many failed attempts. This password reset code has been invalidated. Please request a new code.")
+
+    hashed_otp = hash_otp(email_clean, otp_code.strip())
+    is_valid_otp = (
+        otp_record.check_otp(otp_code.strip())
+        or (otp_record.otp_code == hashed_otp)
+        or (otp_record.otp_code == otp_code.strip())
+    )
+
+    if not is_valid_otp:
+        failed_attempts += 1
+        cache.set(cache_key, failed_attempts, timeout=900)
+        if failed_attempts >= 5:
+            OTPVerification.objects.filter(id=otp_record.id).update(is_used=True)
+            cache.set(f"otp_burned:{otp_record.id}", True, timeout=900)
+            raise DomainValidationError("Too many failed attempts. This password reset code has been invalidated. Please request a new code.")
+        remaining = 5 - failed_attempts
+        raise DomainValidationError(f"Invalid password reset code. {remaining} attempt(s) remaining.")
+
     return True
 
 
-@transaction.atomic
 def reset_password(email: str, otp_code: str, new_password: str) -> User:
     """
     Resets the user's password using the verified OTP.
+    Enforces maximum 5 attempts per OTP code to prevent brute-forcing.
     """
     email_clean = email.lower().strip()
     try:
@@ -240,10 +290,8 @@ def reset_password(email: str, otp_code: str, new_password: str) -> User:
     except User.DoesNotExist:
         raise ResourceNotFoundError("User not found.")
 
-    hashed_otp = hash_otp(email_clean, otp_code.strip())
     otp_record = (
         OTPVerification.objects.filter(
-            Q(otp_code=hashed_otp) | Q(otp_code=otp_code.strip()),
             email=email_clean,
             purpose=OTPVerification.Purpose.PASSWORD_RESET,
             is_used=False,
@@ -252,18 +300,45 @@ def reset_password(email: str, otp_code: str, new_password: str) -> User:
         .first()
     )
 
-    if not otp_record or not otp_record.is_valid():
+    from django.core.cache import cache
+    if not otp_record or not otp_record.is_valid() or (otp_record and cache.get(f"otp_burned:{otp_record.id}")):
         raise DomainValidationError("Invalid or expired password reset code.")
+
+    cache_key = f"otp_failed:{otp_record.id}"
+    failed_attempts = cache.get(cache_key, 0)
+    if failed_attempts >= 5 or cache.get(f"otp_burned:{otp_record.id}"):
+        OTPVerification.objects.filter(id=otp_record.id).update(is_used=True)
+        cache.set(f"otp_burned:{otp_record.id}", True, timeout=900)
+        raise DomainValidationError("Too many failed attempts. This password reset code has been invalidated. Please request a new code.")
+
+    hashed_otp = hash_otp(email_clean, otp_code.strip())
+    is_valid_otp = (
+        otp_record.check_otp(otp_code.strip())
+        or (otp_record.otp_code == hashed_otp)
+        or (otp_record.otp_code == otp_code.strip())
+    )
+
+    if not is_valid_otp:
+        failed_attempts += 1
+        cache.set(cache_key, failed_attempts, timeout=900)
+        if failed_attempts >= 5:
+            OTPVerification.objects.filter(id=otp_record.id).update(is_used=True)
+            cache.set(f"otp_burned:{otp_record.id}", True, timeout=900)
+            raise DomainValidationError("Too many failed attempts. This password reset code has been invalidated. Please request a new code.")
+        remaining = 5 - failed_attempts
+        raise DomainValidationError(f"Invalid password reset code. {remaining} attempt(s) remaining.")
 
     if len(new_password) < 8:
         raise DomainValidationError("Password must be at least 8 characters long.")
 
-    user.set_password(new_password)
-    user.save(update_fields=["password"])
+    with transaction.atomic():
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+        otp_record.is_used = True
+        otp_record.save(update_fields=["is_used"])
 
-    otp_record.is_used = True
-    otp_record.save(update_fields=["is_used"])
-
+    cache.delete(cache_key)
+    cache.delete(f"otp_burned:{otp_record.id}")
     return user
 
 

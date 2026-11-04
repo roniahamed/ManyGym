@@ -8,11 +8,13 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 from apps.users.rest_api.v1.views import UnifiedFollowView
+from apps.authentication.rest_api.v1.views import TokenRefreshView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     # Infrastructure & Common Endpoints
     path("api/v1/", include("common.urls")),
+    path("api/v1/token/refresh/", TokenRefreshView.as_view(), name="token-refresh-direct"),
     # Identity, Authentication & Profile Endpoints
     path("api/v1/auth/", include("apps.authentication.rest_api.v1.urls")),
     path("api/v1/auth/", include("apps.users.rest_api.v1.urls")),

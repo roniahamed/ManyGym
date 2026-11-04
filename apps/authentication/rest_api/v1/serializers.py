@@ -50,3 +50,12 @@ class LoginResponseSerializer(serializers.Serializer):
 class SwitchContextResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
     tokens = TokenResponseSerializer()
+
+
+class RefreshTokenSerializer(serializers.Serializer):
+    refresh = StrictCharField(required=True, help_text="Valid JWT refresh token.")
+
+
+class RefreshTokenResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    tokens = TokenResponseSerializer()

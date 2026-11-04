@@ -9,7 +9,28 @@ class FastJWTAuthentication(JWTAuthentication):
     High-performance JWT authentication backend.
     Eagerly loads the user with their profile via select_related("profile") in a single SQL query,
     preventing duplicate user queries and eliminating N+1 lookups when views/serializers access request.user.profile.
+    Validates token revocation against denylist cache.
     """
+
+    def authenticate(self, request):
+        header = self.get_header(request)
+        if header is None:
+            return None
+
+        raw_token = self.get_raw_token(header)
+        if raw_token is None:
+            return None
+
+        validated_token = self.get_validated_token(raw_token)
+
+        # Check if the token has been revoked
+        raw_token_str = raw_token.decode("utf-8") if isinstance(raw_token, bytes) else str(raw_token)
+        from apps.authentication.services import is_token_revoked
+        if is_token_revoked(raw_token_str, validated_token):
+            raise AuthenticationFailed(_("Token has been revoked."), code="token_revoked")
+
+        user = self.get_user(validated_token)
+        return user, validated_token
 
     def get_user(self, validated_token):
         try:

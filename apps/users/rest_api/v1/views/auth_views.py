@@ -28,6 +28,7 @@ from apps.users.services import (
 from apps.authentication.services import issue_context_token
 from common.enums import TokenContextType
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
+from common.throttling import OTPVerifyRateThrottle, OTPRequestRateThrottle
 
 
 class RegisterView(APIView):
@@ -127,6 +128,7 @@ Creates a new customer account with unverified status and immediately queues an 
 
 class VerifySignupOTPView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [OTPVerifyRateThrottle]
 
     @extend_schema(
         tags=["User Identity & Onboarding"],
@@ -235,6 +237,7 @@ Validates the 6-digit registration OTP, marks the account as verified, and immed
 
 class ResendOTPView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [OTPRequestRateThrottle]
 
     @extend_schema(
         tags=["User Identity & Onboarding"],
@@ -282,6 +285,7 @@ Invalidates prior unused registration OTPs and dispatches a fresh 6-digit OTP co
 
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [OTPRequestRateThrottle]
 
     @extend_schema(
         tags=["Password Management"],
@@ -320,6 +324,7 @@ For security against user enumeration, the endpoint always returns a generic 200
 
 class VerifyResetOTPView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [OTPVerifyRateThrottle]
 
     @extend_schema(
         tags=["Password Management"],
@@ -362,6 +367,7 @@ Pre-checks if a provided password reset OTP is currently valid and unexpired bef
 
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [OTPVerifyRateThrottle]
 
     @extend_schema(
         tags=["Password Management"],

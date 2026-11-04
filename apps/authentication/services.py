@@ -89,15 +89,51 @@ def authenticate_user(
     Authenticates user credentials and returns user and personal context tokens.
     Handles deactivated and soft-deleted accounts by prompting for reactivation/restoration
     or restoring when requested.
+    Includes brute-force account lockout protection: 5 consecutive failed attempts trigger
+    a 300-second lockout with Retry-After backoff.
     """
+    from django.core.cache import cache
+    from rest_framework.exceptions import Throttled
+    from django.utils import timezone as dj_timezone
+
     email_clean = email.lower().strip()
+    lockout_key = f"failed_login_lockout:{email_clean}"
+    now_ts = dj_timezone.now().timestamp()
+    lockout_record = cache.get(lockout_key)
+
+    if lockout_record:
+        count = lockout_record.get("count", 0)
+        reset_at = lockout_record.get("reset_at", now_ts + 300)
+        if count >= 5 and now_ts < reset_at:
+            wait_seconds = max(1, int(reset_at - now_ts))
+            raise Throttled(
+                wait=wait_seconds,
+                detail=f"Account locked due to consecutive failed login attempts. Try again in {wait_seconds} seconds.",
+            )
+
     try:
         user = User.objects.select_related("profile").get(email=email_clean)
+        user_exists = True
     except User.DoesNotExist:
+        user = None
+        user_exists = False
+
+    if not user_exists or not user.check_password(password):
+        prev_count = lockout_record.get("count", 0) if lockout_record else 0
+        new_count = prev_count + 1
+        reset_at = lockout_record.get("reset_at", now_ts + 300) if lockout_record else (now_ts + 300)
+        cache.set(lockout_key, {"count": new_count, "reset_at": reset_at}, timeout=300)
+
+        if new_count >= 5:
+            wait_seconds = max(1, int(reset_at - now_ts))
+            raise Throttled(
+                wait=wait_seconds,
+                detail=f"Account locked due to consecutive failed login attempts. Try again in {wait_seconds} seconds.",
+            )
         raise DomainValidationError("Invalid email or password.")
 
-    if not user.check_password(password):
-        raise DomainValidationError("Invalid email or password.")
+    # Successful password verification -> clear failed login lockout
+    cache.delete(lockout_key)
 
     setting = user.get_settings()
     if setting.is_deleted or user.status == UserStatus.DELETED:
@@ -172,12 +208,129 @@ def switch_to_personal_context(user: User) -> dict:
     return issue_context_token(user, context_type=TokenContextType.PERSONAL)
 
 
-def revoke_token(access_token_str: str) -> None:
+def is_token_revoked(token_str: str, validated_token=None) -> bool:
     """
-    Revokes the given session token.
+    Checks whether the token string or its jti has been marked revoked in the cache denylist.
     """
-    token_hash = hash_token_string(access_token_str)
-    AuthToken.objects.filter(token_hash=token_hash).delete()
+    if not token_str:
+        return False
+
+    from django.core.cache import cache
+    token_hash = hash_token_string(token_str)
+    if cache.get(f"revoked_token:{token_hash}"):
+        return True
+
+    jti = None
+    if validated_token is not None:
+        jti = validated_token.get("jti")
+    else:
+        try:
+            from rest_framework_simplejwt.tokens import UntypedToken
+            parsed = UntypedToken(token_str)
+            jti = parsed.get("jti")
+        except Exception:
+            pass
+
+    if jti and cache.get(f"revoked_jti:{jti}"):
+        return True
+
+    return False
+
+
+def revoke_token(access_token_str: str = "", refresh_token_str: str = "") -> None:
+    """
+    Revokes the given session access token and/or refresh token.
+    Adds them to the Redis denylist cache and removes the access token from the AuthToken table.
+    """
+    from django.core.cache import cache
+    from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    if access_token_str:
+        access_hash = hash_token_string(access_token_str)
+        AuthToken.objects.filter(token_hash=access_hash).delete()
+        ttl = 3600
+        try:
+            tok = AccessToken(access_token_str)
+            exp = tok.get("exp")
+            if exp:
+                ttl = max(int(exp - now_ts), 60)
+            jti = tok.get("jti")
+            if jti:
+                cache.set(f"revoked_jti:{jti}", True, timeout=ttl)
+        except Exception:
+            pass
+        cache.set(f"revoked_token:{access_hash}", True, timeout=ttl)
+
+    if refresh_token_str:
+        refresh_hash = hash_token_string(refresh_token_str)
+        ttl_r = 7 * 86400
+        try:
+            tok_r = RefreshToken(refresh_token_str)
+            exp = tok_r.get("exp")
+            if exp:
+                ttl_r = max(int(exp - now_ts), 60)
+            jti_r = tok_r.get("jti")
+            if jti_r:
+                cache.set(f"revoked_jti:{jti_r}", True, timeout=ttl_r)
+        except Exception:
+            pass
+        cache.set(f"revoked_token:{refresh_hash}", True, timeout=ttl_r)
+
+
+def refresh_context_token(refresh_token_str: str) -> dict:
+    """
+    Validates a refresh token, verifies it is not revoked, preserves contextual claims
+    (context_type, gym_id, scopes), rotates the token pair, and registers the new session.
+    """
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from rest_framework_simplejwt.exceptions import TokenError
+    from rest_framework.exceptions import AuthenticationFailed
+
+    if not refresh_token_str or not isinstance(refresh_token_str, str):
+        raise DomainValidationError("A valid refresh token is required.")
+
+    if is_token_revoked(refresh_token_str):
+        raise AuthenticationFailed("Refresh token has been revoked.", code="token_revoked")
+
+    try:
+        old_refresh = RefreshToken(refresh_token_str)
+    except TokenError as e:
+        raise AuthenticationFailed(str(e), code="token_invalid")
+
+    user_id = old_refresh.payload.get("user_id")
+    if not user_id:
+        raise AuthenticationFailed("Invalid token payload: missing user identifier.", code="token_invalid")
+
+    try:
+        user = User.objects.select_related("profile").get(id=user_id)
+    except User.DoesNotExist:
+        raise AuthenticationFailed("User not found.", code="user_not_found")
+
+    if not user.is_active or user.status != UserStatus.ACTIVE:
+        raise AuthenticationFailed("User is inactive or suspended.", code="user_inactive")
+
+    context_type = old_refresh.payload.get("context_type", TokenContextType.PERSONAL)
+    gym_id = old_refresh.payload.get("gym_id")
+
+    gym = None
+    if context_type == TokenContextType.GYM and gym_id:
+        try:
+            gym = Gym.objects.select_related("settings").get(id=gym_id)
+            settings_obj = getattr(gym, "settings", None)
+            if settings_obj and getattr(settings_obj, "is_deleted", False):
+                context_type = TokenContextType.PERSONAL
+                gym = None
+        except Gym.DoesNotExist:
+            context_type = TokenContextType.PERSONAL
+            gym = None
+
+    # Revoke old refresh token for rotation
+    revoke_token(access_token_str="", refresh_token_str=refresh_token_str)
+
+    # Issue fresh contextual token pair
+    return issue_context_token(user, context_type=context_type, gym=gym)
 
 
 def cleanup_expired_tokens() -> int:

@@ -10,20 +10,25 @@ from apps.authentication.rest_api.v1.serializers import (
     LogoutSerializer,
     LoginResponseSerializer,
     SwitchContextResponseSerializer,
+    RefreshTokenSerializer,
+    RefreshTokenResponseSerializer,
 )
 from apps.authentication.services import (
     authenticate_user,
     switch_gym_context,
     switch_to_personal_context,
     revoke_token,
+    refresh_context_token,
 )
 from apps.users.rest_api.v1.serializers import UserSerializer
 from common.enums import TokenContextType
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
+from common.throttling import LoginRateThrottle, TokenRefreshRateThrottle
 
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
 
     @extend_schema(
         tags=["Authentication & Sessions"],
@@ -290,7 +295,7 @@ class LogoutView(APIView):
         summary="User Logout & Token Revocation",
         description="""
 ### Summary
-Invalidates the current session access token by removing it from the active `auth_tokens` registry.
+Invalidates the current session access token and optional refresh token by adding them to the server-side denylist and removing them from the active `auth_tokens` registry.
 
 ### Authentication & Authorization
 - **Authentication**: Required (`Bearer <JWT>`).
@@ -303,17 +308,75 @@ Invalidates the current session access token by removing it from the active `aut
             ),
             401: OpenApiResponse(
                 response=ErrorDetailSerializer,
-                description="Authentication required.",
+                description="Authentication required or token revoked.",
             ),
         },
     )
     def post(self, request):
+        serializer = LogoutSerializer(data=request.data)
+        refresh_token = ""
+        if serializer.is_valid():
+            refresh_token = serializer.validated_data.get("refresh", "")
+
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        access_token = ""
         if auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-            revoke_token(token)
+            access_token = auth_header.split(" ")[1]
+
+        revoke_token(access_token_str=access_token, refresh_token_str=refresh_token)
 
         return Response(
             {"message": "Logged out successfully."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class TokenRefreshView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [TokenRefreshRateThrottle]
+
+    @extend_schema(
+        tags=["Authentication & Sessions"],
+        summary="Refresh Contextual JWT Token",
+        description="""
+### Summary
+Exchanges an active refresh token for a fresh access and refresh token pair while preserving all tenant context claims (`context_type`, `gym_id`, and `scopes`). The provided refresh token is rotated and revoked.
+
+### Authentication & Authorization
+- **Authentication**: None (Public endpoint, refresh token provided in payload).
+- **Authorization**: Public.
+        """,
+        request=RefreshTokenSerializer,
+        responses={
+            200: OpenApiResponse(
+                response=RefreshTokenResponseSerializer,
+                description="Token refreshed successfully; fresh session pair issued.",
+            ),
+            400: OpenApiResponse(
+                response=ErrorDetailSerializer,
+                description="Invalid or missing refresh token.",
+            ),
+            401: OpenApiResponse(
+                response=ErrorDetailSerializer,
+                description="Refresh token has expired or was revoked.",
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                name="Refresh Token Payload",
+                value={"refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."},
+                request_only=True,
+            )
+        ],
+    )
+    def post(self, request):
+        serializer = RefreshTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        tokens = refresh_context_token(serializer.validated_data["refresh"])
+        return Response(
+            {
+                "message": "Token refreshed successfully.",
+                "tokens": tokens,
+            },
             status=status.HTTP_200_OK,
         )

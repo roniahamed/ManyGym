@@ -187,6 +187,12 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "common.handlers.custom_exception_handler",
+    "DEFAULT_THROTTLE_RATES": {
+        "login": env("THROTTLE_RATE_LOGIN", default="30/minute"),
+        "otp_verify": env("THROTTLE_RATE_OTP_VERIFY", default="20/minute"),
+        "otp_request": env("THROTTLE_RATE_OTP_REQUEST", default="30/minute"),
+        "token_refresh": env("THROTTLE_RATE_TOKEN_REFRESH", default="30/minute"),
+    },
 }
 
 # DRF Spectacular (OpenAPI 3 / Swagger) Configuration
@@ -246,8 +252,8 @@ SENDGRID_SANDBOX_MODE_IN_DEBUG = env.bool("SENDGRID_SANDBOX_MODE_IN_DEBUG", defa
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=24),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("JWT_ACCESS_TOKEN_LIFETIME_MINUTES", default=15)),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("JWT_REFRESH_TOKEN_LIFETIME_DAYS", default=7)),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": False,
     "ALGORITHM": "HS256",
