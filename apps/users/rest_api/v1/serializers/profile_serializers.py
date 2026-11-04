@@ -8,14 +8,21 @@ from common.serializers import StrictCharField, StrictBooleanField, validate_upl
 class FlexibleDateField(serializers.DateField):
     """Accepts standard YYYY-MM-DD or 4-digit year format (e.g. '2020' -> 2020-01-01)."""
 
-    def to_internal_value(self, value):
-        if isinstance(value, str) and value.strip().isdigit() and len(value.strip()) == 4:
+    def to_internal_value(self, data):
+        if isinstance(data, (bool, dict, list)):
+            raise serializers.ValidationError("Expected a valid date string (YYYY-MM-DD or YYYY).")
+        if isinstance(data, str) and data.strip().isdigit() and len(data.strip()) == 4:
             import datetime
-            return datetime.date(int(value.strip()), 1, 1)
-        elif isinstance(value, int) and 1900 <= value <= 2100:
+            try:
+                year = int(data.strip())
+                if 1900 <= year <= 2100:
+                    return datetime.date(year, 1, 1)
+            except Exception:
+                pass
+        elif isinstance(data, int) and not isinstance(data, bool) and 1900 <= data <= 2100:
             import datetime
-            return datetime.date(value, 1, 1)
-        return super().to_internal_value(value)
+            return datetime.date(data, 1, 1)
+        return super().to_internal_value(data)
 
 
 class UserEducationSerializer(serializers.ModelSerializer):
@@ -40,7 +47,7 @@ class UserEducationInputSerializer(serializers.Serializer):
     from_year = FlexibleDateField(required=True)
     till_year = FlexibleDateField(required=False, allow_null=True)
     subject = StrictCharField(max_length=255, required=True)
-    graduated = serializers.BooleanField(required=False, default=False)
+    graduated = StrictBooleanField(required=False, default=False)
 
     def validate(self, attrs):
         from_year = attrs.get("from_year")
@@ -64,8 +71,8 @@ class UserSocialLinkInputSerializer(serializers.Serializer):
 
 
 class PersonalDetailsSerializer(serializers.Serializer):
-    current_address = serializers.CharField(allow_blank=True, allow_null=True, required=False)
-    home_town = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    current_address = StrictCharField(allow_blank=True, allow_null=True, required=False, max_length=500)
+    home_town = StrictCharField(allow_blank=True, allow_null=True, required=False, max_length=255)
     date_of_birth = serializers.DateField(allow_null=True, required=False)
     gender = serializers.ChoiceField(choices=GenderEnum.choices, allow_blank=True, allow_null=True, required=False)
 
@@ -77,13 +84,17 @@ class ContactInfoSerializer(serializers.Serializer):
 
 
 class ContactInfoInputSerializer(serializers.Serializer):
-    social_links = serializers.ListField(child=UserSocialLinkInputSerializer(), required=False)
+    social_links = serializers.ListField(
+        child=UserSocialLinkInputSerializer(),
+        required=False,
+        max_length=50,
+    )
     phone_number = StrictCharField(max_length=50, required=False, allow_blank=True, allow_null=True)
 
 
 class DetailsAboutYouSerializer(serializers.Serializer):
-    about_you = serializers.CharField(max_length=320, allow_blank=True, allow_null=True, required=False)
-    favourite_quote = serializers.CharField(max_length=160, allow_blank=True, allow_null=True, required=False)
+    about_you = StrictCharField(max_length=320, allow_blank=True, allow_null=True, required=False)
+    favourite_quote = StrictCharField(max_length=160, allow_blank=True, allow_null=True, required=False)
 
 
 class UserAboutResponseSerializer(serializers.Serializer):
@@ -138,8 +149,16 @@ class UserAboutResponseSerializer(serializers.Serializer):
 class UserAboutUpdateSerializer(serializers.Serializer):
     # Nested sections
     personal_details = PersonalDetailsSerializer(required=False)
-    education_list = serializers.ListField(child=UserEducationInputSerializer(), required=False)
-    hobbies = serializers.ListField(child=StrictCharField(max_length=100), required=False)
+    education_list = serializers.ListField(
+        child=UserEducationInputSerializer(),
+        required=False,
+        max_length=50,
+    )
+    hobbies = serializers.ListField(
+        child=StrictCharField(max_length=100),
+        required=False,
+        max_length=100,
+    )
     contact_info = ContactInfoInputSerializer(required=False)
     details_about_you = DetailsAboutYouSerializer(required=False)
 
@@ -149,7 +168,11 @@ class UserAboutUpdateSerializer(serializers.Serializer):
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     gender = serializers.ChoiceField(choices=GenderEnum.choices, required=False, allow_blank=True, allow_null=True)
     phone_number = StrictCharField(required=False, allow_blank=True, max_length=50)
-    social_links = serializers.ListField(child=UserSocialLinkInputSerializer(), required=False)
+    social_links = serializers.ListField(
+        child=UserSocialLinkInputSerializer(),
+        required=False,
+        max_length=50,
+    )
     about_you = StrictCharField(required=False, allow_blank=True, max_length=320)
     favourite_quote = StrictCharField(required=False, allow_blank=True, max_length=160)
 
