@@ -1,19 +1,178 @@
 from rest_framework import serializers
-from apps.users.models import User, UserProfile
-from common.serializers import StrictCharField, validate_uploaded_image
+from drf_spectacular.utils import extend_schema_field
+from apps.users.models import User, UserProfile, UserEducation, UserSocialLink
+from common.enums import GenderEnum, SocialPlatformEnum
+from common.serializers import StrictCharField, StrictBooleanField, validate_uploaded_image
+
+
+class FlexibleDateField(serializers.DateField):
+    """Accepts standard YYYY-MM-DD or 4-digit year format (e.g. '2020' -> 2020-01-01)."""
+
+    def to_internal_value(self, value):
+        if isinstance(value, str) and value.strip().isdigit() and len(value.strip()) == 4:
+            import datetime
+            return datetime.date(int(value.strip()), 1, 1)
+        elif isinstance(value, int) and 1900 <= value <= 2100:
+            import datetime
+            return datetime.date(value, 1, 1)
+        return super().to_internal_value(value)
+
+
+class UserEducationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserEducation
+        fields = [
+            "id",
+            "university_name",
+            "from_year",
+            "till_year",
+            "subject",
+            "graduated",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class UserEducationInputSerializer(serializers.Serializer):
+    id = serializers.UUIDField(required=False, allow_null=True)
+    university_name = StrictCharField(max_length=255, required=True)
+    from_year = FlexibleDateField(required=True)
+    till_year = FlexibleDateField(required=False, allow_null=True)
+    subject = StrictCharField(max_length=255, required=True)
+    graduated = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, attrs):
+        from_year = attrs.get("from_year")
+        till_year = attrs.get("till_year")
+        if from_year and till_year and till_year < from_year:
+            raise serializers.ValidationError({"till_year": "Till year must be greater than or equal to from year."})
+        return attrs
+
+
+class UserSocialLinkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserSocialLink
+        fields = ["id", "platform", "link", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class UserSocialLinkInputSerializer(serializers.Serializer):
+    id = serializers.UUIDField(required=False, allow_null=True)
+    platform = serializers.ChoiceField(choices=SocialPlatformEnum.choices, required=True)
+    link = StrictCharField(max_length=1000, required=True)
+
+
+class PersonalDetailsSerializer(serializers.Serializer):
+    current_address = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    home_town = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    date_of_birth = serializers.DateField(allow_null=True, required=False)
+    gender = serializers.ChoiceField(choices=GenderEnum.choices, allow_blank=True, allow_null=True, required=False)
+
+
+class ContactInfoSerializer(serializers.Serializer):
+    social_links = UserSocialLinkSerializer(many=True, read_only=True)
+    phone_number = serializers.CharField(allow_null=True, read_only=True)
+    email = serializers.EmailField(read_only=True, help_text="Registered account email (cannot be changed).")
+
+
+class ContactInfoInputSerializer(serializers.Serializer):
+    social_links = serializers.ListField(child=UserSocialLinkInputSerializer(), required=False)
+    phone_number = StrictCharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+
+
+class DetailsAboutYouSerializer(serializers.Serializer):
+    about_you = serializers.CharField(max_length=320, allow_blank=True, allow_null=True, required=False)
+    favourite_quote = serializers.CharField(max_length=160, allow_blank=True, allow_null=True, required=False)
+
+
+class UserAboutResponseSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField(source="id")
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    avatar_url = serializers.CharField(source="profile.avatar_url", allow_null=True)
+    is_private = serializers.BooleanField(source="profile.is_private")
+    personal_details = serializers.SerializerMethodField()
+    education_list = UserEducationSerializer(source="educations", many=True)
+    hobbies = serializers.SerializerMethodField()
+    contact_info = serializers.SerializerMethodField()
+    details_about_you = serializers.SerializerMethodField()
+
+    @extend_schema_field(PersonalDetailsSerializer)
+    def get_personal_details(self, obj):
+        profile = getattr(obj, "profile", None)
+        return {
+            "current_address": profile.address if profile else None,
+            "home_town": profile.home_town if profile else None,
+            "date_of_birth": profile.date_of_birth if profile else None,
+            "gender": profile.gender if profile else None,
+        }
+
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
+    def get_hobbies(self, obj):
+        profile = getattr(obj, "profile", None)
+        return profile.hobbies if profile and profile.hobbies else []
+
+    @extend_schema_field(ContactInfoSerializer)
+    def get_contact_info(self, obj):
+        social_links = getattr(obj, "social_links", None)
+        links_data = UserSocialLinkSerializer(
+            social_links.all() if hasattr(social_links, "all") else [],
+            many=True,
+        ).data
+        return {
+            "social_links": links_data,
+            "phone_number": obj.phone,
+            "email": obj.email,
+        }
+
+    @extend_schema_field(DetailsAboutYouSerializer)
+    def get_details_about_you(self, obj):
+        profile = getattr(obj, "profile", None)
+        return {
+            "about_you": profile.about_you if profile else None,
+            "favourite_quote": profile.favourite_quote if profile else None,
+        }
+
+
+class UserAboutUpdateSerializer(serializers.Serializer):
+    # Nested sections
+    personal_details = PersonalDetailsSerializer(required=False)
+    education_list = serializers.ListField(child=UserEducationInputSerializer(), required=False)
+    hobbies = serializers.ListField(child=StrictCharField(max_length=100), required=False)
+    contact_info = ContactInfoInputSerializer(required=False)
+    details_about_you = DetailsAboutYouSerializer(required=False)
+
+    # Flat aliases for direct convenience
+    current_address = StrictCharField(required=False, allow_blank=True, max_length=500)
+    home_town = StrictCharField(required=False, allow_blank=True, max_length=255)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    gender = serializers.ChoiceField(choices=GenderEnum.choices, required=False, allow_blank=True, allow_null=True)
+    phone_number = StrictCharField(required=False, allow_blank=True, max_length=50)
+    social_links = serializers.ListField(child=UserSocialLinkInputSerializer(), required=False)
+    about_you = StrictCharField(required=False, allow_blank=True, max_length=320)
+    favourite_quote = StrictCharField(required=False, allow_blank=True, max_length=160)
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    current_address = serializers.CharField(source="address", read_only=True)
+
     class Meta:
         model = UserProfile
         fields = [
             "avatar_url",
             "address",
+            "current_address",
+            "home_town",
             "city",
             "country",
             "date_of_birth",
             "sex",
+            "gender",
             "nationality",
+            "hobbies",
+            "about_you",
+            "favourite_quote",
             "is_private",
             "created_at",
             "updated_at",

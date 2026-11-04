@@ -106,23 +106,34 @@ Build shared framework utilities, custom user authentication with a single login
 ### 1.2 User Identity & Multi-Tenant Authentication (`apps/users/`, `apps/authentication/`)
 - **Data Models**:
   - `User`: Custom user model (`email`, `password_hash`, `first_name`, `last_name`, `phone`, `status`).
-  - `UserProfile`: Personal profile (`avatar_url`, `address`, `city`, `country`, `date_of_birth`, `sex`, `nationality`).
+  - `UserProfile`: Personal profile (`avatar_url`, `address`, `home_town`, `city`, `country`, `date_of_birth`, `sex`, `gender`, `nationality`, `hobbies`, `about_you`, `favourite_quote`, `is_private`).
+  - `UserEducation`: Education history (`user_id`, `university_name`, `from_year`, `till_year`, `subject`, `graduated`).
+  - `UserSocialLink`: Social network links (`user_id`, `platform`, `link`).
   - `AuthToken`: Context-specific token registry (`user_id`, `gym_id`, `token_hash`, `context_type` [personal, gym], `expires_at`).
 - **Services (`services.py`)**:
   - `register_user()`: Validates unique email, creates `User` and empty `UserProfile`.
   - `authenticate_user()`: Validates credentials, issues base login session.
+  - `update_user_about()`: Atomic update of Personal Details, Education List, Hobbies, Contact Info, and Details About You.
   - `issue_context_token()`: Generates JWT signed with specific context claims (`personal` or `gym_id`).
   - `switch_gym_context()`: Verifies the user has an active ownership or staff assignment for the target gym before issuing a gym access token.
   - `revoke_context_tokens()`: Invalidates active tokens upon logout or role revocation.
 - **Selectors (`selectors.py`)**:
   - `get_user_profile()`: Retrieves personal user details.
+  - `get_user_about_profile()`: Retrieves complete About profile with educations and social links, respecting privacy and blocking.
   - `get_accessible_gyms_for_user()`: Queries all gyms where the user is an owner, staff member, trainer, or active member.
-- **REST Endpoints (`/api/v1/auth/`)**:
+- **REST Endpoints (`/api/v1/auth/`, `/api/v1/users/`)**:
   - `POST /register/` - Register account.
   - `POST /login/` - Initial credential verification.
   - `POST /switch-context/` - Switch to Personal or specific Gym context and receive contextual access token.
   - `POST /logout/` - Invalidate current session token.
   - `GET /me/` - Retrieve personal profile and list of accessible gym contexts.
+  - `GET /profile/about/` - Retrieve authenticated user's Public Profile -> About details.
+  - `PATCH /profile/about/` - Update authenticated user's Public Profile -> About details.
+  - `GET /{user_id}/profile/about/` - Retrieve target user's public About details.
+  - `GET & POST /profile/about/educations/` - List and create education items.
+  - `PATCH & DELETE /profile/about/educations/{id}/` - Update and delete education items.
+  - `GET & POST /profile/about/social-links/` - List and create social links.
+  - `PATCH & DELETE /profile/about/social-links/{id}/` - Update and delete social links.
 
 ### 1.3 Dynamic Roles & Topic-Based Permissions (`apps/access_control/`)
 - **Data Models**:

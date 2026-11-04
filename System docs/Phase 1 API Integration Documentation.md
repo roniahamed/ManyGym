@@ -23,6 +23,13 @@ This document provides complete, production-grade documentation for the **Phase 
 6. [User Profile APIs](#user-profile-apis)
    - [GET /api/v1/auth/me/](#11-get-apiv1authme)
    - [PATCH /api/v1/auth/me/](#12-patch-apiv1authme)
+   - [GET /api/v1/users/profile/about/](#13-get-apiv1usersprofileabout)
+   - [PATCH /api/v1/users/profile/about/](#14-patch-apiv1usersprofileabout)
+   - [GET /api/v1/users/{user_id}/profile/about/](#15-get-apiv1usersuser_idprofileabout)
+   - [GET & POST /api/v1/users/profile/about/educations/](#16-get--post-apiv1usersprofileabouteducations)
+   - [PATCH & DELETE /api/v1/users/profile/about/educations/{id}/](#17-patch--delete-apiv1usersprofileabouteducationsid)
+   - [GET & POST /api/v1/users/profile/about/social-links/](#18-get--post-apiv1usersprofileaboutsocial-links)
+   - [PATCH & DELETE /api/v1/users/profile/about/social-links/{id}/](#19-patch--delete-apiv1usersprofileaboutsocial-linksid)
 7. [Dynamic RBAC & Access Control APIs](#dynamic-rbac--access-control-apis)
    - [GET /api/v1/access-control/permissions/](#13-get-apiv1access-controlpermissions)
    - [GET /api/v1/access-control/roles/](#14-get-apiv1access-controlroles)
@@ -460,6 +467,270 @@ To switch to a gym context, user must be:
 }
 ```
 - **Success (200)**: Returns updated user profile structure.
+
+---
+
+## Public Profile → About APIs
+
+### 13. GET `/api/v1/users/profile/about/`
+*(Convenient alias: `GET /api/v1/users/me/about/`)*
+
+#### 1. Summary
+Retrieves the complete Public Profile → About section for the authenticated user across all 5 structured categories:
+1. **Personal Details**: `current_address`, `home_town`, `date_of_birth`, `gender`.
+2. **Education**: list of education entries (`university_name`, `from_year`, `till_year`, `subject`, `graduated`).
+3. **Hobbies**: list of user hobbies (free text strings).
+4. **Contact info**: list of social links (`platform`, `link`), `phone_number`, and registered account `email` (read-only).
+5. **Details about you**: `about_you` (bio up to 320 chars) and `favourite_quote` (quote up to 160 chars).
+
+#### 2. Authentication & Authorization
+- **Authentication**: Required (`Bearer <JWT>`).
+- **Authorization**: Accessible to the authenticated user.
+
+#### 3. Success Response (200 OK)
+```json
+{
+  "user_id": "b3e0c0fa-2384-48f8-b3d5-e357e62a0a20",
+  "first_name": "Alex",
+  "last_name": "Morgan",
+  "avatar_url": "https://cdn.manygym.com/avatars/alex.webp",
+  "is_private": false,
+  "personal_details": {
+    "current_address": "House 12, Road 5, Dhanmondi, Dhaka",
+    "home_town": "Chittagong",
+    "date_of_birth": "1994-06-15",
+    "gender": "male"
+  },
+  "education_list": [
+    {
+      "id": "18c2f1ab-2233-4455-6677-8899aabbccdd",
+      "university_name": "Stanford University",
+      "from_year": "2012-09-01",
+      "till_year": "2016-06-15",
+      "subject": "Kinesiology and Sports Science",
+      "graduated": true,
+      "created_at": "2026-10-12T12:00:00Z",
+      "updated_at": "2026-10-12T12:00:00Z"
+    }
+  ],
+  "hobbies": [
+    "Weightlifting",
+    "Trail Running",
+    "Chess"
+  ],
+  "contact_info": {
+    "social_links": [
+      {
+        "id": "29d4e2bc-3344-5566-7788-99aabbccddee",
+        "platform": "instagram",
+        "link": "https://instagram.com/alex_fitness",
+        "created_at": "2026-10-12T12:00:00Z",
+        "updated_at": "2026-10-12T12:00:00Z"
+      },
+      {
+        "id": "30e5f3cd-4455-6677-8899-aabbccddeeff",
+        "platform": "github",
+        "link": "https://github.com/alexmorgan",
+        "created_at": "2026-10-12T12:00:00Z",
+        "updated_at": "2026-10-12T12:00:00Z"
+      }
+    ],
+    "phone_number": "+14155552671",
+    "email": "alex.morgan@manygym.com"
+  },
+  "details_about_you": {
+    "about_you": "Dedicated strength athlete and fitness coach helping members transform their physical capacity and mental endurance.",
+    "favourite_quote": "Discipline is choosing between what you want now and what you want most."
+  }
+}
+```
+
+#### 4. Error Responses
+- `401 Unauthorized`: Invalid or missing authentication credentials.
+
+---
+
+### 14. PATCH / PUT `/api/v1/users/profile/about/`
+
+#### 1. Summary
+Atomic update of the authenticated user's Public Profile -> About details.
+Accepts either structured nested sections (`personal_details`, `education_list`, `hobbies`, `contact_info`, `details_about_you`) or direct flat fields.
+
+#### 2. Business Invariants & Rules Enforced
+1. **Registered Email Immutability**: The email registered when creating an account **cannot be changed** via this or any profile update. Any `email` field passed in the request is safely discarded and the original email is preserved.
+2. **Text Length Constraints**:
+   - `about_you`: Maximum 320 characters.
+   - `favourite_quote`: Maximum 160 characters.
+3. **Education Validation**:
+   - `university_name`, `from_year`, and `subject` are mandatory for each item.
+   - `till_year` is optional (nullable if currently continuing).
+   - When provided, `till_year >= from_year` is strictly enforced.
+   - Accepts both standard ISO date (`YYYY-MM-DD`) and 4-digit year format (e.g. `"2018"` -> `2018-01-01`).
+4. **Gender Selection**:
+   - Restricted to standard choices: `male`, `female`, `other`, `prefer_not_to_say`.
+5. **Social Platform Selection**:
+   - Restricted to standard choices: `facebook`, `instagram`, `twitter_x`, `linkedin`, `youtube`, `tiktok`, `github`, `website`, `other`.
+
+#### 3. Request Example (Nested Payload)
+```json
+{
+  "personal_details": {
+    "current_address": "450 Broadway, Apt 12B, New York, NY",
+    "home_town": "Austin, Texas",
+    "date_of_birth": "1993-08-20",
+    "gender": "male"
+  },
+  "education_list": [
+    {
+      "university_name": "University of Texas at Austin",
+      "from_year": "2011-09-01",
+      "till_year": "2015-05-20",
+      "subject": "Exercise Physiology",
+      "graduated": true
+    }
+  ],
+  "hobbies": ["Powerlifting", "Hiking", "Reading"],
+  "contact_info": {
+    "phone_number": "+15125550198",
+    "social_links": [
+      {
+        "platform": "instagram",
+        "link": "https://instagram.com/alex_lifts"
+      },
+      {
+        "platform": "linkedin",
+        "link": "https://linkedin.com/in/alex-morgan"
+      }
+    ]
+  },
+  "details_about_you": {
+    "about_you": "Competitive powerlifter and strength conditioning coach passionate about progressive overload.",
+    "favourite_quote": "Consistency over intensity."
+  }
+}
+```
+
+#### 4. Request Example (Flat Payload)
+```json
+{
+  "current_address": "450 Broadway, Apt 12B, New York, NY",
+  "home_town": "Austin, Texas",
+  "date_of_birth": "1993-08-20",
+  "gender": "male",
+  "phone_number": "+15125550198",
+  "hobbies": ["Powerlifting", "Hiking"],
+  "about_you": "Competitive powerlifter and coach.",
+  "favourite_quote": "Consistency over intensity."
+}
+```
+
+#### 5. Success Response (200 OK)
+Returns the complete preloaded `UserAboutResponseSerializer` object.
+
+#### 6. Error Responses
+- `400 Bad Request`: Validation failure (e.g. `about_you` > 320 chars, `favourite_quote` > 160 chars, invalid gender/platform choice, or `till_year < from_year`).
+- `401 Unauthorized`: Missing or invalid Bearer JWT.
+
+---
+
+### 15. GET `/api/v1/users/{user_id}/profile/about/`
+*(Convenient alias: `GET /api/v1/users/{user_id}/about/`)*
+
+#### 1. Summary
+Retrieves the public "About" profile of another user by their UUID.
+
+#### 2. Privacy & Access Rules
+- **Non-existent / Soft-Deleted**: Returns `404 Not Found`.
+- **Deactivated**: Returns `400 Bad Request` ("This user account is deactivated.") unless viewed by the account owner.
+- **Blocked Users**: Returns `403 Forbidden` ("You have been blocked by this user.") if the target user has blocked the requester.
+- **Private Profiles**: Returns `403 Forbidden` ("This user account is private.") if `is_private=True` and the requester is not an approved follower.
+
+#### 3. Success Response (200 OK)
+Returns `UserAboutResponseSerializer` object.
+
+---
+
+### 16. GET & POST `/api/v1/users/profile/about/educations/`
+
+#### 1. Summary
+- `GET`: Lists all education records for the authenticated user, ordered by `from_year` descending.
+- `POST`: Adds a single education record to the user's profile.
+
+#### 2. POST Request Body
+```json
+{
+  "university_name": "Massachusetts Institute of Technology",
+  "from_year": "2016-09-01",
+  "till_year": "2020-05-30",
+  "subject": "Electrical Engineering & Computer Science",
+  "graduated": true
+}
+```
+
+#### 3. Success Response (201 Created)
+```json
+{
+  "id": "e93f3456-789a-bcde-f012-3456789abcde",
+  "university_name": "Massachusetts Institute of Technology",
+  "from_year": "2016-09-01",
+  "till_year": "2020-05-30",
+  "subject": "Electrical Engineering & Computer Science",
+  "graduated": true,
+  "created_at": "2026-11-04T12:00:00Z",
+  "updated_at": "2026-11-04T12:00:00Z"
+}
+```
+
+---
+
+### 17. PATCH & DELETE `/api/v1/users/profile/about/educations/{education_id}/`
+
+#### 1. Summary
+- `PATCH`: Partially updates an education record owned by the authenticated user.
+- `DELETE`: Deletes an education record owned by the authenticated user.
+
+#### 2. Success Response
+- `PATCH`: `200 OK` with updated education record.
+- `DELETE`: `200 OK` with `{"message": "Education record deleted successfully."}`.
+
+---
+
+### 18. GET & POST `/api/v1/users/profile/about/social-links/`
+
+#### 1. Summary
+- `GET`: Lists all social links for the authenticated user.
+- `POST`: Adds a single social link to the user's profile.
+
+#### 2. POST Request Body
+```json
+{
+  "platform": "linkedin",
+  "link": "https://linkedin.com/in/alexmorgan"
+}
+```
+
+#### 3. Success Response (201 Created)
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-1234-56789abcdef0",
+  "platform": "linkedin",
+  "link": "https://linkedin.com/in/alexmorgan",
+  "created_at": "2026-11-04T12:00:00Z",
+  "updated_at": "2026-11-04T12:00:00Z"
+}
+```
+
+---
+
+### 19. PATCH & DELETE `/api/v1/users/profile/about/social-links/{link_id}/`
+
+#### 1. Summary
+- `PATCH`: Partially updates a social link owned by the authenticated user.
+- `DELETE`: Deletes a social link owned by the authenticated user.
+
+#### 2. Success Response
+- `PATCH`: `200 OK` with updated social link record.
+- `DELETE`: `200 OK` with `{"message": "Social link deleted successfully."}`.
 
 ---
 

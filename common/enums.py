@@ -23,6 +23,27 @@ class UserAudienceVisibilityEnum(models.TextChoices):
     PRIVATE = "private", "Private"
 
 
+class GenderEnum(models.TextChoices):
+    """Gender options for personal user profiles."""
+    MALE = "male", "Male"
+    FEMALE = "female", "Female"
+    OTHER = "other", "Other"
+    PREFER_NOT_TO_SAY = "prefer_not_to_say", "Prefer not to say"
+
+
+class SocialPlatformEnum(models.TextChoices):
+    """Supported social network platforms for profile links."""
+    FACEBOOK = "facebook", "Facebook"
+    INSTAGRAM = "instagram", "Instagram"
+    TWITTER_X = "twitter_x", "Twitter / X"
+    LINKEDIN = "linkedin", "LinkedIn"
+    YOUTUBE = "youtube", "YouTube"
+    TIKTOK = "tiktok", "TikTok"
+    GITHUB = "github", "GitHub"
+    WEBSITE = "website", "Website"
+    OTHER = "other", "Other"
+
+
 class TokenContextType(models.TextChoices):
     PERSONAL = "personal", "Personal"
     GYM = "gym", "Gym"

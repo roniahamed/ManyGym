@@ -13,6 +13,25 @@ Enum token_context_type {
   gym
 }
 
+Enum gender_enum {
+  male
+  female
+  other
+  prefer_not_to_say
+}
+
+Enum social_platform_enum {
+  facebook
+  instagram
+  twitter_x
+  linkedin
+  youtube
+  tiktok
+  github
+  website
+  other
+}
+
 Enum staff_status {
   invited
   active
@@ -187,11 +206,38 @@ Table user_profiles {
   user_id uuid [unique, not null, ref: > users.id]
   avatar_url varchar(1000)
   address varchar(500)
+  home_town varchar(255)
   city varchar(100)
   country varchar(100)
   date_of_birth date
   sex varchar(20)
+  gender gender_enum
   nationality varchar(100)
+  hobbies jsonb [note: 'list of free text hobby strings']
+  about_you varchar(320)
+  favourite_quote varchar(160)
+  is_private boolean [default: false]
+  created_at timestamp [not null, default: `now()`]
+  updated_at timestamp [not null, default: `now()`]
+}
+
+Table user_educations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [not null, ref: > users.id]
+  university_name varchar(255) [not null]
+  from_year date [not null]
+  till_year date
+  subject varchar(255) [not null]
+  graduated boolean [default: false]
+  created_at timestamp [not null, default: `now()`]
+  updated_at timestamp [not null, default: `now()`]
+}
+
+Table user_social_links {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [not null, ref: > users.id]
+  platform social_platform_enum [not null]
+  link varchar(1000) [not null]
   created_at timestamp [not null, default: `now()`]
   updated_at timestamp [not null, default: `now()`]
 }
@@ -604,6 +650,8 @@ Table gym_post_media {
 TableGroup Auth_and_Tenancy {
   users
   user_profiles
+  user_educations
+  user_social_links
   auth_tokens
   gyms
   roles

@@ -9,6 +9,12 @@ from apps.users.rest_api.v1.views.auth_views import (
 )
 from apps.users.rest_api.v1.views.profile_views import (
     UserProfileMeView,
+    UserAboutMeView,
+    UserPublicAboutView,
+    UserEducationListCreateView,
+    UserEducationDetailView,
+    UserSocialLinkListCreateView,
+    UserSocialLinkDetailView,
 )
 from apps.users.rest_api.v1.views.social_views import (
     UserFollowToggleView,
@@ -38,6 +44,12 @@ __all__ = [
     "ResetPasswordView",
     "ChangePasswordView",
     "UserProfileMeView",
+    "UserAboutMeView",
+    "UserPublicAboutView",
+    "UserEducationListCreateView",
+    "UserEducationDetailView",
+    "UserSocialLinkListCreateView",
+    "UserSocialLinkDetailView",
     "UserFollowToggleView",
     "UserFollowersListView",
     "UserFollowingListView",

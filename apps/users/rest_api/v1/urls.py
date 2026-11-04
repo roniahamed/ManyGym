@@ -18,6 +18,12 @@ from apps.users.rest_api.v1.views import (
     UserBlockedUsersListView,
     UserSearchUsersToBlockView,
     UserBlockedUserDetailView,
+    UserAboutMeView,
+    UserPublicAboutView,
+    UserEducationListCreateView,
+    UserEducationDetailView,
+    UserSocialLinkListCreateView,
+    UserSocialLinkDetailView,
 )
 
 urlpatterns = [
@@ -29,6 +35,15 @@ urlpatterns = [
     path("reset-password/", ResetPasswordView.as_view(), name="reset-password"),
     path("me/", UserProfileMeView.as_view(), name="me"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
+    # Public profile -> About routes
+    path("profile/about/", UserAboutMeView.as_view(), name="user-profile-about"),
+    path("me/about/", UserAboutMeView.as_view(), name="user-me-about"),
+    path("profile/about/educations/", UserEducationListCreateView.as_view(), name="user-education-list-create"),
+    path("profile/about/educations/<uuid:education_id>/", UserEducationDetailView.as_view(), name="user-education-detail"),
+    path("profile/about/social-links/", UserSocialLinkListCreateView.as_view(), name="user-social-link-list-create"),
+    path("profile/about/social-links/<uuid:link_id>/", UserSocialLinkDetailView.as_view(), name="user-social-link-detail"),
+    path("<uuid:user_id>/profile/about/", UserPublicAboutView.as_view(), name="user-public-profile-about"),
+    path("<uuid:user_id>/about/", UserPublicAboutView.as_view(), name="user-public-about"),
     # Social follow routes
     path("follow/", UnifiedFollowView.as_view(), name="user-unified-follow"),
     path("<uuid:user_id>/follow/", UserFollowToggleView.as_view(), name="user-follow-toggle"),

@@ -2,6 +2,11 @@ from apps.users.selectors.user_selectors import (
     get_user_by_email,
     get_user_by_id,
     get_user_profile,
+    get_user_about_profile,
+    list_user_educations,
+    get_user_education_by_id,
+    list_user_social_links,
+    get_user_social_link_by_id,
     iter_users,
 )
 from apps.users.selectors.social_selectors import (
@@ -25,6 +30,11 @@ __all__ = [
     "get_user_by_email",
     "get_user_by_id",
     "get_user_profile",
+    "get_user_about_profile",
+    "list_user_educations",
+    "get_user_education_by_id",
+    "list_user_social_links",
+    "get_user_social_link_by_id",
     "iter_users",
     "get_user_with_profile",
     "list_user_followers",

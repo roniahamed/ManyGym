@@ -2,7 +2,13 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.utils import timezone
-from common.enums import UserStatus, UserAudienceMessagingEnum, UserAudienceVisibilityEnum
+from common.enums import (
+    UserStatus,
+    UserAudienceMessagingEnum,
+    UserAudienceVisibilityEnum,
+    GenderEnum,
+    SocialPlatformEnum,
+)
 
 
 class UserManager(BaseUserManager):
@@ -75,11 +81,36 @@ class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     avatar_url = models.CharField(max_length=1000, blank=True, null=True)
     address = models.CharField(max_length=500, blank=True, null=True)
+    home_town = models.CharField(max_length=255, blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
     date_of_birth = models.DateField(blank=True, null=True)
     sex = models.CharField(max_length=20, blank=True, null=True)
+    gender = models.CharField(
+        max_length=50,
+        choices=GenderEnum.choices,
+        blank=True,
+        null=True,
+        help_text="User gender identity selection.",
+    )
     nationality = models.CharField(max_length=100, blank=True, null=True)
+    hobbies = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of user hobbies as free text items.",
+    )
+    about_you = models.CharField(
+        max_length=320,
+        blank=True,
+        null=True,
+        help_text="Short bio/description about user (maximum 320 characters).",
+    )
+    favourite_quote = models.CharField(
+        max_length=160,
+        blank=True,
+        null=True,
+        help_text="User favourite quote (maximum 160 characters).",
+    )
     is_private = models.BooleanField(
         default=False,
         help_text="If True, this user's profile is private and cannot be followed by other users.",
@@ -94,6 +125,71 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"Profile of {self.user.email}"
+
+    @property
+    def current_address(self):
+        return self.address
+
+    @current_address.setter
+    def current_address(self, value):
+        self.address = value
+
+
+class UserEducation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="educations",
+    )
+    university_name = models.CharField(max_length=255)
+    from_year = models.DateField(help_text="Start date / year of education")
+    till_year = models.DateField(
+        null=True,
+        blank=True,
+        help_text="End date / year of education (optional if still continuing)",
+    )
+    subject = models.CharField(max_length=255)
+    graduated = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_educations"
+        verbose_name = "User Education"
+        verbose_name_plural = "User Educations"
+        ordering = ["-from_year", "-created_at"]
+        indexes = [
+            models.Index(fields=["user", "-from_year"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.university_name} ({self.subject})"
+
+
+class UserSocialLink(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="social_links",
+    )
+    platform = models.CharField(max_length=50, choices=SocialPlatformEnum.choices)
+    link = models.CharField(max_length=1000)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_social_links"
+        verbose_name = "User Social Link"
+        verbose_name_plural = "User Social Links"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["user", "platform"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.platform}: {self.link}"
 
 
 _raw_otp_cache = {}

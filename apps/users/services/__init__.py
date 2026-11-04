@@ -9,6 +9,13 @@ from apps.users.services.auth_services import (
 )
 from apps.users.services.profile_services import (
     update_user_profile,
+    update_user_about,
+    create_user_education,
+    update_user_education,
+    delete_user_education,
+    create_user_social_link,
+    update_user_social_link,
+    delete_user_social_link,
 )
 from apps.users.services.social_services import (
     follow_user,
@@ -31,6 +38,13 @@ __all__ = [
     "reset_password",
     "change_password",
     "update_user_profile",
+    "update_user_about",
+    "create_user_education",
+    "update_user_education",
+    "delete_user_education",
+    "create_user_social_link",
+    "update_user_social_link",
+    "delete_user_social_link",
     "follow_user",
     "unfollow_user",
     "get_or_create_user_settings",
