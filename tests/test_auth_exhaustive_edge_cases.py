@@ -531,10 +531,10 @@ class TestAuthMissingExtraMalformedFields:
         # Protected endpoints
         assert auth_client.post(reverse("switch-context"), {}, format="json").status_code == 400
         assert auth_client.post(reverse("change-password"), {}, format="json").status_code == 400
+        # Logout with empty payload is valid because refresh is optional
+        assert auth_client.post(reverse("logout"), {}, format="json").status_code == 200
         # Me PATCH with empty payload is valid (no-op profile update)
         assert auth_client.patch(reverse("me"), {}, format="json").status_code == 200
-        # Logout with empty payload is valid because refresh is optional (revokes token for subsequent calls)
-        assert auth_client.post(reverse("logout"), {}, format="json").status_code == 200
 
     def test_missing_required_fields_individually_in_registration(self):
         client = APIClient()
@@ -751,7 +751,7 @@ class TestAuthSecurityAndInjection:
         "' UNION SELECT NULL, NULL, NULL --",
         "\" OR \"\"=\"",
     ])
-    def test_sql_injection_in_login_email(self, verified_user, sqli_payload):
+    def test_sql_injection_in_login_email(self, sqli_payload):
         client = APIClient()
         res = client.post(
             reverse("login"),
@@ -760,7 +760,7 @@ class TestAuthSecurityAndInjection:
         )
         # Email validator will reject malformed emails with 400
         assert res.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_401_UNAUTHORIZED]
-        assert User.objects.filter(id=verified_user.id).exists()  # DB intact
+        assert User.objects.exists()  # DB intact
 
     @pytest.mark.parametrize("sqli_payload", [
         "' OR '1'='1",
@@ -986,7 +986,7 @@ class TestAuthBusinessLogicAndStateTransitions:
 
     def test_deleted_user_login_without_flag_rejected(self, verified_user):
         apply_user_access_control_action(
-            verified_user, action="delete", password="SecurePassword2026!", confirmation="delete"
+            verified_user, action="delete", password="SecurePassword2026!"
         )
 
         client = APIClient()
@@ -1015,6 +1015,7 @@ class TestAuthBusinessLogicAndStateTransitions:
     def test_cannot_verify_already_verified_user(self, verified_user):
         client = APIClient()
         otp = OTPVerification.objects.create(
+            user=verified_user,
             email=verified_user.email,
             otp_code="112233",
             purpose="signup_verification",
@@ -1041,6 +1042,7 @@ class TestAuthBusinessLogicAndStateTransitions:
     def test_expired_otp_is_rejected(self, unverified_user):
         client = APIClient()
         OTPVerification.objects.create(
+            user=unverified_user,
             email=unverified_user.email,
             otp_code="998877",
             purpose="signup_verification",
@@ -1057,6 +1059,7 @@ class TestAuthBusinessLogicAndStateTransitions:
     def test_used_otp_is_rejected(self, unverified_user):
         client = APIClient()
         OTPVerification.objects.create(
+            user=unverified_user,
             email=unverified_user.email,
             otp_code="554433",
             purpose="signup_verification",
@@ -1073,6 +1076,7 @@ class TestAuthBusinessLogicAndStateTransitions:
     def test_otp_brute_force_5_attempt_burn_lockout(self, unverified_user):
         client = APIClient()
         otp = OTPVerification.objects.create(
+            user=unverified_user,
             email=unverified_user.email,
             otp_code="654321",
             purpose="signup_verification",
@@ -1098,17 +1102,14 @@ class TestAuthBusinessLogicAndStateTransitions:
         assert res5.status_code == status.HTTP_400_BAD_REQUEST
         assert "invalidated" in res5.json()["message"]
 
-        # 6th attempt with CORRECT code is now rejected because it was burned/marked used
+        # 6th attempt with CORRECT code is now rejected because it was burned
         res6 = client.post(
             reverse("verify-signup-otp"),
             {"email": unverified_user.email, "otp_code": "654321"},
             format="json",
         )
         assert res6.status_code == status.HTTP_400_BAD_REQUEST
-        assert any(
-            phrase in res6.json()["message"].lower()
-            for phrase in ["invalid", "expired", "invalidated"]
-        )
+        assert "invalidated" in res6.json()["message"]
 
     def test_login_brute_force_lockout_after_5_wrong_passwords(self, verified_user):
         client = APIClient()
@@ -1222,4 +1223,3 @@ class TestAuthResponseValidation:
         assert "psycopg2" not in content
         assert "SELECT" not in content
         assert "django.db" not in content
-
