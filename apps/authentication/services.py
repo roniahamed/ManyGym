@@ -137,11 +137,12 @@ def switch_gym_context(user: User, gym_id: str) -> dict:
     try:
         import uuid
         uuid.UUID(str(gym_id))
-        gym = Gym.objects.select_related("owner_user").get(id=gym_id)
+        gym = Gym.objects.select_related("owner_user", "settings").get(id=gym_id)
     except Exception:
         raise ResourceNotFoundError("Gym not found.")
 
-    if getattr(gym.get_settings(), "is_deleted", False):
+    settings_obj = getattr(gym, "settings", None)
+    if settings_obj and getattr(settings_obj, "is_deleted", False):
         raise ResourceNotFoundError("Gym not found.")
 
     # Check if user is the gym owner
@@ -159,7 +160,9 @@ def switch_gym_context(user: User, gym_id: str) -> dict:
     if not (is_owner or is_staff):
         raise UnauthorizedContextError(f"You do not have access rights to gym '{gym.name}'.")
 
-    return issue_context_token(user, context_type=TokenContextType.GYM, gym=gym)
+    tokens = issue_context_token(user, context_type=TokenContextType.GYM, gym=gym)
+    tokens["_gym"] = gym
+    return tokens
 
 
 def switch_to_personal_context(user: User) -> dict:

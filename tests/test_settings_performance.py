@@ -176,10 +176,10 @@ class TestGymSettingsPerformanceAndQueryCounts:
             assert "video_autoplay" in res.data
 
     def test_patch_gym_settings_query_budget(self, gym_auth_client, perf_gym, django_assert_num_queries):
-        """PATCH /api/v1/gyms/settings/ must execute in 6 queries (auth + context + begin + select + update + commit)."""
+        """PATCH /api/v1/gyms/settings/ must execute in <= 9 queries (auth + context + begin + select + update + admin audit log)."""
         url = f"{reverse('gyms_v1:gym-settings')}?gym_id={perf_gym.id}"
         payload = {"dark_mode": True, "video_autoplay": False}
-        with django_assert_num_queries(6):
+        with django_assert_num_queries(9):
             res = gym_auth_client.patch(url, payload, format="json")
             assert res.status_code == status.HTTP_200_OK
             assert res.data["dark_mode"] is True

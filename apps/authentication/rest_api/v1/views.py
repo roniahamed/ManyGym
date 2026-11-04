@@ -247,11 +247,12 @@ Dynamically switches user operational context between Personal Profile and speci
 
         if context_type == TokenContextType.GYM:
             tokens = switch_gym_context(user=request.user, gym_id=str(gym_id))
-            from apps.gyms.models import Gym
-            gym_obj = Gym.objects.filter(id=gym_id).first()
+            gym_obj = tokens.pop("_gym", None)
             is_deactivated = False
             if gym_obj:
-                is_deactivated = getattr(gym_obj.get_settings(), "is_deactivated", False)
+                settings_obj = getattr(gym_obj, "settings", None)
+                if settings_obj:
+                    is_deactivated = getattr(settings_obj, "is_deactivated", False)
             if is_deactivated:
                 notice = "This gym is deactivated. Do you want to reactivate it? If so, please reactivate it from Settings."
                 return Response(

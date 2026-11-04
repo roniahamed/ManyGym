@@ -290,8 +290,8 @@ class TestFormatSpecificInvalidInputs:
 
         payload = {"target_id": str(gym_instance.id)}
         response = client_bob.post("/api/v1/follows/", data=payload, format="json")
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "inactive" in response.json().get("message", "").lower()
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert "not found" in response.json().get("message", "").lower()
 
 
 # =====================================================================

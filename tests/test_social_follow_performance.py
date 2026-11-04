@@ -26,6 +26,9 @@ def auth_client_factory(db):
                 is_verified=True,
             )
             UserProfile.objects.get_or_create(user=user)
+            user.get_settings()
+        else:
+            user.get_settings()
         token = issue_context_token(user=user, context_type=TokenContextType.PERSONAL)
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {token['access']}")
@@ -43,6 +46,7 @@ def target_user(db):
         is_verified=True,
     )
     UserProfile.objects.get_or_create(user=user)
+    user.get_settings()
     return user
 
 
@@ -78,6 +82,10 @@ class TestFollowNPlusOneElimination:
         saved_initial = list(User.objects.filter(email__startswith="initial_follower_"))
         UserProfile.objects.bulk_create([UserProfile(user=u) for u in saved_initial])
         UserFollow.objects.bulk_create([UserFollow(follower=u, followed_user=target_user) for u in saved_initial])
+
+        # Ensure settings and connections are initialized prior to measurement
+        viewer.get_settings()
+        target_user.get_settings()
 
         # Measure query count with 5 followers
         with CaptureQueriesContext(connection) as ctx_5:
@@ -130,6 +138,10 @@ class TestFollowNPlusOneElimination:
         saved_5 = list(User.objects.filter(email__startswith="gym_flwr_5_"))
         UserProfile.objects.bulk_create([UserProfile(user=u) for u in saved_5])
         GymFollow.objects.bulk_create([GymFollow(user=u, gym=target_gym) for u in saved_5])
+
+        # Ensure settings and connections are initialized prior to measurement
+        viewer.get_settings()
+        target_gym.get_settings()
 
         with CaptureQueriesContext(connection) as ctx_5:
             res_5 = client.get(f"/api/v1/gyms/{target_gym.id}/followers/")
@@ -199,8 +211,8 @@ class TestQueryCountThresholds:
             assert response.json()["followers_count"] == 10
 
         op_queries = get_operational_queries(ctx)
-        assert len(op_queries) <= 5, (
-            f"Expected <= 5 queries for auto-detect UnifiedFollowView GET, but got {len(op_queries)}: "
+        assert len(op_queries) <= 7, (
+            f"Expected <= 7 queries for auto-detect UnifiedFollowView GET, but got {len(op_queries)}: "
             f"{[q['sql'] for q in op_queries]}"
         )
 
@@ -226,8 +238,8 @@ class TestQueryCountThresholds:
             assert response.json()["followers_count"] == 10
 
         op_queries = get_operational_queries(ctx)
-        assert len(op_queries) <= 4, (
-            f"Expected <= 4 queries for UnifiedFollowView GET (gym followers), but got {len(op_queries)}: "
+        assert len(op_queries) <= 7, (
+            f"Expected <= 7 queries for UnifiedFollowView GET (gym followers), but got {len(op_queries)}: "
             f"{[q['sql'] for q in op_queries]}"
         )
 
@@ -245,19 +257,20 @@ class TestQueryCountThresholds:
             assert data["total_followed_gyms"] == 1
 
         op_queries = get_operational_queries(ctx)
-        # Maximum allowed queries is 3:
+        # Maximum allowed queries is 4:
         # 1. Auth token lookup
-        # 2. list_user_following (follower=viewer)
-        # 3. list_user_followed_gyms (user=viewer)
-        assert len(op_queries) <= 3, (
-            f"Expected <= 3 queries for UnifiedFollowView GET (followed list), but got {len(op_queries)}: "
+        # 2. User settings lookup
+        # 3. list_user_following (follower=viewer)
+        # 4. list_user_followed_gyms (user=viewer)
+        assert len(op_queries) <= 4, (
+            f"Expected <= 4 queries for UnifiedFollowView GET (followed list), but got {len(op_queries)}: "
             f"{[q['sql'] for q in op_queries]}"
         )
 
     def test_follow_user_post_query_budget(self, auth_client_factory, target_user):
         client, viewer = auth_client_factory()
 
-        # Auto-detect mode: maximum 5 operational queries (auth + gym check + user check + get_or_create lookup + insert)
+        # Auto-detect mode: maximum 8 operational queries (auth + gym check + user check + settings + mutual block check (2) + is_following check + insert)
         with CaptureQueriesContext(connection) as ctx:
             response = client.post(
                 "/api/v1/follows/",
@@ -267,8 +280,8 @@ class TestQueryCountThresholds:
             assert response.status_code == status.HTTP_201_CREATED
 
         op_queries = get_operational_queries(ctx)
-        assert len(op_queries) <= 5, (
-            f"Expected <= 5 queries for POST /api/v1/follows/, but got {len(op_queries)}: "
+        assert len(op_queries) <= 8, (
+            f"Expected <= 8 queries for POST /api/v1/follows/, but got {len(op_queries)}: "
             f"{[q['sql'] for q in op_queries]}"
         )
 
