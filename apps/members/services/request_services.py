@@ -198,6 +198,8 @@ def get_member_joining_request_status(user: User, gym_id: Any) -> Dict[str, Any]
             raise ResourceNotFoundError("Gym not found.")
 
     settings_obj = gym.get_settings()
+    if settings_obj.is_deleted:
+        raise ResourceNotFoundError("Gym not found.")
 
     is_blocked = GymBlockedUser.objects.filter(gym=gym, user=user).exists()
     is_member = Member.objects.filter(gym=gym, user=user).exclude(joining_status="removed").exists()
@@ -263,9 +265,14 @@ def accept_member_request(
     Creates an active Member directly linked to the user account (joining_status='joined').
     """
     try:
+        req_uuid = uuid.UUID(str(request_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ResourceNotFoundError("Member request not found.")
+
+    try:
         member_request = (
             MemberRequest.objects.select_related("gym", "user", "interested_plan")
-            .get(id=request_id, gym=gym)
+            .get(id=req_uuid, gym=gym)
         )
     except MemberRequest.DoesNotExist:
         raise ResourceNotFoundError("Member request not found.")
@@ -450,9 +457,14 @@ def reject_member_request(
     Rejects a pending member request.
     """
     try:
+        req_uuid = uuid.UUID(str(request_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ResourceNotFoundError("Member request not found.")
+
+    try:
         member_request = (
             MemberRequest.objects.select_related("gym", "user")
-            .get(id=request_id, gym=gym)
+            .get(id=req_uuid, gym=gym)
         )
     except MemberRequest.DoesNotExist:
         raise ResourceNotFoundError("Member request not found.")
@@ -507,8 +519,13 @@ def cancel_member_request(
     Allows a Manygym user to cancel their own pending join request.
     """
     try:
+        req_uuid = uuid.UUID(str(request_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ResourceNotFoundError("Member request not found.")
+
+    try:
         member_request = MemberRequest.objects.select_related("gym").get(
-            id=request_id,
+            id=req_uuid,
             user=user,
         )
     except MemberRequest.DoesNotExist:

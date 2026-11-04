@@ -18,12 +18,20 @@ def resolve_member_gym(request, gym_id=None) -> Gym:
     if hasattr(request, "parser_context") and isinstance(request.parser_context, dict):
         url_kwarg_gym_id = request.parser_context.get("kwargs", {}).get("gym_id")
 
+    body_gym_id = None
+    if getattr(request, "method", "") in ("POST", "PUT", "PATCH"):
+        try:
+            if hasattr(request, "data") and isinstance(request.data, dict):
+                body_gym_id = request.data.get("gym_id")
+        except Exception:
+            body_gym_id = None
+
     target_id = (
         gym_id
         or url_kwarg_gym_id
-        or request.query_params.get("gym_id")
+        or (request.query_params.get("gym_id") if hasattr(request, "query_params") else None)
         or getattr(request, "gym_id", None)
-        or (request.data.get("gym_id") if isinstance(request.data, dict) else None)
+        or body_gym_id
     )
     if not target_id:
         raise DomainValidationError("An active Gym context token or 'gym_id' parameter is required.")

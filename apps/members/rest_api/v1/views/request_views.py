@@ -39,11 +39,19 @@ def _resolve_request_and_gym(request, request_id, gym_id=None):
     Resolves target MemberRequest and its Gym in a single unified database query.
     Eliminates redundant Gym resolution queries and preloads user profiles to prevent N+1 queries.
     """
+    body_gym_id = None
+    if getattr(request, "method", "") in ("POST", "PUT", "PATCH"):
+        try:
+            if hasattr(request, "data") and isinstance(request.data, dict):
+                body_gym_id = request.data.get("gym_id")
+        except Exception:
+            body_gym_id = None
+
     target_gym_id = (
         gym_id
-        or request.query_params.get("gym_id")
+        or (request.query_params.get("gym_id") if hasattr(request, "query_params") else None)
         or getattr(request, "gym_id", None)
-        or (request.data.get("gym_id") if isinstance(request.data, dict) else None)
+        or body_gym_id
     )
 
     try:

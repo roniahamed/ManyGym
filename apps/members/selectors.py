@@ -313,16 +313,19 @@ def list_member_requests(
         )
         .order_by("-created_at")
     )
-    if status:
-        qs = qs.filter(status=status.strip().lower())
-    if search:
-        s = search.strip()
-        qs = qs.filter(
-            Q(user__first_name__icontains=s)
-            | Q(user__last_name__icontains=s)
-            | Q(user__email__icontains=s)
-            | Q(notes__icontains=s)
-        )
+    if status is not None:
+        status_clean = str(status).strip().lower()
+        if status_clean:
+            qs = qs.filter(status=status_clean)
+    if search is not None:
+        s = str(search).strip()
+        if s:
+            qs = qs.filter(
+                Q(user__first_name__icontains=s)
+                | Q(user__last_name__icontains=s)
+                | Q(user__email__icontains=s)
+                | Q(notes__icontains=s)
+            )
     return qs
 
 
@@ -331,8 +334,13 @@ def get_member_request_detail(gym: Gym, request_id: uuid.UUID) -> MemberRequest:
     Fetches a single member join request for a gym with preloaded relationships and exact column projection.
     """
     try:
+        req_uuid = uuid.UUID(str(request_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ResourceNotFoundError("Member request not found.")
+
+    try:
         return (
-            MemberRequest.objects.filter(id=request_id, gym=gym)
+            MemberRequest.objects.filter(id=req_uuid, gym=gym)
             .select_related(
                 "gym",
                 "user__profile",
