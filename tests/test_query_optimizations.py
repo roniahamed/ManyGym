@@ -1662,6 +1662,7 @@ def test_phase7_performance_benchmarks_and_p95_latencies():
         return s[min(idx, len(s) - 1)]
 
     # 1. Benchmark GET /api/v1/posts/ (Feed)
+    client.get(f"/api/v1/posts/?gym_id={gym.id}")  # Warm-up cold start
     feed_latencies = []
     for _ in range(20):
         t0 = time.perf_counter()
