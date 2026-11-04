@@ -46,11 +46,11 @@ class MemberRequestPlanSerializer(serializers.ModelSerializer):
 
 class MemberRequestListSerializer(serializers.ModelSerializer):
     """List representation for gym staff reviewing incoming member requests."""
-    gym_id = serializers.UUIDField(source="gym.id", read_only=True)
+    gym_id = serializers.UUIDField(read_only=True)
     user = MemberRequestUserSerializer(read_only=True)
     interested_plan = MemberRequestPlanSerializer(read_only=True)
     reviewed_by_name = serializers.SerializerMethodField()
-    created_member_id = serializers.UUIDField(source="created_member.id", read_only=True, allow_null=True)
+    created_member_id = serializers.UUIDField(read_only=True, allow_null=True)
 
     class Meta:
         model = MemberRequest
@@ -77,12 +77,12 @@ class MemberRequestListSerializer(serializers.ModelSerializer):
 
 class MemberRequestDetailSerializer(serializers.ModelSerializer):
     """Full detailed representation of a gym member request."""
-    gym_id = serializers.UUIDField(source="gym.id", read_only=True)
+    gym_id = serializers.UUIDField(read_only=True)
     gym_name = serializers.CharField(source="gym.name", read_only=True)
     user = MemberRequestUserSerializer(read_only=True)
     interested_plan = MemberRequestPlanSerializer(read_only=True)
     reviewed_by_name = serializers.SerializerMethodField()
-    created_member_id = serializers.UUIDField(source="created_member.id", read_only=True, allow_null=True)
+    created_member_id = serializers.UUIDField(read_only=True, allow_null=True)
 
     class Meta:
         model = MemberRequest

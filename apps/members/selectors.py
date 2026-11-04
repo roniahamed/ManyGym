@@ -269,12 +269,48 @@ def list_member_requests(
     search: Optional[str] = None,
 ) -> QuerySet[MemberRequest]:
     """
-    Retrieves member join requests for a gym with eager-loaded user, interested plan,
-    and reviewer info.
+    Retrieves member join requests for a gym with eager-loaded user profile, interested plan,
+    and reviewer info. Eliminates N+1 queries.
     """
     qs = (
         MemberRequest.objects.filter(gym=gym)
-        .select_related("user", "interested_plan", "reviewed_by", "created_member")
+        .select_related(
+            "user__profile",
+            "interested_plan",
+            "reviewed_by",
+            "created_member",
+        )
+        .only(
+            "id",
+            "gym_id",
+            "user_id",
+            "interested_plan_id",
+            "notes",
+            "status",
+            "created_member_id",
+            "reviewed_by_id",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+            "user__id",
+            "user__first_name",
+            "user__last_name",
+            "user__email",
+            "user__phone",
+            "user__profile__id",
+            "user__profile__user_id",
+            "user__profile__avatar_url",
+            "interested_plan__id",
+            "interested_plan__name",
+            "interested_plan__price",
+            "interested_plan__duration_value",
+            "interested_plan__duration_unit",
+            "interested_plan__plan_type",
+            "reviewed_by__id",
+            "reviewed_by__first_name",
+            "reviewed_by__last_name",
+            "reviewed_by__email",
+        )
         .order_by("-created_at")
     )
     if status:
@@ -292,12 +328,53 @@ def list_member_requests(
 
 def get_member_request_detail(gym: Gym, request_id: uuid.UUID) -> MemberRequest:
     """
-    Fetches a single member join request for a gym with preloaded relationships.
+    Fetches a single member join request for a gym with preloaded relationships and exact column projection.
     """
     try:
         return (
-            MemberRequest.objects.select_related("gym", "user", "interested_plan", "reviewed_by", "created_member")
-            .get(id=request_id, gym=gym)
+            MemberRequest.objects.filter(id=request_id, gym=gym)
+            .select_related(
+                "gym",
+                "user__profile",
+                "interested_plan",
+                "reviewed_by",
+                "created_member",
+            )
+            .only(
+                "id",
+                "gym_id",
+                "user_id",
+                "interested_plan_id",
+                "notes",
+                "status",
+                "rejection_reason",
+                "created_member_id",
+                "reviewed_by_id",
+                "reviewed_at",
+                "created_at",
+                "updated_at",
+                "gym__id",
+                "gym__name",
+                "user__id",
+                "user__first_name",
+                "user__last_name",
+                "user__email",
+                "user__phone",
+                "user__profile__id",
+                "user__profile__user_id",
+                "user__profile__avatar_url",
+                "interested_plan__id",
+                "interested_plan__name",
+                "interested_plan__price",
+                "interested_plan__duration_value",
+                "interested_plan__duration_unit",
+                "interested_plan__plan_type",
+                "reviewed_by__id",
+                "reviewed_by__first_name",
+                "reviewed_by__last_name",
+                "reviewed_by__email",
+            )
+            .get()
         )
     except (MemberRequest.DoesNotExist, ValueError):
         raise ResourceNotFoundError("Member request not found.")

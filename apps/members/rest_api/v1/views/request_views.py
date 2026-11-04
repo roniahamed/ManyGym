@@ -9,6 +9,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParamet
 from apps.members.selectors import (
     list_member_requests,
     get_member_request_detail,
+    get_member_detail,
 )
 from apps.members.services import (
     create_member_request,
@@ -34,26 +35,70 @@ from common.exceptions import ResourceNotFoundError
 
 
 def _resolve_request_and_gym(request, request_id, gym_id=None):
-    """Resolves target MemberRequest and its Gym seamlessly from URL params or request ID."""
-    has_explicit_gym = bool(
+    """
+    Resolves target MemberRequest and its Gym in a single unified database query.
+    Eliminates redundant Gym resolution queries and preloads user profiles to prevent N+1 queries.
+    """
+    target_gym_id = (
         gym_id
         or request.query_params.get("gym_id")
         or getattr(request, "gym_id", None)
-        or (isinstance(request.data, dict) and request.data.get("gym_id"))
+        or (request.data.get("gym_id") if isinstance(request.data, dict) else None)
     )
-    if has_explicit_gym:
-        gym = resolve_member_gym(request, gym_id=gym_id)
-        member_req = get_member_request_detail(gym=gym, request_id=request_id)
-        return member_req, gym
 
     try:
         from apps.members.models import MemberRequest
-        member_req = (
-            MemberRequest.objects.select_related("gym", "user", "interested_plan", "reviewed_by", "created_member")
-            .get(id=request_id)
+        qs = MemberRequest.objects.select_related(
+            "gym",
+            "user__profile",
+            "interested_plan",
+            "reviewed_by",
+            "created_member",
+        ).only(
+            "id",
+            "gym_id",
+            "user_id",
+            "interested_plan_id",
+            "notes",
+            "status",
+            "rejection_reason",
+            "created_member_id",
+            "reviewed_by_id",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+            "gym__id",
+            "gym__name",
+            "gym__owner_user_id",
+            "gym__timezone",
+            "user__id",
+            "user__first_name",
+            "user__last_name",
+            "user__email",
+            "user__phone",
+            "user__profile__id",
+            "user__profile__user_id",
+            "user__profile__avatar_url",
+            "interested_plan__id",
+            "interested_plan__name",
+            "interested_plan__price",
+            "interested_plan__duration_value",
+            "interested_plan__duration_unit",
+            "interested_plan__plan_type",
+            "reviewed_by__id",
+            "reviewed_by__first_name",
+            "reviewed_by__last_name",
+            "reviewed_by__email",
         )
+        if target_gym_id:
+            uuid.UUID(str(target_gym_id))
+            member_req = qs.get(id=request_id, gym_id=target_gym_id)
+        else:
+            member_req = qs.get(id=request_id)
+
+        request._resolved_gym = member_req.gym
         return member_req, member_req.gym
-    except (MemberRequest.DoesNotExist, ValueError):
+    except (MemberRequest.DoesNotExist, ValueError, AttributeError):
         raise ResourceNotFoundError("Member request not found.")
 
 
@@ -218,7 +263,8 @@ class MemberRequestAcceptView(APIView):
             internal_notes=data.get("internal_notes"),
         )
 
-        member_detail = MemberDetailSerializer(member)
+        member_dossier = get_member_detail(member_id=member.id, gym=gym)
+        member_detail = MemberDetailSerializer(member_dossier)
         return Response(
             {
                 "message": "Member request accepted and member successfully enrolled.",

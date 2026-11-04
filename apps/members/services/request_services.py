@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 
@@ -275,10 +275,6 @@ def accept_member_request(
 
     applicant = member_request.user
 
-    # Invariant: User must not already be an enrolled member
-    if Member.objects.filter(gym=gym, user=applicant).exclude(joining_status="removed").exists():
-        raise ResourceConflictError("This user is already an active member of this gym.")
-
     # 1. Demographic data resolution
     fn_clean = (first_name.strip() if first_name else "") or (applicant.first_name.strip() if applicant.first_name else "") or "Member"
     ln_clean = (last_name.strip() if last_name else "") or (applicant.last_name.strip() if applicant.last_name else "") or "-"
@@ -287,14 +283,26 @@ def accept_member_request(
     if not email_clean or "@" not in email_clean:
         raise DomainValidationError("A valid email address is required to enroll a member.")
 
-    if Member.objects.filter(gym=gym, email=email_clean).exclude(joining_status="removed").exists():
+    # Unified single query checking both user and email conflicts
+    conflict_member = (
+        Member.objects.filter(gym=gym)
+        .filter(models.Q(user=applicant) | models.Q(email=email_clean))
+        .exclude(joining_status="removed")
+        .only("id", "user_id", "email")
+        .first()
+    )
+    if conflict_member:
+        if conflict_member.user_id == applicant.id:
+            raise ResourceConflictError("This user is already an active member of this gym.")
         raise ResourceConflictError(f"A member with email '{email_clean}' already exists in this gym.")
 
     # 2. Trainer assignment validation
     trainer_assignment = None
     if assigned_trainer_id:
         try:
-            trainer_assignment = GymStaffAssignment.objects.select_related("user").get(
+            trainer_assignment = GymStaffAssignment.objects.select_related("user").only(
+                "id", "gym_id", "user_id", "status", "user__id", "user__first_name", "user__last_name"
+            ).get(
                 id=assigned_trainer_id,
                 gym=gym,
                 status=StaffStatus.ACTIVE,
@@ -303,7 +311,12 @@ def accept_member_request(
             raise DomainValidationError("Assigned trainer does not exist or is not an active staff member of this gym.")
 
     # 3. Resolve profile photo
-    user_avatar = getattr(applicant, "avatar_url", None) or getattr(applicant, "profile_photo_url", None)
+    user_avatar = getattr(applicant, "avatar_url", None)
+    if not user_avatar:
+        profile = getattr(applicant, "profile", None)
+        if profile:
+            user_avatar = getattr(profile, "avatar_url", None)
+
     resolved_photo = process_member_profile_photo(
         photo_file=profile_photo,
         photo_url=profile_photo_url or user_avatar,
@@ -347,13 +360,16 @@ def accept_member_request(
     except ValidationError as exc:
         raise DomainValidationError(str(exc))
 
-    # 6. Initialize subscription if plan specified
+    # 6. Initialize subscription if plan specified (reuse preloaded plan if IDs match)
     target_plan_id = plan_id or (member_request.interested_plan_id if member_request.interested_plan else None)
     if target_plan_id:
-        try:
-            plan = MembershipPlan.objects.get(id=target_plan_id, gym=gym)
-        except MembershipPlan.DoesNotExist:
-            raise DomainValidationError("The selected membership plan does not exist in this gym.")
+        if member_request.interested_plan and member_request.interested_plan.id == target_plan_id:
+            plan = member_request.interested_plan
+        else:
+            try:
+                plan = MembershipPlan.objects.get(id=target_plan_id, gym=gym)
+            except MembershipPlan.DoesNotExist:
+                raise DomainValidationError("The selected membership plan does not exist in this gym.")
 
         sub_start_date = start_date or timezone.now().date()
         create_member_subscription(
@@ -375,14 +391,18 @@ def accept_member_request(
     member_request.reviewed_at = timezone.now()
     member_request.save(update_fields=["status", "created_member", "reviewed_by", "reviewed_at", "updated_at"])
 
-    # 8. Synchronize Lead if exists
+    # 8. Synchronize Lead if exists (project only required columns)
     try:
         from apps.leads.models import Lead
-        lead = Lead.objects.filter(
-            gym=gym,
-            email=email_clean,
-            stage__in=[LeadStageEnum.NEW, LeadStageEnum.CONTACTED, LeadStageEnum.VISIT_TRIAL_BOOKED],
-        ).first()
+        lead = (
+            Lead.objects.filter(
+                gym=gym,
+                email=email_clean,
+                stage__in=[LeadStageEnum.NEW, LeadStageEnum.CONTACTED, LeadStageEnum.VISIT_TRIAL_BOOKED],
+            )
+            .only("id", "stage", "converted_member_id")
+            .first()
+        )
         if lead:
             lead.converted_member = member
             lead.stage = LeadStageEnum.JOINED
