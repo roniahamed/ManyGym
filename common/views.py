@@ -1,3 +1,4 @@
+from rest_framework import serializers
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
@@ -5,6 +6,14 @@ from django.db import connection
 from django.core.cache import cache
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 import time
+
+
+class HealthCheckResponseSerializer(serializers.Serializer):
+    status = serializers.CharField(help_text="Overall system health status ('healthy' or 'unhealthy').")
+    service = serializers.CharField(help_text="Service identifier.")
+    timestamp = serializers.FloatField(help_text="Current Unix timestamp.")
+    components = serializers.DictField(child=serializers.CharField(), help_text="Component statuses.")
+    latency_ms = serializers.FloatField(required=False, help_text="Latency in milliseconds.")
 
 
 class HealthCheckView(APIView):
@@ -17,7 +26,7 @@ class HealthCheckView(APIView):
         summary="Service Health Check",
         description="Verifies the operational status of the Web API, PostgreSQL database, and Redis cache.",
         responses={
-            200: OpenApiResponse(description="All infrastructure components healthy"),
+            200: HealthCheckResponseSerializer,
             503: OpenApiResponse(description="One or more infrastructure services unavailable"),
         },
     )

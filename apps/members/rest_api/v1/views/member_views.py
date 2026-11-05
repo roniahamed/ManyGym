@@ -24,6 +24,7 @@ from apps.members.rest_api.v1.serializers import (
     MemberCreateSerializer,
     MemberUpdateSerializer,
     MemberAcceptInvitationSerializer,
+    MemberMetricsSerializer,
 )
 from apps.members.rest_api.v1.views.base_views import (
     resolve_member_gym,
@@ -319,7 +320,7 @@ class MemberMetricsView(APIView):
         summary="Get Member Directory Metrics",
         description="Returns total members, joined count, invited count, active subscriptions, unpaid count, and total revenue.",
         responses={
-            status.HTTP_200_OK: OpenApiResponse(description="Aggregated member and subscription metrics."),
+            status.HTTP_200_OK: MemberMetricsSerializer,
         },
     )
     def get(self, request):

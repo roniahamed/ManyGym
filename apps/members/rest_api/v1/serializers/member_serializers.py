@@ -252,3 +252,16 @@ class MemberAcceptInvitationSerializer(serializers.Serializer):
             raise serializers.ValidationError({"token": "Invitation token is required."})
         attrs["token"] = tok
         return attrs
+
+
+class MemberMetricsSerializer(serializers.Serializer):
+    """
+    Response schema for member directory and subscription ledger metrics.
+    """
+    total_members = serializers.IntegerField(help_text="Total members enrolled in gym.")
+    joined_members = serializers.IntegerField(help_text="Count of members with joined status.")
+    invited_members = serializers.IntegerField(help_text="Count of members with pending invitation.")
+    active_subscriptions = serializers.IntegerField(help_text="Count of currently active member subscriptions.")
+    unpaid_subscriptions = serializers.IntegerField(help_text="Count of unpaid subscriptions.")
+    fully_paid_subscriptions = serializers.IntegerField(help_text="Count of fully paid subscriptions.")
+    total_revenue = serializers.FloatField(help_text="Cumulative revenue amount from member payments.")

@@ -4,6 +4,7 @@ from apps.members.rest_api.v1.serializers.member_serializers import (
     MemberCreateSerializer,
     MemberUpdateSerializer,
     MemberAcceptInvitationSerializer,
+    MemberMetricsSerializer,
 )
 from apps.members.rest_api.v1.serializers.subscription_serializers import (
     MemberExtraAmenitySerializer,

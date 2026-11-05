@@ -105,8 +105,15 @@ class GymPostCreateSerializer(serializers.Serializer):
         default=PostPrivacyEnum.PUBLIC,
     )
     media_items = MediaItemInputSerializer(many=True, required=False, default=list)
+    files = serializers.ListField(
+        child=serializers.FileField(),
+        required=False,
+        write_only=True,
+        help_text="Direct file upload (pictures or videos) in multipart/form-data. Multiple files accepted under 'files', 'media_files', or 'file'.",
+    )
 
     def validate(self, attrs):
+        attrs.pop("files", None)
         content_text = (attrs.get("content_text") or "").strip()
         media_items = attrs.get("media_items") or []
 

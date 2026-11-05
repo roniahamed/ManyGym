@@ -2,7 +2,14 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiExample, OpenApiParameter
+from drf_spectacular.utils import (
+    extend_schema,
+    OpenApiResponse,
+    OpenApiExample,
+    OpenApiParameter,
+    inline_serializer,
+)
+from common.enums import AmenityGroupEnum
 
 from apps.amenities.rest_api.v1.serializers import (
     AmenityCatalogItemSerializer,
@@ -28,8 +35,12 @@ class AmenityCatalogListView(APIView):
         description="Returns system-wide master amenities categorized into 7 domains for UI rendering.",
         tags=["Amenities"],
         responses={
-            status.HTTP_200_OK: OpenApiResponse(
-                description="Master catalog grouped by domain category."
+            status.HTTP_200_OK: inline_serializer(
+                name="MasterAmenityCatalogResponse",
+                fields={
+                    label: AmenityCatalogItemSerializer(many=True)
+                    for _, label in AmenityGroupEnum.choices
+                },
             ),
         },
     )
