@@ -18,6 +18,20 @@ from common.serializers import (
 )
 
 
+class MembershipPlanMetricsSerializer(serializers.Serializer):
+    total_plans = serializers.IntegerField(help_text="Total number of plans.")
+    active_plans = serializers.IntegerField(help_text="Number of active plans.")
+    draft_plans = serializers.IntegerField(help_text="Number of draft plans.")
+    archived_plans = serializers.IntegerField(help_text="Number of archived plans.")
+    time_based_plans = serializers.IntegerField(help_text="Number of time-based plans.")
+    session_based_plans = serializers.IntegerField(help_text="Number of session-based plans.")
+    avg_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    min_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    max_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    avg_time_based_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    avg_session_based_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+
+
 class MembershipPlanListSerializer(serializers.ModelSerializer):
     """
     Summary view of a membership plan for directory listings.

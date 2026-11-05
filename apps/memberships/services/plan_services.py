@@ -305,7 +305,7 @@ def delete_membership_plan(
 
     if has_subscriptions:
         raise ResourceConflictError(
-            "Cannot delete a membership plan that has member subscription history. Archive the plan instead."
+            "Membership plans with subscription history cannot be deleted; archive the plan to retire it instead."
         )
 
     if plan.plan_status != PlanStatusEnum.DRAFT:

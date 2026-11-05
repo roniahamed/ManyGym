@@ -3,6 +3,7 @@ from apps.memberships.rest_api.v1.serializers.amenities_serializers import (
     PlanSyncAmenitiesSerializer,
 )
 from apps.memberships.rest_api.v1.serializers.plan_serializers import (
+    MembershipPlanMetricsSerializer,
     MembershipPlanListSerializer,
     MembershipPlanDetailSerializer,
     MembershipPlanCreateSerializer,
@@ -13,6 +14,7 @@ from apps.memberships.rest_api.v1.serializers.plan_serializers import (
 __all__ = [
     "PlanIncludedAmenitySerializer",
     "PlanSyncAmenitiesSerializer",
+    "MembershipPlanMetricsSerializer",
     "MembershipPlanListSerializer",
     "MembershipPlanDetailSerializer",
     "MembershipPlanCreateSerializer",

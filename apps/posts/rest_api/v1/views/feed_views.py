@@ -35,6 +35,7 @@ class GymFeedView(APIView):
     List gym community feed posts or publish a new post with text and media.
     """
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    pagination_class = StandardResultsSetPagination
 
     def get_permissions(self):
         if self.request.method == "POST":
@@ -44,9 +45,9 @@ class GymFeedView(APIView):
     @extend_schema(
         tags=["Community Feed"],
         summary="List Gym Community Feed",
-        description="Retrieves community posts for a gym. Unauthenticated guests and non-members see only public posts; verified members and staff see both public and members_only posts.",
+        description="Retrieves community posts for a gym or public posts globally when gym_id is omitted. Unauthenticated guests and non-members see only public posts; verified members and staff see both public and members_only posts.",
         parameters=[
-            OpenApiParameter(name="gym_id", type=str, location=OpenApiParameter.QUERY, required=True),
+            OpenApiParameter(name="gym_id", type=str, location=OpenApiParameter.QUERY, required=False),
             OpenApiParameter(name="privacy", type=str, location=OpenApiParameter.QUERY, required=False),
             OpenApiParameter(name="search", type=str, location=OpenApiParameter.QUERY, required=False),
             OpenApiParameter(name="page", type=int, location=OpenApiParameter.QUERY, required=False),
@@ -59,8 +60,17 @@ class GymFeedView(APIView):
         },
     )
     def get(self, request):
-        gym = resolve_post_gym(request)
-        is_member_or_staff = check_user_is_member_or_staff(request, gym)
+        gym_id = (
+            request.query_params.get("gym_id")
+            or getattr(request, "gym_id", None)
+            or (request.data.get("gym_id") if isinstance(request.data, dict) else None)
+        )
+        if gym_id:
+            gym = resolve_post_gym(request)
+            is_member_or_staff = check_user_is_member_or_staff(request, gym)
+        else:
+            gym = None
+            is_member_or_staff = False
 
         privacy = request.query_params.get("privacy")
         search = request.query_params.get("search")
@@ -73,13 +83,13 @@ class GymFeedView(APIView):
             requesting_user=request.user,
         )
 
-        paginator = StandardResultsSetPagination()
+        paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
         if page is not None:
-            serializer = GymPostListSerializer(page, many=True)
+            serializer = GymPostListSerializer(page, many=True, context={"request": request})
             return paginator.get_paginated_response(serializer.data)
 
-        serializer = GymPostListSerializer(qs, many=True)
+        serializer = GymPostListSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
@@ -105,8 +115,12 @@ class GymFeedView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Gather any uploaded files (support multipart 'media_files' or 'files')
-        media_files = request.FILES.getlist("media_files") or request.FILES.getlist("files")
+        # Gather any uploaded files (support multipart 'media_files', 'files', or singular 'file')
+        media_files = (
+            request.FILES.getlist("media_files")
+            or request.FILES.getlist("files")
+            or request.FILES.getlist("file")
+        )
 
         post = create_post(
             gym=gym,
@@ -118,7 +132,7 @@ class GymFeedView(APIView):
         )
 
         loaded_post = get_post_detail(gym=gym, post_id=post.id, is_member_or_staff=True)
-        return Response(GymPostDetailSerializer(loaded_post).data, status=status.HTTP_201_CREATED)
+        return Response(GymPostDetailSerializer(loaded_post, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
 class GymPostDetailView(APIView):
@@ -154,7 +168,7 @@ class GymPostDetailView(APIView):
             is_member_or_staff=is_member_or_staff,
             requesting_user=request.user,
         )
-        return Response(GymPostDetailSerializer(post).data, status=status.HTTP_200_OK)
+        return Response(GymPostDetailSerializer(post, context={"request": request}).data, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["Community Feed"],

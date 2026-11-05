@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Dict, Any, Optional, Iterator
-from django.db.models import Count, Prefetch
+from django.db.models import Count, Prefetch, Q
 from apps.gyms.models import Gym, GymLocation, GymOpeningHours
 from apps.access_control.models import GymStaffAssignment
 
@@ -9,12 +9,14 @@ def stream_accessible_gyms_for_user(user) -> Iterator[Dict[str, Any]]:
     """
     Generator streaming all gyms accessible to the user (owned or staff),
     yielding items lazily with optimized queries, field projections, and iterator().
+    Excludes soft-deleted gyms (Issue 31).
     """
     seen_gym_ids = set()
 
-    # 1. Owned gyms
+    # 1. Owned gyms (exclude soft-deleted)
     owned_gyms = (
         Gym.objects.filter(owner_user=user)
+        .filter(Q(settings__isnull=True) | Q(settings__is_deleted=False))
         .only("id", "name", "primary_type", "profile_picture_url")
         .distinct()
         .iterator()
@@ -31,12 +33,13 @@ def stream_accessible_gyms_for_user(user) -> Iterator[Dict[str, Any]]:
             "profile_picture_url": g.profile_picture_url,
         }
 
-    # 2. Staff assignments
+    # 2. Staff assignments (exclude soft-deleted)
     staff_assignments = (
         GymStaffAssignment.objects.filter(
             user=user,
             status="active",
         )
+        .filter(Q(gym__settings__isnull=True) | Q(gym__settings__is_deleted=False))
         .select_related("gym", "role")
         .only(
             "id",

@@ -5,8 +5,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiExample
 
+from common.pagination import StandardResultsSetPagination
 from apps.gyms.rest_api.v1.views import check_gym_permission
 from apps.memberships.rest_api.v1.serializers import (
+    MembershipPlanMetricsSerializer,
     MembershipPlanListSerializer,
     MembershipPlanDetailSerializer,
     MembershipPlanCreateSerializer,
@@ -31,6 +33,7 @@ class MembershipPlanListCreateView(APIView):
     List and create membership plans for a gym.
     """
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
 
     @extend_schema(
         tags=["Membership Plans"],
@@ -260,7 +263,9 @@ class MembershipPlanMetricsView(APIView):
         summary="Get Gym Plan Pricing Metrics",
         description="Returns aggregated metrics (count by status, count by type, average, min, max price) in a single database query.",
         responses={
-            status.HTTP_200_OK: OpenApiResponse(description="Aggregated pricing and count metrics."),
+            status.HTTP_200_OK: MembershipPlanMetricsSerializer,
+            status.HTTP_401_UNAUTHORIZED: ErrorDetailSerializer,
+            status.HTTP_403_FORBIDDEN: ErrorDetailSerializer,
         },
     )
     def get(self, request):

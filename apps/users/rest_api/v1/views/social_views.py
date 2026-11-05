@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiTypes
 
 from apps.users.rest_api.v1.serializers import (
     FollowUserItemSerializer,
@@ -189,6 +189,15 @@ Unified single endpoint to follow or unfollow any public User or Gym.
 - Pass `target_id` (or `id`) in JSON body (`{"target_id": "<uuid>"}`) or directly in URL path (`/api/v1/follows/<target_id>/`).
 - Optional `action`: `"follow"` (default) or `"unfollow"`.
         """,
+        parameters=[
+            OpenApiParameter(
+                name="target_id",
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="UUID of target User or Gym to unfollow (if not supplied in URL path or JSON request body).",
+            ),
+        ],
         request=FollowActionSerializer,
         responses={
             201: OpenApiResponse(response=FollowActionResponseSerializer, description="Successfully followed target."),
@@ -238,6 +247,15 @@ Parameters can be sent via:
 2. JSON body: `{"target_id": "<uuid>"}`
 3. Query param: `?target_id=<uuid>`
         """,
+        parameters=[
+            OpenApiParameter(
+                name="target_id",
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="UUID of target User or Gym to unfollow (if not supplied in URL path or JSON request body).",
+            ),
+        ],
         request=FollowActionSerializer,
         responses={
             200: OpenApiResponse(response=FollowActionResponseSerializer, description="Successfully unfollowed target."),

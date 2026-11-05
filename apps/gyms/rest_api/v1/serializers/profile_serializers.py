@@ -1,6 +1,7 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from apps.gyms.models import Gym, GymLocation, GymOpeningHours
-from common.serializers import StrictCharField, StrictBooleanField, validate_uploaded_image
+from common.serializers import StrictCharField, StrictBooleanField, validate_uploaded_image, AbsoluteMediaURLField
 from common.enums import GymTypeEnum, GymGenderRequired
 
 
@@ -135,6 +136,8 @@ class GymLocationUpdateSerializer(serializers.Serializer):
 
 
 class GymDetailSerializer(serializers.ModelSerializer):
+    profile_picture_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    cover_photo_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
     location = serializers.SerializerMethodField()
     opening_hours_count = serializers.SerializerMethodField()
     gallery_count = serializers.SerializerMethodField()
@@ -161,6 +164,7 @@ class GymDetailSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    @extend_schema_field(GymLocationSerializer)
     def get_location(self, obj):
         prefetched = getattr(obj, "prefetched_primary_locations", None)
         if prefetched is not None:
@@ -169,12 +173,14 @@ class GymDetailSerializer(serializers.ModelSerializer):
             primary_loc = obj.locations.filter(is_primary=True).first()
         return GymLocationSerializer(primary_loc).data if primary_loc else None
 
+    @extend_schema_field(serializers.IntegerField)
     def get_opening_hours_count(self, obj):
         count = getattr(obj, "annotated_opening_hours_count", None)
         if count is not None:
             return count
         return obj.opening_hours.count()
 
+    @extend_schema_field(serializers.IntegerField)
     def get_gallery_count(self, obj):
         count = getattr(obj, "annotated_gallery_count", None)
         if count is not None:

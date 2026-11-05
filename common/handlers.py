@@ -61,6 +61,16 @@ def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
 
     if response is not None:
+        # Check if the requested HTTP method is actually not allowed on this view
+        # Addresses Issue 18: HTTP Method check takes precedence over Authentication/Permission
+        view = context.get("view") if context else None
+        req = context.get("request") if context else None
+        if view and req and hasattr(view, "http_method_names") and req.method:
+            allowed_methods = [m.upper() for m in view.http_method_names if hasattr(view, m.lower())]
+            if allowed_methods and req.method.upper() not in allowed_methods:
+                response.status_code = status.HTTP_405_METHOD_NOT_ALLOWED
+                response["Allow"] = ", ".join(allowed_methods)
+
         code = "API_ERROR"
         message = "An error occurred while processing your request."
         details = {}

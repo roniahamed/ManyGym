@@ -267,8 +267,18 @@ Dynamically switches user operational context between Personal Profile and speci
         context_type = serializer.validated_data["context_type"]
         gym_id = serializer.validated_data.get("gym_id")
 
+        # Capture caller's previous access token to invalidate on successful switch (Issue 17b)
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        prev_access_token = ""
+        if auth_header.startswith("Bearer "):
+            prev_access_token = auth_header.split(" ", 1)[1].strip()
+        elif hasattr(request, "auth") and request.auth:
+            prev_access_token = str(request.auth)
+
         if context_type == TokenContextType.GYM:
             tokens = switch_gym_context(user=request.user, gym_id=str(gym_id))
+            if prev_access_token:
+                revoke_token(access_token_str=prev_access_token)
             gym_obj = tokens.pop("_gym", None)
             is_deactivated = False
             if gym_obj:
@@ -295,6 +305,8 @@ Dynamically switches user operational context between Personal Profile and speci
             )
         else:
             tokens = switch_to_personal_context(user=request.user)
+            if prev_access_token:
+                revoke_token(access_token_str=prev_access_token)
             return Response(
                 {
                     "message": f"Successfully switched to {context_type} context.",

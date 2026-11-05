@@ -43,6 +43,7 @@ class MemberListCreateView(APIView):
     """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    pagination_class = StandardResultsSetPagination
 
     @extend_schema(
         tags=["Members & Lifecycle"],

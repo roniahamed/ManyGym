@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from apps.posts.models import GymPost, GymPostMedia
 from common.enums import PostPrivacyEnum, MediaTypeEnum
-from common.serializers import validate_uploaded_image
+from common.serializers import validate_uploaded_image, AbsoluteMediaURLField
 
 
 class StrictCharField(serializers.CharField):
@@ -15,8 +15,10 @@ class StrictCharField(serializers.CharField):
 
 
 class GymPostMediaSerializer(serializers.ModelSerializer):
-    media_url = serializers.CharField(source="resolved_media_url", read_only=True)
-    thumbnail_url = serializers.CharField(source="resolved_thumbnail_url", read_only=True)
+    media_url = AbsoluteMediaURLField(source="resolved_media_url", read_only=True)
+    thumbnail_url = AbsoluteMediaURLField(source="resolved_thumbnail_url", read_only=True)
+    original_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    optimized_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
 
     class Meta:
         model = GymPostMedia
@@ -25,6 +27,7 @@ class GymPostMediaSerializer(serializers.ModelSerializer):
             "post_id",
             "media_url",
             "original_url",
+            "optimized_url",
             "media_type",
             "thumbnail_url",
             "file_size_bytes",

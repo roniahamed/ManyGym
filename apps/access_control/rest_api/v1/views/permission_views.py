@@ -2,9 +2,10 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiExample, inline_serializer
 
 from apps.access_control.selectors import list_permissions_by_topic
+from apps.access_control.rest_api.v1.serializers import PermissionSerializer
 from common.serializers import ErrorDetailSerializer
 
 
@@ -33,6 +34,20 @@ Retrieves all system permission scopes organized across the 9 core topics:
         """,
         responses={
             200: OpenApiResponse(
+                response=inline_serializer(
+                    name="SystemPermissionsByTopicResponse",
+                    fields={
+                        "Studio": PermissionSerializer(many=True),
+                        "Reports": PermissionSerializer(many=True),
+                        "Gym Profile": PermissionSerializer(many=True),
+                        "Subscription Plans": PermissionSerializer(many=True),
+                        "Members": PermissionSerializer(many=True),
+                        "Leads": PermissionSerializer(many=True),
+                        "Trainers": PermissionSerializer(many=True),
+                        "Routine Templates": PermissionSerializer(many=True),
+                        "People & Roles": PermissionSerializer(many=True),
+                    },
+                ),
                 description="Permissions grouped by topic dictionary.",
                 examples=[
                     OpenApiExample(

@@ -5,7 +5,7 @@ from rest_framework import serializers
 
 from apps.members.models import Member, MemberSubscription
 from apps.members.rest_api.v1.serializers.subscription_serializers import MemberSubscriptionDetailSerializer
-from common.enums import PaymentMethodEnum, MembershipStatusEnum
+from common.enums import PaymentMethodEnum, MembershipStatusEnum, MemberJoiningStatus
 from common.serializers import (
     StrictCharField,
     StrictUUIDField,
@@ -228,6 +228,11 @@ class MemberUpdateSerializer(serializers.Serializer):
     emergency_contact_relationship = StrictCharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     assigned_trainer_id = StrictUUIDField(required=False, allow_null=True)
     internal_notes = StrictCharField(required=False, allow_blank=True, allow_null=True)
+    joining_status = serializers.ChoiceField(
+        choices=MemberJoiningStatus.values,
+        required=False,
+        help_text="Member joining lifecycle status ('sent_invitation' or 'joined').",
+    )
 
     def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
         validate_uploaded_image(attrs.get("profile_photo"), field_name="profile_photo")

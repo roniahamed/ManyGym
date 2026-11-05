@@ -289,14 +289,37 @@ def invite_staff_member(gym: Gym, user_email: str, role_id: str) -> GymStaffAssi
 
 
 @transaction.atomic
-def update_staff_status(assignment: GymStaffAssignment, status_value: str) -> GymStaffAssignment:
+def update_staff_status(
+    assignment: GymStaffAssignment,
+    status_value: Optional[str] = None,
+    role_id: Optional[uuid.UUID] = None,
+) -> GymStaffAssignment:
     """
-    Updates the status (active/inactive) of a staff assignment.
+    Updates the status (active/inactive) and/or assigned role of a staff assignment.
     """
-    if status_value not in [StaffStatus.ACTIVE, StaffStatus.INACTIVE]:
-        raise DomainValidationError(f"Invalid staff status: '{status_value}'.")
-    assignment.status = status_value
-    assignment.save(update_fields=["status"])
+    update_fields = []
+    log_details = []
+
+    if status_value is not None:
+        if status_value not in [StaffStatus.ACTIVE, StaffStatus.INACTIVE]:
+            raise DomainValidationError(f"Invalid staff status: '{status_value}'.")
+        assignment.status = status_value
+        update_fields.append("status")
+        log_details.append(f"status to {status_value}")
+
+    if role_id is not None:
+        try:
+            role = Role.objects.get(id=role_id)
+        except (Role.DoesNotExist, ValueError):
+            raise ResourceNotFoundError(f"Role '{role_id}' not found.")
+        if role.gym_id is not None and role.gym_id != assignment.gym_id:
+            raise DomainValidationError("Role does not belong to this gym.")
+        assignment.role = role
+        update_fields.append("role")
+        log_details.append(f"role to {role.name}")
+
+    if update_fields:
+        assignment.save(update_fields=update_fields)
 
     try:
         from apps.gyms.services.admin_log_services import log_admin_action
@@ -304,9 +327,9 @@ def update_staff_status(assignment: GymStaffAssignment, status_value: str) -> Gy
         user_name = f"{assignment.user.first_name} {assignment.user.last_name}".strip() or assignment.user.email
         log_admin_action(
             gym=assignment.gym,
-            action="Updated staff status",
+            action="Updated staff assignment",
             action_type=AdminLogActionType.UPDATE_STAFF_ROLE,
-            details=f"Updated status of {user_name} to {status_value}",
+            details=f"Updated {', '.join(log_details)} for {user_name}",
             category=AdminLogCategory.ACCESS_CONTROL,
             target_type="staff",
             target_id=str(assignment.id),

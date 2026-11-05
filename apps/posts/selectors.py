@@ -56,7 +56,7 @@ def check_posts_age_restriction(gym: Gym, requesting_user=None) -> bool:
 
 
 def list_gym_feed(
-    gym: Gym,
+    gym: Optional[Gym] = None,
     is_member_or_staff: bool = False,
     privacy_filter: Optional[str] = None,
     search: Optional[str] = None,
@@ -64,11 +64,35 @@ def list_gym_feed(
 ) -> QuerySet[GymPost]:
     """
     Returns an optimized queryset of gym community posts ordered by publication time.
+    If gym is None, returns public posts from all published, active gyms (Global Public Feed).
     Visibility Rules:
     - Public / Unauthenticated / Non-member users see ONLY public posts.
     - Verified Members and Staff see both public and members_only posts.
     - Respects GymBlockedUser, gym lifecycle (deleted/deactivated), and posts_age_restriction.
     """
+    if gym is None:
+        qs = (
+            GymPost.objects.filter(
+                privacy=PostPrivacyEnum.PUBLIC,
+                gym__settings__is_deleted=False,
+                gym__settings__is_published=True,
+                gym__settings__is_deactivated=False,
+            )
+            .select_related("gym", "author_user__profile")
+            .prefetch_related("media_attachments")
+            .annotate(media_count=Count("media_attachments", distinct=True))
+            .order_by("-published_at")
+        )
+        if search:
+            search_clean = search.strip()
+            qs = qs.filter(
+                Q(content_text__icontains=search_clean)
+                | Q(author_user__first_name__icontains=search_clean)
+                | Q(author_user__last_name__icontains=search_clean)
+                | Q(gym__name__icontains=search_clean)
+            ).distinct()
+        return qs
+
     setting = getattr(gym, "settings", None)
     if not setting:
         setting = GymSetting.objects.filter(gym=gym).first()

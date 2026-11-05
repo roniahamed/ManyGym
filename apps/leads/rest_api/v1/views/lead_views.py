@@ -38,6 +38,7 @@ class LeadListCreateView(APIView):
     List prospective leads and create new leads in the CRM sales pipeline.
     """
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
 
     @extend_schema(
         tags=["Leads CRM"],

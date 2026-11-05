@@ -72,5 +72,11 @@ class InviteStaffSerializer(serializers.Serializer):
 
 
 class UpdateStaffStatusSerializer(serializers.Serializer):
-    status = serializers.ChoiceField(choices=StaffStatus.choices, required=True)
+    status = serializers.ChoiceField(choices=StaffStatus.choices, required=False, help_text="Staff assignment status ('active' or 'inactive').")
+    role_id = StrictUUIDField(required=False, help_text="New Role UUID to reassign to this staff member.")
+
+    def validate(self, attrs):
+        if not attrs.get("status") and not attrs.get("role_id"):
+            raise serializers.ValidationError("At least one of 'status' or 'role_id' must be provided.")
+        return attrs
 

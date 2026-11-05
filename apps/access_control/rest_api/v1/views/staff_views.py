@@ -185,7 +185,11 @@ When `inactive`, the staff member can no longer switch context to this gym or ex
 
         serializer = UpdateStaffStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        updated = update_staff_status(assignment, serializer.validated_data["status"])
+        updated = update_staff_status(
+            assignment,
+            status_value=serializer.validated_data.get("status"),
+            role_id=serializer.validated_data.get("role_id"),
+        )
         updated = (
             GymStaffAssignment.objects.select_related("gym", "user__profile", "role__gym")
             .prefetch_related("role__permissions")

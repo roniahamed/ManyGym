@@ -1,12 +1,16 @@
 from rest_framework import serializers
 from apps.gyms.models import GymGallery
-from common.serializers import StrictCharField
+from common.serializers import StrictCharField, AbsoluteMediaURLField
 from common.enums import GalleryCategoryEnum, MediaTypeEnum
 
 
 class GymGalleryItemSerializer(serializers.ModelSerializer):
-    resolved_media_url = serializers.CharField(read_only=True)
-    resolved_thumbnail_url = serializers.CharField(read_only=True)
+    media_url = AbsoluteMediaURLField(read_only=True)
+    original_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    optimized_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    thumbnail_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    resolved_media_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    resolved_thumbnail_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
 
     class Meta:
         model = GymGallery

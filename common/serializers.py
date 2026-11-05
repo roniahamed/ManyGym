@@ -44,6 +44,23 @@ class StrictDecimalField(serializers.DecimalField):
         return super().to_internal_value(data)
 
 
+class AbsoluteMediaURLField(serializers.CharField):
+    """
+    Serializer field that ensures relative media URLs (e.g. /media/...) are resolved
+    to fully-qualified absolute URLs using the incoming request context.
+    """
+    def to_representation(self, value):
+        val = super().to_representation(value)
+        if not val or not isinstance(val, str):
+            return val
+        if val.startswith("http://") or val.startswith("https://") or val.startswith("data:"):
+            return val
+        request = self.context.get("request") if hasattr(self, "context") and self.context else None
+        if request is not None and hasattr(request, "build_absolute_uri"):
+            return request.build_absolute_uri(val)
+        return val
+
+
 def validate_uploaded_image(
     file: Any,
     max_size_mb: int = 10,
@@ -93,15 +110,15 @@ class OptimizedMediaSerializerMixin(serializers.Serializer):
     """
     Reusable serializer mixin exposing background media optimization fields.
     """
-    original_url = serializers.CharField(read_only=True, allow_null=True)
-    optimized_url = serializers.CharField(read_only=True, allow_null=True)
-    thumbnail_url = serializers.CharField(read_only=True, allow_null=True)
+    original_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    optimized_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    thumbnail_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
     processing_status = serializers.CharField(read_only=True)
     width = serializers.IntegerField(read_only=True, allow_null=True)
     height = serializers.IntegerField(read_only=True, allow_null=True)
     size_bytes = serializers.IntegerField(read_only=True, allow_null=True)
     optimized_size_bytes = serializers.IntegerField(read_only=True, allow_null=True)
-    resolved_media_url = serializers.CharField(read_only=True, allow_null=True)
-    resolved_thumbnail_url = serializers.CharField(read_only=True, allow_null=True)
+    resolved_media_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
+    resolved_thumbnail_url = AbsoluteMediaURLField(read_only=True, allow_null=True)
 
 

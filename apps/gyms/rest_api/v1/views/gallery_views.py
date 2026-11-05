@@ -41,7 +41,7 @@ class GymGalleryListView(APIView):
         check_gym_permission(request, gym, required_scope="gym_profile:read")
         category = request.query_params.get("category")
         items = list_gallery_items(str(gym.id), category=category)
-        return Response(GymGalleryItemSerializer(items, many=True).data, status=status.HTTP_200_OK)
+        return Response(GymGalleryItemSerializer(items, many=True, context={"request": request}).data, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["Gym Profile & Multi-Location"],
@@ -76,7 +76,7 @@ class GymGalleryListView(APIView):
         serializer = GymGalleryCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         item = add_gallery_item(gym=gym, **serializer.validated_data)
-        return Response(GymGalleryItemSerializer(item).data, status=status.HTTP_201_CREATED)
+        return Response(GymGalleryItemSerializer(item, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
 class GymGalleryReorderView(APIView):

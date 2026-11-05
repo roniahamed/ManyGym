@@ -344,7 +344,7 @@ def delete_member(member_id: uuid.UUID, gym: Gym) -> None:
 
     has_payments = MemberPayment.objects.filter(member_subscription__member=member).exists()
     if has_payments:
-        raise ResourceConflictError("Cannot permanently delete a member with payment ledger history. Cancel their active subscription instead.")
+        raise ResourceConflictError("Members with payment history cannot be deleted; cancel their subscription to end it instead.")
 
     try:
         from apps.gyms.services.admin_log_services import log_admin_action

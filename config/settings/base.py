@@ -16,7 +16,7 @@ env = environ.Env(
 # Read .env file if present
 env_file = BASE_DIR / ".env"
 if env_file.exists():
-    environ.Env.read_env(env_file, overwrite=True)
+    environ.Env.read_env(env_file, overwrite=False)
 
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
@@ -202,6 +202,9 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    "PREPROCESSING_HOOKS": [
+        "common.spectacular_hooks.deduplicate_schema_endpoints",
+    ],
 }
 
 # Celery Configuration
