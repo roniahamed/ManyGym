@@ -654,9 +654,9 @@ class TestPostEdgeCasesAndBoundaries:
         res = owner_client.get("/api/v1/posts/?gym_id=not-a-valid-uuid")
         assert res.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
 
-        # Missing gym_id entirely
+        # Missing gym_id entirely (public feed access returns 200 OK after Issue 7 fix)
         res = owner_client.get("/api/v1/posts/")
-        assert res.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+        assert res.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND, status.HTTP_200_OK)
 
         # Malformed post_id in URL path
         res = owner_client.get(f"/api/v1/posts/invalid-post-uuid/?gym_id={gym.id}")

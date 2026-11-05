@@ -422,6 +422,7 @@ def test_switch_context_query_efficiency(django_assert_num_queries):
     2. Gym lookup (select_related owner)
     3. Distinct scopes values_list query
     4. AuthToken insert
+    5. Prior access token revocation (Issue 17b security fix)
     (Skips redundant staff assignment search since user is owner).
     """
     owner = User.objects.create_user(
@@ -438,7 +439,7 @@ def test_switch_context_query_efficiency(django_assert_num_queries):
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {base_tokens['access']}")
 
-    with django_assert_num_queries(4):
+    with django_assert_num_queries(5):
         res = client.post(
             reverse("switch-context"),
             {"context_type": TokenContextType.GYM, "gym_id": str(gym.id)},
