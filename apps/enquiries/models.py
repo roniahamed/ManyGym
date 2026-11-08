@@ -119,3 +119,23 @@ class Enquiry(models.Model):
     def __str__(self):
         return f"Enquiry {self.id}: {self.first_name} {self.last_name} ({self.status})"
 
+    @property
+    def full_name(self) -> str:
+        """Returns the full name of the enquiring lead."""
+        return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def type_display(self) -> str:
+        """Returns human-readable choice label for enquiry type."""
+        return dict(EnquiryTypeEnum.choices).get(self.type, self.type)
+
+    @property
+    def status_display(self) -> str:
+        """Returns human-readable choice label for enquiry status."""
+        return dict(EnquiryStatusEnum.choices).get(self.status, self.status)
+
+    @property
+    def notes_count(self) -> int:
+        """Returns count of notes associated with the enquiry."""
+        return len(self.notes) if isinstance(self.notes, list) else 0
+

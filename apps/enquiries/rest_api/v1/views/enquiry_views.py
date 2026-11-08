@@ -1,11 +1,9 @@
-import uuid
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 
-from apps.enquiries.models import Enquiry
 from apps.enquiries.selectors import list_enquiries, get_enquiry_by_id
 from apps.enquiries.services import (
     create_enquiry,
@@ -22,7 +20,6 @@ from apps.enquiries.rest_api.v1.serializers import (
 )
 from common.pagination import StandardResultsSetPagination
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
-from common.exceptions import DomainValidationError
 
 
 class EnquiryListCreateView(APIView):
@@ -105,7 +102,7 @@ Creates a new Enquiry record.
             email=data.get("email"),
             phone=data.get("phone"),
             manygym_user=data.get("manygym_user_id"),
-            gym=data.get("gym_id"),
+            gym=data["gym_id"],
             type=data.get("type"),
             status=data.get("status"),
             summary=data.get("summary", ""),
@@ -197,4 +194,3 @@ class EnquiryAddNoteView(APIView):
         note_text = serializer.validated_data["note_text"]
         updated = add_enquiry_note(enquiry_id=enquiry_id, note_text=note_text)
         return Response(EnquiryDetailSerializer(updated).data, status=status.HTTP_200_OK)
-

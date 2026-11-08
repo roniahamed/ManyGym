@@ -1,7 +1,8 @@
 import uuid
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union
 from django.db import transaction
 from django.utils import timezone
+
 from apps.enquiries.models import Enquiry
 from apps.users.models import User
 from apps.gyms.models import Gym
@@ -15,15 +16,18 @@ def create_enquiry(
     last_name: str,
     email: Optional[str] = None,
     phone: Optional[str] = None,
-    manygym_user: Optional[Any] = None,
-    gym: Optional[Any] = None,
+    manygym_user: Optional[Union[User, str, uuid.UUID]] = None,
+    gym: Optional[Union[Gym, str, uuid.UUID]] = None,
     type: str = EnquiryTypeEnum.GENERAL_INQUIRY,
     status: str = EnquiryStatusEnum.NEW,
     summary: str = "",
     notes: Optional[List[str]] = None,
 ) -> Enquiry:
     """
-    Creates a new Enquiry record after enforcing mandatory contact and field validations.
+    Creates a new Enquiry entity in the database after validating domain invariants:
+    - gym is mandatory.
+    - first_name and last_name are mandatory.
+    - either email or phone is mandatory.
     """
     first_name = (first_name or "").strip()
     last_name = (last_name or "").strip()
@@ -37,33 +41,32 @@ def create_enquiry(
     if not email and not phone:
         raise DomainValidationError("Either Email or Phone number is mandatory.")
 
-    # Resolve Manygym User if provided
+    # 1. Resolve Gym (Mandatory)
+    if not gym:
+        raise DomainValidationError("Gym is required.")
+
+    if isinstance(gym, Gym):
+        gym_obj = gym
+    else:
+        try:
+            gym_uuid = gym if isinstance(gym, uuid.UUID) else uuid.UUID(str(gym))
+            gym_obj = Gym.objects.get(id=gym_uuid)
+        except (ValueError, TypeError, AttributeError, Gym.DoesNotExist):
+            raise DomainValidationError("Invalid gym ID or gym does not exist.")
+
+    # 2. Resolve Manygym User (Optional)
     user_obj = None
     if manygym_user:
         if isinstance(manygym_user, User):
             user_obj = manygym_user
         else:
             try:
-                user_uuid = uuid.UUID(str(manygym_user))
+                user_uuid = manygym_user if isinstance(manygym_user, uuid.UUID) else uuid.UUID(str(manygym_user))
                 user_obj = User.objects.get(id=user_uuid)
             except (ValueError, TypeError, AttributeError, User.DoesNotExist):
                 raise DomainValidationError("Invalid manygym_user ID.")
 
-    # Resolve Gym (Mandatory)
-    if not gym:
-        raise DomainValidationError("Gym is required.")
-
-    gym_obj = None
-    if isinstance(gym, Gym):
-        gym_obj = gym
-    else:
-        try:
-            gym_uuid = uuid.UUID(str(gym))
-            gym_obj = Gym.objects.get(id=gym_uuid)
-        except (ValueError, TypeError, AttributeError, Gym.DoesNotExist):
-            raise DomainValidationError("Invalid gym ID or gym does not exist.")
-
-    # Normalize type & status
+    # 3. Normalize type & status
     normalized_type = str(type).strip().upper() if type else EnquiryTypeEnum.GENERAL_INQUIRY
     valid_types = {c.value for c in EnquiryTypeEnum}
     if normalized_type not in valid_types:
@@ -79,7 +82,7 @@ def create_enquiry(
     }
     normalized_status = status_alias_map.get(normalized_status, EnquiryStatusEnum.NEW)
 
-    clean_notes = []
+    clean_notes: List[str] = []
     if notes is not None:
         if isinstance(notes, list):
             clean_notes = [str(n).strip() for n in notes if str(n).strip()]
@@ -103,8 +106,8 @@ def create_enquiry(
 
 @transaction.atomic
 def update_enquiry(
-    enquiry_id,
-    gym_id: Optional[str] = None,
+    enquiry_id: Union[str, uuid.UUID],
+    gym_id: Optional[Union[str, uuid.UUID]] = None,
     **kwargs: Any,
 ) -> Enquiry:
     """
@@ -113,7 +116,7 @@ def update_enquiry(
     from apps.enquiries.selectors import get_enquiry_by_id
 
     enquiry = get_enquiry_by_id(enquiry_id=enquiry_id, gym_id=gym_id)
-    update_fields = []
+    update_fields: List[str] = []
 
     if "first_name" in kwargs and kwargs["first_name"] is not None:
         fn = str(kwargs["first_name"]).strip()
@@ -139,7 +142,7 @@ def update_enquiry(
         enquiry.phone = ph
         update_fields.append("phone")
 
-    # Re-validate that either email or phone is present
+    # Re-validate that either email or phone remains present
     if "email" in kwargs or "phone" in kwargs:
         if not enquiry.email and not enquiry.phone:
             raise DomainValidationError("Either Email or Phone number is mandatory.")
@@ -148,7 +151,7 @@ def update_enquiry(
         uid = kwargs["manygym_user_id"]
         if uid:
             try:
-                user_uuid = uuid.UUID(str(uid))
+                user_uuid = uid if isinstance(uid, uuid.UUID) else uuid.UUID(str(uid))
                 enquiry.manygym_user = User.objects.get(id=user_uuid)
             except (ValueError, TypeError, AttributeError, User.DoesNotExist):
                 raise DomainValidationError("Invalid manygym_user ID.")
@@ -159,7 +162,7 @@ def update_enquiry(
     if "gym_id" in kwargs and kwargs["gym_id"] is not None:
         gid = kwargs["gym_id"]
         try:
-            gym_uuid = uuid.UUID(str(gid))
+            gym_uuid = gid if isinstance(gid, uuid.UUID) else uuid.UUID(str(gid))
             enquiry.gym = Gym.objects.get(id=gym_uuid)
             update_fields.append("gym")
         except (ValueError, TypeError, AttributeError, Gym.DoesNotExist):
@@ -218,9 +221,12 @@ def update_enquiry(
 
 
 @transaction.atomic
-def delete_enquiry(enquiry_id, gym_id: Optional[str] = None) -> bool:
+def delete_enquiry(
+    enquiry_id: Union[str, uuid.UUID],
+    gym_id: Optional[Union[str, uuid.UUID]] = None,
+) -> bool:
     """
-    Deletes an Enquiry entity.
+    Permanently deletes an Enquiry entity.
     """
     from apps.enquiries.selectors import get_enquiry_by_id
 
@@ -230,12 +236,15 @@ def delete_enquiry(enquiry_id, gym_id: Optional[str] = None) -> bool:
 
 
 @transaction.atomic
-def add_enquiry_note(enquiry_id, note_text: str, gym_id: Optional[str] = None) -> Enquiry:
+def add_enquiry_note(
+    enquiry_id: Union[str, uuid.UUID],
+    note_text: str,
+    gym_id: Optional[Union[str, uuid.UUID]] = None,
+) -> Enquiry:
     """
-    Appends a new note string to an existing enquiry.
+    Appends a new text note string to an existing enquiry.
     """
     note_clean = (note_text or "").strip()
     if not note_clean:
         raise DomainValidationError("Note text cannot be empty.")
     return update_enquiry(enquiry_id=enquiry_id, gym_id=gym_id, append_note=note_clean)
-

@@ -1,17 +1,20 @@
 from rest_framework import serializers
+
 from apps.enquiries.models import Enquiry
 from apps.users.models import User
+from apps.gyms.models import Gym
 from common.enums import EnquiryTypeEnum, EnquiryStatusEnum
 from common.serializers import StrictCharField, StrictUUIDField
 
 
 class ManygymUserSlimSerializer(serializers.ModelSerializer):
     """
-    Representation serializer for Manygym User object inside Enquiry.
+    Slim representation serializer for Manygym registered User object.
     """
     user_id = serializers.UUIDField(source="id", read_only=True)
     full_name = serializers.SerializerMethodField()
     avatar_url = serializers.SerializerMethodField()
+    phone = serializers.CharField(read_only=True)
 
     class Meta:
         model = User
@@ -22,6 +25,7 @@ class ManygymUserSlimSerializer(serializers.ModelSerializer):
             "last_name",
             "full_name",
             "avatar_url",
+            "phone",
         ]
 
     def get_full_name(self, obj):
@@ -34,10 +38,13 @@ class ManygymUserSlimSerializer(serializers.ModelSerializer):
 
 class EnquiryListSerializer(serializers.ModelSerializer):
     """
-    Presentation serializer for Enquiry list view.
+    Presentation serializer for Enquiry list and summary views.
     """
     manygym_user = ManygymUserSlimSerializer(read_only=True)
-    gym_id = serializers.UUIDField(read_only=True, allow_null=True)
+    gym_id = serializers.UUIDField(read_only=True)
+    type_display = serializers.CharField(read_only=True)
+    status_display = serializers.CharField(read_only=True)
+    notes_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Enquiry
@@ -47,12 +54,16 @@ class EnquiryListSerializer(serializers.ModelSerializer):
             "manygym_user",
             "first_name",
             "last_name",
+            "full_name",
             "email",
             "phone",
             "type",
+            "type_display",
             "status",
+            "status_display",
             "summary",
             "notes",
+            "notes_count",
             "created_at",
             "updated_at",
         ]
@@ -60,11 +71,14 @@ class EnquiryListSerializer(serializers.ModelSerializer):
 
 class EnquiryDetailSerializer(serializers.ModelSerializer):
     """
-    Presentation serializer for full Enquiry dossier.
+    Presentation serializer for full Enquiry dossier view.
     """
     manygym_user = ManygymUserSlimSerializer(read_only=True)
-    gym_id = serializers.UUIDField(read_only=True, allow_null=True)
+    gym_id = serializers.UUIDField(read_only=True)
     gym_name = serializers.SerializerMethodField()
+    type_display = serializers.CharField(read_only=True)
+    status_display = serializers.CharField(read_only=True)
+    notes_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Enquiry
@@ -75,12 +89,16 @@ class EnquiryDetailSerializer(serializers.ModelSerializer):
             "manygym_user",
             "first_name",
             "last_name",
+            "full_name",
             "email",
             "phone",
             "type",
+            "type_display",
             "status",
+            "status_display",
             "summary",
             "notes",
+            "notes_count",
             "created_at",
             "updated_at",
         ]
@@ -93,14 +111,15 @@ class EnquiryCreateSerializer(serializers.Serializer):
     """
     Validation and deserialization serializer for creating a new Enquiry.
     Enforces mandatory:
+    - gym_id
     - first_name, last_name
     - either email or phone
     """
+    gym_id = StrictUUIDField(required=True, allow_null=False, help_text="Gym UUID to which this enquiry belongs (required).")
     first_name = StrictCharField(max_length=100, help_text="First name (required).")
     last_name = StrictCharField(max_length=100, help_text="Last name (required).")
     email = serializers.EmailField(required=False, allow_null=True, allow_blank=True, max_length=255)
     phone = StrictCharField(required=False, allow_null=True, allow_blank=True, max_length=50)
-    gym_id = StrictUUIDField(required=True, allow_null=False, help_text="Gym UUID to which this enquiry belongs (required).")
     manygym_user_id = StrictUUIDField(required=False, allow_null=True, help_text="Optional Manygym registered User ID.")
     type = StrictCharField(required=False, default=EnquiryTypeEnum.GENERAL_INQUIRY)
     status = StrictCharField(required=False, default=EnquiryStatusEnum.NEW)
@@ -111,6 +130,13 @@ class EnquiryCreateSerializer(serializers.Serializer):
         default=list,
         help_text="Optional list of text notes.",
     )
+
+    def validate_gym_id(self, value):
+        if not value:
+            raise serializers.ValidationError("gym_id is required.")
+        if not Gym.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Gym with the provided ID does not exist.")
+        return value
 
     def validate_first_name(self, value):
         if not value or not str(value).strip():
@@ -134,14 +160,6 @@ class EnquiryCreateSerializer(serializers.Serializer):
         val = str(value).strip()
         return val if val else None
 
-    def validate_gym_id(self, value):
-        if not value:
-            raise serializers.ValidationError("gym_id is required.")
-        from apps.gyms.models import Gym
-        if not Gym.objects.filter(id=value).exists():
-            raise serializers.ValidationError("Gym with the provided ID does not exist.")
-        return value
-
     def validate_type(self, value):
         if not value:
             return EnquiryTypeEnum.GENERAL_INQUIRY
@@ -156,15 +174,15 @@ class EnquiryCreateSerializer(serializers.Serializer):
         if not value:
             return EnquiryStatusEnum.NEW
         val = str(value).strip().upper()
-        alias_map = {
+        status_alias_map = {
             "BOOK": EnquiryStatusEnum.BOOKED,
             "BOOKED": EnquiryStatusEnum.BOOKED,
             "VISIT": EnquiryStatusEnum.VISIT,
             "CONTACTED": EnquiryStatusEnum.CONTACTED,
             "NEW": EnquiryStatusEnum.NEW,
         }
-        if val in alias_map:
-            return alias_map[val]
+        if val in status_alias_map:
+            return status_alias_map[val]
         raise serializers.ValidationError(
             f"Invalid status '{value}'. Choices: {', '.join([c.value for c in EnquiryStatusEnum])}"
         )
@@ -201,6 +219,13 @@ class EnquiryUpdateSerializer(serializers.Serializer):
         help_text="Convenience parameter to append a single new text note.",
     )
 
+    def validate_gym_id(self, value):
+        if value is None:
+            raise serializers.ValidationError("gym_id cannot be null.")
+        if not Gym.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Gym with the provided ID does not exist.")
+        return value
+
     def validate_first_name(self, value):
         if not value or not str(value).strip():
             raise serializers.ValidationError("First name cannot be empty or whitespace.")
@@ -223,14 +248,6 @@ class EnquiryUpdateSerializer(serializers.Serializer):
         val = str(value).strip()
         return val if val else None
 
-    def validate_gym_id(self, value):
-        if not value:
-            raise serializers.ValidationError("gym_id is required.")
-        from apps.gyms.models import Gym
-        if not Gym.objects.filter(id=value).exists():
-            raise serializers.ValidationError("Gym with the provided ID does not exist.")
-        return value
-
     def validate_type(self, value):
         if not value:
             return value
@@ -245,15 +262,15 @@ class EnquiryUpdateSerializer(serializers.Serializer):
         if not value:
             return value
         val = str(value).strip().upper()
-        alias_map = {
+        status_alias_map = {
             "BOOK": EnquiryStatusEnum.BOOKED,
             "BOOKED": EnquiryStatusEnum.BOOKED,
             "VISIT": EnquiryStatusEnum.VISIT,
             "CONTACTED": EnquiryStatusEnum.CONTACTED,
             "NEW": EnquiryStatusEnum.NEW,
         }
-        if val in alias_map:
-            return alias_map[val]
+        if val in status_alias_map:
+            return status_alias_map[val]
         raise serializers.ValidationError(
             f"Invalid status '{value}'. Choices: {', '.join([c.value for c in EnquiryStatusEnum])}"
         )
@@ -278,7 +295,6 @@ class EnquiryAddNoteSerializer(serializers.Serializer):
     def validate(self, attrs):
         text = attrs.get("note") or attrs.get("note_text")
         if not text or not str(text).strip():
-            raise serializers.ValidationError("Note text is required.")
+            raise serializers.ValidationError("Note text cannot be empty.")
         attrs["note_text"] = str(text).strip()
         return attrs
-
