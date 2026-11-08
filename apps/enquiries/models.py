@@ -13,14 +13,12 @@ class Enquiry(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    # Multi-tenancy & Gym context (optional, enables gym dashboard scoping)
+    # Multi-tenancy & Gym context (mandatory, scopes enquiry to a gym)
     gym = models.ForeignKey(
         "gyms.Gym",
         on_delete=models.CASCADE,
-        null=True,
-        blank=True,
         related_name="enquiries",
-        help_text="Associated gym entity if scoped to a gym.",
+        help_text="Associated gym entity to which this enquiry belongs.",
     )
 
     # Manygym user (object) (optional)
@@ -107,6 +105,8 @@ class Enquiry(models.Model):
 
     def clean(self):
         super().clean()
+        if not getattr(self, "gym_id", None) and not getattr(self, "gym", None):
+            raise ValidationError("Associated Gym is mandatory.")
         has_email = bool(self.email and str(self.email).strip())
         has_phone = bool(self.phone and str(self.phone).strip())
         if not has_email and not has_phone:

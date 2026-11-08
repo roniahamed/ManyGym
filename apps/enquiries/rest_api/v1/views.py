@@ -84,8 +84,8 @@ Retrieves paginated enquiries with comprehensive filtering by status, type, gym_
         description="""
 ### Summary
 Creates a new Enquiry record.
-- **Mandatory**: `first_name`, `last_name`, and **either** `email` or `phone`.
-- **Optional**: `manygym_user_id`, `gym_id`, `type`, `status`, `summary`, `notes`.
+- **Mandatory**: `gym_id`, `first_name`, `last_name`, and **either** `email` or `phone`.
+- **Optional**: `manygym_user_id`, `type`, `status`, `summary`, `notes`.
         """,
         request=EnquiryCreateSerializer,
         responses={

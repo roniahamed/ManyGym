@@ -49,17 +49,19 @@ def create_enquiry(
             except (ValueError, TypeError, AttributeError, User.DoesNotExist):
                 raise DomainValidationError("Invalid manygym_user ID.")
 
-    # Resolve Gym if provided
+    # Resolve Gym (Mandatory)
+    if not gym:
+        raise DomainValidationError("Gym is required.")
+
     gym_obj = None
-    if gym:
-        if isinstance(gym, Gym):
-            gym_obj = gym
-        else:
-            try:
-                gym_uuid = uuid.UUID(str(gym))
-                gym_obj = Gym.objects.get(id=gym_uuid)
-            except (ValueError, TypeError, AttributeError, Gym.DoesNotExist):
-                raise DomainValidationError("Invalid gym ID.")
+    if isinstance(gym, Gym):
+        gym_obj = gym
+    else:
+        try:
+            gym_uuid = uuid.UUID(str(gym))
+            gym_obj = Gym.objects.get(id=gym_uuid)
+        except (ValueError, TypeError, AttributeError, Gym.DoesNotExist):
+            raise DomainValidationError("Invalid gym ID or gym does not exist.")
 
     # Normalize type & status
     normalized_type = str(type).strip().upper() if type else EnquiryTypeEnum.GENERAL_INQUIRY
@@ -153,6 +155,15 @@ def update_enquiry(
         else:
             enquiry.manygym_user = None
         update_fields.append("manygym_user")
+
+    if "gym_id" in kwargs and kwargs["gym_id"] is not None:
+        gid = kwargs["gym_id"]
+        try:
+            gym_uuid = uuid.UUID(str(gid))
+            enquiry.gym = Gym.objects.get(id=gym_uuid)
+            update_fields.append("gym")
+        except (ValueError, TypeError, AttributeError, Gym.DoesNotExist):
+            raise DomainValidationError("Invalid gym ID or gym does not exist.")
 
     if "type" in kwargs and kwargs["type"] is not None:
         raw_type = str(kwargs["type"]).strip().upper()

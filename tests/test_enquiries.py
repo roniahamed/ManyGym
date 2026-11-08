@@ -66,8 +66,9 @@ class TestEnquiryCRUDLifecycle:
     - Delete an Enquiry
     """
 
-    def test_create_enquiry_with_email_only(self, auth_client):
+    def test_create_enquiry_with_email_only(self, auth_client, gym_instance):
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "Sarah",
             "last_name": "Connor",
             "email": "sarah.connor@example.com",
@@ -83,6 +84,7 @@ class TestEnquiryCRUDLifecycle:
         assert data["last_name"] == "Connor"
         assert data["email"] == "sarah.connor@example.com"
         assert data["phone"] is None
+        assert data["gym_id"] == str(gym_instance.id)
         assert data["type"] == "GENERAL_INQUIRY"
         assert data["status"] == "NEW"
         assert data["summary"] == "Inquiring about personal trainer availability on weekends."
@@ -93,9 +95,11 @@ class TestEnquiryCRUDLifecycle:
         enquiry = Enquiry.objects.get(id=data["id"])
         assert enquiry.first_name == "Sarah"
         assert enquiry.email == "sarah.connor@example.com"
+        assert enquiry.gym_id == gym_instance.id
 
-    def test_create_enquiry_with_phone_only(self, auth_client):
+    def test_create_enquiry_with_phone_only(self, auth_client, gym_instance):
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "David",
             "last_name": "Beckham",
             "phone": "+1234567890",
@@ -108,7 +112,31 @@ class TestEnquiryCRUDLifecycle:
         data = res.json()
         assert data["phone"] == "+1234567890"
         assert data["email"] is None
+        assert data["gym_id"] == str(gym_instance.id)
         assert data["type"] == "CALLBACK_REQUEST"
+
+    def test_create_enquiry_missing_gym_id_fails(self, auth_client):
+        payload = {
+            "first_name": "Sarah",
+            "last_name": "Connor",
+            "email": "sarah.connor@example.com",
+        }
+        res = auth_client.post("/api/v1/enquiries/", data=payload, format="json")
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        data = res.json()
+        assert "gym_id" in str(data).lower()
+
+    def test_create_enquiry_nonexistent_gym_id_fails(self, auth_client):
+        payload = {
+            "gym_id": str(uuid.uuid4()),
+            "first_name": "Sarah",
+            "last_name": "Connor",
+            "email": "sarah.connor@example.com",
+        }
+        res = auth_client.post("/api/v1/enquiries/", data=payload, format="json")
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        data = res.json()
+        assert "gym" in str(data).lower()
 
     def test_create_enquiry_with_manygym_user_and_gym(self, auth_client, registered_user, gym_instance):
         payload = {
@@ -134,8 +162,9 @@ class TestEnquiryCRUDLifecycle:
         assert data["gym_name"] == "Powerhouse Gym"
         assert len(data["notes"]) == 2
 
-    def test_create_enquiry_missing_both_email_and_phone_fails(self, auth_client):
+    def test_create_enquiry_missing_both_email_and_phone_fails(self, auth_client, gym_instance):
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "No",
             "last_name": "Contact",
             "summary": "This must fail because contact info is absent.",
@@ -145,11 +174,11 @@ class TestEnquiryCRUDLifecycle:
         data = res.json()
         assert "email" in str(data).lower() or "phone" in str(data).lower()
 
-    def test_create_enquiry_missing_first_or_last_name_fails(self, auth_client):
+    def test_create_enquiry_missing_first_or_last_name_fails(self, auth_client, gym_instance):
         # Missing last_name
         res1 = auth_client.post(
             "/api/v1/enquiries/",
-            data={"first_name": "OnlyFirst", "email": "only@example.com"},
+            data={"gym_id": str(gym_instance.id), "first_name": "OnlyFirst", "email": "only@example.com"},
             format="json",
         )
         assert res1.status_code == status.HTTP_400_BAD_REQUEST
@@ -157,16 +186,17 @@ class TestEnquiryCRUDLifecycle:
         # Missing first_name
         res2 = auth_client.post(
             "/api/v1/enquiries/",
-            data={"last_name": "OnlyLast", "email": "only@example.com"},
+            data={"gym_id": str(gym_instance.id), "last_name": "OnlyLast", "email": "only@example.com"},
             format="json",
         )
         assert res2.status_code == status.HTTP_400_BAD_REQUEST
 
-    def test_list_enquiries_with_filters_and_search(self, auth_client):
+    def test_list_enquiries_with_filters_and_search(self, auth_client, gym_instance):
         # Create 3 enquiries with distinct types and statuses
         auth_client.post(
             "/api/v1/enquiries/",
             data={
+                "gym_id": str(gym_instance.id),
                 "first_name": "Alice",
                 "last_name": "Smith",
                 "email": "alice.smith@example.com",
@@ -179,6 +209,7 @@ class TestEnquiryCRUDLifecycle:
         auth_client.post(
             "/api/v1/enquiries/",
             data={
+                "gym_id": str(gym_instance.id),
                 "first_name": "Bob",
                 "last_name": "Jones",
                 "phone": "+4412345678",
@@ -191,6 +222,7 @@ class TestEnquiryCRUDLifecycle:
         auth_client.post(
             "/api/v1/enquiries/",
             data={
+                "gym_id": str(gym_instance.id),
                 "first_name": "Charlie",
                 "last_name": "Brown",
                 "email": "charlie@example.com",
@@ -233,10 +265,11 @@ class TestEnquiryCRUDLifecycle:
         assert len(items_search) == 1
         assert items_search[0]["first_name"] == "Alice"
 
-    def test_view_enquiry_by_id(self, auth_client):
+    def test_view_enquiry_by_id(self, auth_client, gym_instance):
         create_res = auth_client.post(
             "/api/v1/enquiries/",
             data={
+                "gym_id": str(gym_instance.id),
                 "first_name": "Emily",
                 "last_name": "Clark",
                 "email": "emily@example.com",
@@ -257,10 +290,11 @@ class TestEnquiryCRUDLifecycle:
         res = auth_client.get(f"/api/v1/enquiries/{random_id}/")
         assert res.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_update_enquiry_status_and_fields(self, auth_client):
+    def test_update_enquiry_status_and_fields(self, auth_client, gym_instance):
         create_res = auth_client.post(
             "/api/v1/enquiries/",
             data={
+                "gym_id": str(gym_instance.id),
                 "first_name": "Marcus",
                 "last_name": "Aurelius",
                 "email": "marcus@rome.com",
@@ -304,10 +338,11 @@ class TestEnquiryCRUDLifecycle:
         )
         assert res_booked.json()["status"] == "BOOKED"
 
-    def test_add_note_via_dedicated_endpoint(self, auth_client):
+    def test_add_note_via_dedicated_endpoint(self, auth_client, gym_instance):
         create_res = auth_client.post(
             "/api/v1/enquiries/",
             data={
+                "gym_id": str(gym_instance.id),
                 "first_name": "Rachel",
                 "last_name": "Green",
                 "email": "rachel@friends.com",
@@ -325,10 +360,11 @@ class TestEnquiryCRUDLifecycle:
         assert len(note_res.json()["notes"]) == 1
         assert note_res.json()["notes"][0] == "Prefers morning Zumba classes."
 
-    def test_delete_enquiry_success(self, auth_client):
+    def test_delete_enquiry_success(self, auth_client, gym_instance):
         create_res = auth_client.post(
             "/api/v1/enquiries/",
             data={
+                "gym_id": str(gym_instance.id),
                 "first_name": "Temporary",
                 "last_name": "Enquiry",
                 "email": "temp@example.com",

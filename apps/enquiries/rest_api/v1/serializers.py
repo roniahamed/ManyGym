@@ -100,8 +100,8 @@ class EnquiryCreateSerializer(serializers.Serializer):
     last_name = StrictCharField(max_length=100, help_text="Last name (required).")
     email = serializers.EmailField(required=False, allow_null=True, allow_blank=True, max_length=255)
     phone = StrictCharField(required=False, allow_null=True, allow_blank=True, max_length=50)
+    gym_id = StrictUUIDField(required=True, allow_null=False, help_text="Gym UUID to which this enquiry belongs (required).")
     manygym_user_id = StrictUUIDField(required=False, allow_null=True, help_text="Optional Manygym registered User ID.")
-    gym_id = StrictUUIDField(required=False, allow_null=True, help_text="Optional Gym UUID.")
     type = StrictCharField(required=False, default=EnquiryTypeEnum.GENERAL_INQUIRY)
     status = StrictCharField(required=False, default=EnquiryStatusEnum.NEW)
     summary = StrictCharField(required=False, allow_blank=True, default="")
@@ -133,6 +133,14 @@ class EnquiryCreateSerializer(serializers.Serializer):
             return None
         val = str(value).strip()
         return val if val else None
+
+    def validate_gym_id(self, value):
+        if not value:
+            raise serializers.ValidationError("gym_id is required.")
+        from apps.gyms.models import Gym
+        if not Gym.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Gym with the provided ID does not exist.")
+        return value
 
     def validate_type(self, value):
         if not value:
@@ -177,6 +185,7 @@ class EnquiryUpdateSerializer(serializers.Serializer):
     last_name = StrictCharField(required=False, max_length=100)
     email = serializers.EmailField(required=False, allow_null=True, allow_blank=True, max_length=255)
     phone = StrictCharField(required=False, allow_null=True, allow_blank=True, max_length=50)
+    gym_id = StrictUUIDField(required=False, allow_null=False)
     manygym_user_id = StrictUUIDField(required=False, allow_null=True)
     type = StrictCharField(required=False)
     status = StrictCharField(required=False)
@@ -213,6 +222,14 @@ class EnquiryUpdateSerializer(serializers.Serializer):
             return None
         val = str(value).strip()
         return val if val else None
+
+    def validate_gym_id(self, value):
+        if not value:
+            raise serializers.ValidationError("gym_id is required.")
+        from apps.gyms.models import Gym
+        if not Gym.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Gym with the provided ID does not exist.")
+        return value
 
     def validate_type(self, value):
         if not value:

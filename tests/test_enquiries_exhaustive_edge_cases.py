@@ -252,20 +252,21 @@ class TestBoundaryAndLengthEdgeCases:
         res2 = auth_client.post("/api/v1/enquiries/", data={"first_name": "Valid", "last_name": bad_str, "email": "v@v.com"}, format="json")
         assert res2.status_code == status.HTTP_400_BAD_REQUEST
 
-    def test_exact_100_char_boundary_names(self, auth_client):
+    def test_exact_100_char_boundary_names(self, auth_client, gym_instance):
         # 100 chars -> OK
         name_100 = "A" * 100
-        res = auth_client.post("/api/v1/enquiries/", data={"first_name": name_100, "last_name": name_100, "email": "boundary@test.com"}, format="json")
+        res = auth_client.post("/api/v1/enquiries/", data={"gym_id": str(gym_instance.id), "first_name": name_100, "last_name": name_100, "email": "boundary@test.com"}, format="json")
         assert res.status_code == status.HTTP_201_CREATED
 
         # 101 chars -> Fails (max_length=100)
         name_101 = "A" * 101
-        res_fail = auth_client.post("/api/v1/enquiries/", data={"first_name": name_101, "last_name": "Valid", "email": "boundary2@test.com"}, format="json")
+        res_fail = auth_client.post("/api/v1/enquiries/", data={"gym_id": str(gym_instance.id), "first_name": name_101, "last_name": "Valid", "email": "boundary2@test.com"}, format="json")
         assert res_fail.status_code == status.HTTP_400_BAD_REQUEST
 
-    def test_extremely_long_strings_handling(self, auth_client):
+    def test_extremely_long_strings_handling(self, auth_client, gym_instance):
         huge_text = "Gym enquiry details: " + ("lorem ipsum " * 1000)  # > 10,000 chars
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "Long",
             "last_name": "Summary",
             "email": "long@summary.com",
@@ -276,8 +277,9 @@ class TestBoundaryAndLengthEdgeCases:
         assert res.status_code == status.HTTP_201_CREATED
         assert len(res.json()["summary"]) > 5000
 
-    def test_notes_with_whitespace_item_rejected(self, auth_client):
+    def test_notes_with_whitespace_item_rejected(self, auth_client, gym_instance):
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "Test",
             "last_name": "Notes",
             "email": "test@notes.com",
@@ -298,18 +300,28 @@ class TestMissingAndMalformedFields:
         res = auth_client.post("/api/v1/enquiries/", data={}, format="json")
         assert res.status_code == status.HTTP_400_BAD_REQUEST
 
-    def test_missing_contact_info_returns_400(self, auth_client):
+    def test_missing_gym_id_returns_400(self, auth_client):
+        res = auth_client.post(
+            "/api/v1/enquiries/",
+            data={"first_name": "No", "last_name": "Gym", "email": "nogym@example.com"},
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "gym_id" in str(res.json()).lower()
+
+    def test_missing_contact_info_returns_400(self, auth_client, gym_instance):
         # Neither email nor phone
         res = auth_client.post(
             "/api/v1/enquiries/",
-            data={"first_name": "No", "last_name": "Contact"},
+            data={"gym_id": str(gym_instance.id), "first_name": "No", "last_name": "Contact"},
             format="json",
         )
         assert res.status_code == status.HTTP_400_BAD_REQUEST
         assert "Either Email or Phone" in str(res.json())
 
-    def test_100_garbage_fields_ignored_safely(self, auth_client):
+    def test_100_garbage_fields_ignored_safely(self, auth_client, gym_instance):
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "Clean",
             "last_name": "Fields",
             "email": "clean@fields.com",
@@ -369,8 +381,9 @@ class TestFormatSpecificInvalidInputs:
         res = auth_client.post("/api/v1/enquiries/", data=payload, format="json")
         assert res.status_code == status.HTTP_400_BAD_REQUEST
 
-    def test_nonexistent_manygym_user_id_rejected(self, auth_client):
+    def test_nonexistent_manygym_user_id_rejected(self, auth_client, gym_instance):
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "Ghost",
             "last_name": "User",
             "email": "ghost@user.com",
@@ -462,13 +475,14 @@ class TestSecurityAndInjection:
         "1' or '1'='1",
         "admin'--",
     ])
-    def test_sql_injection_payloads_in_search_and_fields(self, auth_client, sqli_payload):
+    def test_sql_injection_payloads_in_search_and_fields(self, auth_client, gym_instance, sqli_payload):
         # 1. Search param injection
         res_search = auth_client.get(f"/api/v1/enquiries/?search={sqli_payload}")
         assert res_search.status_code == status.HTTP_200_OK
 
         # 2. In summary and notes fields
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "Test",
             "last_name": "SQLi",
             "email": "sqli@test.com",
@@ -485,8 +499,9 @@ class TestSecurityAndInjection:
         "javascript:alert(document.cookie)",
         "<svg onload=alert(1)>",
     ])
-    def test_xss_payloads_stored_safely_without_crash(self, auth_client, xss_payload):
+    def test_xss_payloads_stored_safely_without_crash(self, auth_client, gym_instance, xss_payload):
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "XSS",
             "last_name": "Tester",
             "email": "xss@test.com",
@@ -498,9 +513,10 @@ class TestSecurityAndInjection:
         data = res.json()
         assert data["summary"] == xss_payload
 
-    def test_unicode_and_emojis_in_fields(self, auth_client):
+    def test_unicode_and_emojis_in_fields(self, auth_client, gym_instance):
         unicode_summary = "🏋️‍♂️ Fitness inquiry: مرحبا بكم / 健身房咨询 / Z̸a̸l̸g̸o̸"
         payload = {
+            "gym_id": str(gym_instance.id),
             "first_name": "Ünïcödë",
             "last_name": "Tëstër",
             "email": "unicode@test.com",
