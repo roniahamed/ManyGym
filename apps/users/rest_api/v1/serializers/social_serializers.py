@@ -35,6 +35,64 @@ class UserFollowActionResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
     is_following = serializers.BooleanField()
     target_user_id = serializers.UUIDField()
+    target_user_name = serializers.CharField(required=False, allow_null=True)
+    status = serializers.CharField(required=False, default="following")
+    request_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+class FollowRequestUserInfoSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField()
+    email = serializers.EmailField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    full_name = serializers.CharField()
+    avatar_url = serializers.CharField(allow_null=True, required=False)
+
+
+class FollowRequestItemSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    status = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    requester = serializers.SerializerMethodField()
+    target_user = serializers.SerializerMethodField()
+
+    def get_requester(self, obj):
+        user = obj.requester
+        profile = getattr(user, "profile", None)
+        fn = getattr(user, "first_name", "") or ""
+        ln = getattr(user, "last_name", "") or ""
+        return {
+            "user_id": user.id,
+            "email": user.email,
+            "first_name": fn,
+            "last_name": ln,
+            "full_name": f"{fn} {ln}".strip(),
+            "avatar_url": getattr(profile, "avatar_url", None),
+        }
+
+    def get_target_user(self, obj):
+        user = obj.target_user
+        profile = getattr(user, "profile", None)
+        fn = getattr(user, "first_name", "") or ""
+        ln = getattr(user, "last_name", "") or ""
+        return {
+            "user_id": user.id,
+            "email": user.email,
+            "first_name": fn,
+            "last_name": ln,
+            "full_name": f"{fn} {ln}".strip(),
+            "avatar_url": getattr(profile, "avatar_url", None),
+        }
+
+
+class FollowRequestActionResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    status = serializers.CharField()
+    request_id = serializers.UUIDField(required=False, allow_null=True)
+    is_following = serializers.BooleanField(default=False)
+    target_user_id = serializers.UUIDField(required=False, allow_null=True)
+    requester_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class FollowActionSerializer(serializers.Serializer):
@@ -88,6 +146,8 @@ class FollowActionResponseSerializer(serializers.Serializer):
     target_type = serializers.CharField()
     target_id = serializers.UUIDField()
     target_name = serializers.CharField(allow_null=True, required=False)
+    status = serializers.CharField(required=False, default="following")
+    request_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class UnifiedTargetFollowersResponseSerializer(serializers.Serializer):

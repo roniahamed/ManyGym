@@ -21,6 +21,10 @@ from apps.users.rest_api.v1.views.social_views import (
     UserFollowersListView,
     UserFollowingListView,
     UnifiedFollowView,
+    UserFollowRequestListView,
+    UserFollowRequestAcceptView,
+    UserFollowRequestRejectView,
+    UserFollowRequestCancelView,
 )
 from apps.users.rest_api.v1.views.settings_views import (
     UserSettingsView,
@@ -54,6 +58,10 @@ __all__ = [
     "UserFollowersListView",
     "UserFollowingListView",
     "UnifiedFollowView",
+    "UserFollowRequestListView",
+    "UserFollowRequestAcceptView",
+    "UserFollowRequestRejectView",
+    "UserFollowRequestCancelView",
     "resolve_target_entity",
     "ResolvedTarget",
     "UserSettingsView",

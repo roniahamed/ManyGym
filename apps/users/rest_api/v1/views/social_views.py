@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiTypes
 
+from apps.users.models import UserFollowRequest
 from apps.users.rest_api.v1.serializers import (
     FollowUserItemSerializer,
     UserFollowActionResponseSerializer,
@@ -12,10 +13,15 @@ from apps.users.rest_api.v1.serializers import (
     FollowActionResponseSerializer,
     UnifiedTargetFollowersResponseSerializer,
     UnifiedFollowedAccountsResponseSerializer,
+    FollowRequestItemSerializer,
+    FollowRequestActionResponseSerializer,
 )
 from apps.users.services import (
     follow_user,
     unfollow_user,
+    accept_follow_request,
+    reject_follow_request,
+    cancel_follow_request,
 )
 from apps.gyms.services import (
     follow_gym,
@@ -25,6 +31,10 @@ from apps.users.selectors import (
     list_user_followers,
     list_user_following,
     is_following_user,
+    has_pending_follow_request,
+    list_received_follow_requests,
+    list_sent_follow_requests,
+    get_follow_request_by_id,
     resolve_target_entity,
 )
 from apps.gyms.selectors import (
@@ -60,13 +70,31 @@ class UserFollowToggleView(APIView):
     )
     def post(self, request, user_id):
         follow_obj, created = follow_user(follower=request.user, target_user_id=user_id)
+        if isinstance(follow_obj, UserFollowRequest):
+            status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            message = "Follow request sent successfully." if created else "Follow request already pending."
+            target_user = follow_obj.target_user
+            return Response(
+                {
+                    "message": message,
+                    "is_following": False,
+                    "status": "pending",
+                    "target_user_id": str(user_id),
+                    "target_user_name": f"{target_user.first_name} {target_user.last_name}".strip(),
+                    "request_id": str(follow_obj.id),
+                },
+                status=status_code,
+            )
+
         status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         message = "Successfully followed user." if created else "Already following user."
         return Response(
             {
                 "message": message,
                 "is_following": True,
+                "status": "following",
                 "target_user_id": str(user_id),
+                "target_user_name": f"{follow_obj.followed_user.first_name} {follow_obj.followed_user.last_name}".strip(),
             },
             status=status_code,
         )
@@ -405,6 +433,23 @@ Parameters can be sent via:
     def _perform_follow(self, user, target_type: str, target_id):
         if target_type == "user":
             follow_obj, created = follow_user(follower=user, target_user_id=target_id)
+            if isinstance(follow_obj, UserFollowRequest):
+                target_user = follow_obj.target_user
+                target_name = f"{target_user.first_name} {target_user.last_name}".strip()
+                status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+                message = "Follow request sent successfully." if created else "Follow request already pending."
+                return Response(
+                    {
+                        "message": message,
+                        "is_following": False,
+                        "status": "pending",
+                        "target_type": "user",
+                        "target_id": str(getattr(target_id, "id", target_id)),
+                        "target_name": target_name,
+                        "request_id": str(follow_obj.id),
+                    },
+                    status=status_code,
+                )
             target_name = f"{follow_obj.followed_user.first_name} {follow_obj.followed_user.last_name}".strip()
             status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
             message = "Successfully followed user." if created else "Already following user."
@@ -420,6 +465,7 @@ Parameters can be sent via:
             {
                 "message": message,
                 "is_following": True,
+                "status": "following",
                 "target_type": target_type,
                 "target_id": str(getattr(target_id, "id", target_id)),
                 "target_name": target_name,
@@ -445,6 +491,192 @@ Parameters can be sent via:
                 "target_type": target_type,
                 "target_id": str(resolved_uuid),
                 "target_name": None,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class UserFollowRequestListView(APIView):
+    """
+    API endpoint for listing follow requests for the authenticated user.
+    Supports viewing received (incoming) or sent (outgoing) follow requests.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Follow Requests"],
+        summary="List Follow Requests",
+        description="""
+### Summary
+Lists follow requests for the authenticated user.
+- `type=received` (default): lists incoming follow requests sent to you that await your confirmation.
+- `type=sent`: lists outgoing follow requests you sent to other users that await their confirmation.
+- `status=pending` (default): filters by pending status. Pass `status=all` to see full history.
+        """,
+        parameters=[
+            OpenApiParameter(
+                name="type",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Request type: 'received' (default) or 'sent'.",
+            ),
+            OpenApiParameter(
+                name="status",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Status filter: 'pending' (default), 'accepted', 'rejected', 'cancelled', or 'all'.",
+            ),
+            OpenApiParameter(name="page", type=int, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name="page_size", type=int, location=OpenApiParameter.QUERY, required=False),
+        ],
+        responses={
+            200: OpenApiResponse(response=FollowRequestItemSerializer(many=True), description="List of follow requests."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def get(self, request):
+        req_type = request.query_params.get("type", "received").strip().lower()
+        req_status = request.query_params.get("status", "pending").strip().lower()
+
+        if req_type == "sent":
+            qs = list_sent_follow_requests(user=request.user, status=req_status)
+        else:
+            qs = list_received_follow_requests(user=request.user, status=req_status)
+
+        if request.query_params.get("page") or request.query_params.get("page_size"):
+            paginator = StandardResultsSetPagination()
+            page_results = paginator.paginate_queryset(qs, request)
+            serializer = FollowRequestItemSerializer(page_results, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = FollowRequestItemSerializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class UserFollowRequestAcceptView(APIView):
+    """
+    API endpoint for confirming/accepting an incoming follow request.
+    Upon acceptance, the requester becomes a follower of the authenticated user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Follow Requests"],
+        summary="Accept / Confirm Follow Request",
+        description="""
+### Summary
+Confirms and accepts a pending follow request. The requester immediately becomes a follower of the authenticated user.
+Accepts `request_id` or `user_id` in path or body.
+        """,
+        responses={
+            200: OpenApiResponse(response=FollowRequestActionResponseSerializer, description="Follow request accepted successfully."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure or invalid ID."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Pending follow request not found."),
+        },
+    )
+    def post(self, request, request_id=None, user_id=None):
+        target_ident = request_id or user_id or request.data.get("request_id") or request.data.get("user_id")
+        if not target_ident:
+            raise DomainValidationError("Please provide request_id or user_id.")
+
+        follow_obj, req_obj = accept_follow_request(target_user=request.user, identifier=target_ident)
+        return Response(
+            {
+                "message": "Follow request accepted.",
+                "is_following": True,
+                "status": "accepted",
+                "request_id": str(req_obj.id),
+                "requester_id": str(req_obj.requester_id),
+                "target_user_id": str(request.user.id),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class UserFollowRequestRejectView(APIView):
+    """
+    API endpoint for rejecting/declining an incoming follow request.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Follow Requests"],
+        summary="Reject / Decline Follow Request",
+        description="""
+### Summary
+Rejects/declines a pending follow request received by the authenticated user.
+Accepts `request_id` or `user_id` in path or body.
+        """,
+        responses={
+            200: OpenApiResponse(response=FollowRequestActionResponseSerializer, description="Follow request rejected successfully."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure or invalid ID."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Pending follow request not found."),
+        },
+    )
+    def post(self, request, request_id=None, user_id=None):
+        target_ident = request_id or user_id or request.data.get("request_id") or request.data.get("user_id")
+        if not target_ident:
+            raise DomainValidationError("Please provide request_id or user_id.")
+
+        req_obj = reject_follow_request(target_user=request.user, identifier=target_ident)
+        return Response(
+            {
+                "message": "Follow request rejected.",
+                "is_following": False,
+                "status": "rejected",
+                "request_id": str(req_obj.id),
+                "requester_id": str(req_obj.requester_id),
+                "target_user_id": str(request.user.id),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class UserFollowRequestCancelView(APIView):
+    """
+    API endpoint for canceling/withdrawing a pending follow request sent by the authenticated user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Follow Requests"],
+        summary="Cancel / Withdraw Follow Request",
+        description="""
+### Summary
+Cancels/withdraws a pending follow request previously sent by the authenticated user.
+Accepts `request_id` or `user_id` in path or body.
+        """,
+        responses={
+            200: OpenApiResponse(response=FollowRequestActionResponseSerializer, description="Follow request cancelled successfully."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure or invalid ID."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Pending follow request not found."),
+        },
+    )
+    def post(self, request, request_id=None, user_id=None):
+        return self._do_cancel(request, request_id=request_id, user_id=user_id)
+
+    def delete(self, request, request_id=None, user_id=None):
+        return self._do_cancel(request, request_id=request_id, user_id=user_id)
+
+    def _do_cancel(self, request, request_id=None, user_id=None):
+        target_ident = request_id or user_id or request.data.get("request_id") or request.data.get("user_id")
+        if not target_ident:
+            raise DomainValidationError("Please provide request_id or user_id.")
+
+        req_obj = cancel_follow_request(requester=request.user, identifier=target_ident)
+        return Response(
+            {
+                "message": "Follow request cancelled.",
+                "is_following": False,
+                "status": "cancelled",
+                "request_id": str(req_obj.id),
+                "requester_id": str(request.user.id),
+                "target_user_id": str(req_obj.target_user_id),
             },
             status=status.HTTP_200_OK,
         )

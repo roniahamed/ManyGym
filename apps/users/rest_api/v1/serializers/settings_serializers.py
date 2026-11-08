@@ -19,6 +19,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
             "language",
             "dark_mode",
             "is_private",
+            "require_follow_approval",
             "who_can_message",
             "who_can_see_followers",
             "who_can_see_following",
@@ -47,6 +48,7 @@ class UserSettingUpdateSerializer(serializers.Serializer):
     language = StrictCharField(required=False, max_length=20)
     dark_mode = StrictBooleanField(required=False)
     is_private = StrictBooleanField(required=False, help_text="Toggle private profile state.")
+    require_follow_approval = StrictBooleanField(required=False, help_text="Require approval before someone can follow you.")
 
     who_can_message = serializers.ChoiceField(
         choices=UserAudienceMessagingEnum.choices,

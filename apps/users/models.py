@@ -342,6 +342,68 @@ class UserFollow(models.Model):
         return f"{self.follower.email} follows {self.followed_user.email}"
 
 
+class FollowRequestStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    ACCEPTED = "accepted", "Accepted"
+    REJECTED = "rejected", "Rejected"
+    CANCELLED = "cancelled", "Cancelled"
+
+
+class UserFollowRequest(models.Model):
+    """
+    Represents an intentional follow request from one user to another public user
+    who requires confirmation/approval before followers are accepted.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    requester = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="sent_follow_requests",
+    )
+    target_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="received_follow_requests",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=FollowRequestStatus.choices,
+        default=FollowRequestStatus.PENDING,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_follow_requests"
+        verbose_name = "User Follow Request"
+        verbose_name_plural = "User Follow Requests"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["requester", "target_user"],
+                condition=models.Q(status="pending"),
+                name="unique_pending_follow_request",
+            ),
+            models.CheckConstraint(
+                check=~models.Q(requester=models.F("target_user")),
+                name="prevent_self_follow_request",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["target_user", "status", "-created_at"], name="idx_freq_target_status"),
+            models.Index(fields=["requester", "status", "-created_at"], name="idx_freq_req_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.requester.email} -> {self.target_user.email} ({self.status})"
+
+    @property
+    def followed_user(self):
+        """Convenience alias matching UserFollow interface."""
+        return self.target_user
+
+
 class UserSetting(models.Model):
     """
     Configuration and administrative settings for an individual user profile.
@@ -383,6 +445,10 @@ class UserSetting(models.Model):
         choices=UserAudienceVisibilityEnum.choices,
         default=UserAudienceVisibilityEnum.EVERYONE,
         help_text="Who can see people and gyms you follow? (Everyone, Followers, Private)",
+    )
+    require_follow_approval = models.BooleanField(
+        default=False,
+        help_text="If True, followers must be confirmed before they can follow this user.",
     )
 
     # --- Visibility -> Access & Control ---

@@ -1,8 +1,9 @@
 from typing import Optional
 import uuid
+from django.db import models
 from django.db.models import QuerySet
 
-from apps.users.models import User, UserFollow
+from apps.users.models import User, UserFollow, UserFollowRequest, FollowRequestStatus
 from common.exceptions import ResourceNotFoundError, PermissionDeniedError, DomainValidationError
 
 
@@ -158,6 +159,56 @@ def is_following_user(follower, target_user) -> bool:
         follower_id=f_id,
         followed_user_id=t_id,
     ).exists()
+
+
+def has_pending_follow_request(requester, target_user) -> bool:
+    """Returns True if requester has an active pending follow request to target_user."""
+    r_id = getattr(requester, "id", requester)
+    t_id = getattr(target_user, "id", target_user)
+    if not r_id or not t_id:
+        return False
+    return UserFollowRequest.objects.filter(
+        requester_id=r_id,
+        target_user_id=t_id,
+        status=FollowRequestStatus.PENDING,
+    ).exists()
+
+
+def list_received_follow_requests(user: User, status: Optional[str] = "pending") -> QuerySet[UserFollowRequest]:
+    """Returns QuerySet of follow requests received by user."""
+    qs = UserFollowRequest.objects.filter(target_user=user).select_related(
+        "requester", "requester__profile"
+    )
+    if status and status.lower() != "all":
+        qs = qs.filter(status=status.lower())
+    return qs.order_by("-created_at")
+
+
+def list_sent_follow_requests(user: User, status: Optional[str] = "pending") -> QuerySet[UserFollowRequest]:
+    """Returns QuerySet of follow requests sent by user."""
+    qs = UserFollowRequest.objects.filter(requester=user).select_related(
+        "target_user", "target_user__profile"
+    )
+    if status and status.lower() != "all":
+        qs = qs.filter(status=status.lower())
+    return qs.order_by("-created_at")
+
+
+def get_follow_request_by_id(user: User, request_id) -> UserFollowRequest:
+    """Retrieves a follow request where user is either recipient or sender."""
+    try:
+        req_uuid = uuid.UUID(str(request_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid request ID format.")
+
+    req = (
+        UserFollowRequest.objects.select_related("requester", "target_user", "requester__profile", "target_user__profile")
+        .filter(models.Q(target_user=user) | models.Q(requester=user), id=req_uuid)
+        .first()
+    )
+    if not req:
+        raise ResourceNotFoundError("Follow request not found.")
+    return req
 
 
 class ResolvedTarget(tuple):

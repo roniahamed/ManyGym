@@ -20,6 +20,9 @@ from apps.users.services.profile_services import (
 from apps.users.services.social_services import (
     follow_user,
     unfollow_user,
+    accept_follow_request,
+    reject_follow_request,
+    cancel_follow_request,
 )
 from apps.users.services.settings_services import (
     get_or_create_user_settings,
@@ -47,6 +50,9 @@ __all__ = [
     "delete_user_social_link",
     "follow_user",
     "unfollow_user",
+    "accept_follow_request",
+    "reject_follow_request",
+    "cancel_follow_request",
     "get_or_create_user_settings",
     "update_user_settings",
     "block_user_for_user",

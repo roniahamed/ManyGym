@@ -34,6 +34,7 @@ def update_user_settings(user: User, **data: Any) -> UserSetting:
         "who_can_message",
         "who_can_see_followers",
         "who_can_see_following",
+        "require_follow_approval",
         "is_private",
     }
 

@@ -12,6 +12,10 @@ from apps.users.rest_api.v1.views import (
     UserFollowersListView,
     UserFollowingListView,
     UnifiedFollowView,
+    UserFollowRequestListView,
+    UserFollowRequestAcceptView,
+    UserFollowRequestRejectView,
+    UserFollowRequestCancelView,
     UserFollowerBlockView,
     UserSettingsView,
     UserAccessControlActionView,
@@ -50,6 +54,16 @@ urlpatterns = [
     path("<uuid:user_id>/followers/", UserFollowersListView.as_view(), name="user-followers-list"),
     path("<uuid:user_id>/following/", UserFollowingListView.as_view(), name="user-following-list"),
     path("followers/<uuid:user_id>/block/", UserFollowerBlockView.as_view(), name="user-follower-block"),
+    # Follow Request routes
+    path("follow-requests/", UserFollowRequestListView.as_view(), name="user-follow-requests-list"),
+    path("follow-requests/<uuid:request_id>/accept/", UserFollowRequestAcceptView.as_view(), name="user-follow-request-accept"),
+    path("follow-requests/<uuid:request_id>/reject/", UserFollowRequestRejectView.as_view(), name="user-follow-request-reject"),
+    path("follow-requests/<uuid:request_id>/cancel/", UserFollowRequestCancelView.as_view(), name="user-follow-request-cancel"),
+    # Convenience routes for accepting/rejecting by user_id
+    path("<uuid:user_id>/follow/accept/", UserFollowRequestAcceptView.as_view(), name="user-follow-accept-by-user"),
+    path("<uuid:user_id>/follow/confirm/", UserFollowRequestAcceptView.as_view(), name="user-follow-confirm-by-user"),
+    path("<uuid:user_id>/follow/reject/", UserFollowRequestRejectView.as_view(), name="user-follow-reject-by-user"),
+    path("<uuid:user_id>/follow/cancel/", UserFollowRequestCancelView.as_view(), name="user-follow-cancel-by-user"),
     # Settings & Access Control routes
     path("settings/", UserSettingsView.as_view(), name="user-settings"),
     path("settings/access-control/", UserAccessControlActionView.as_view(), name="user-settings-access-control"),

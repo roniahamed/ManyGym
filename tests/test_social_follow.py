@@ -3,7 +3,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.users.models import User, UserProfile, UserFollow
+from apps.users.models import User, UserProfile, UserFollow, UserFollowRequest, FollowRequestStatus
 from apps.users.services import update_user_profile
 from apps.gyms.models import Gym, GymFollow, GymBlockedUser
 from apps.gyms.services import create_gym, block_user_for_gym
@@ -670,6 +670,187 @@ class TestGymFollowingSettingsVisibility:
         # Alice (owner) is allowed
         response = client_alice.get(f"/api/v1/gyms/{gym_instance.id}/following/")
         assert response.status_code == status.HTTP_200_OK
+
+
+class TestUserFollowApprovalFlow:
+    """
+    Tests the Follow Approval System:
+    - Gym follow: Always automatic (instant follow).
+    - Public user follow: Automatic by default.
+    - Confirm required: Can be toggled in settings (require_follow_approval).
+      When enabled, following sends a request with status 'pending' until target confirms.
+    """
+
+    def test_gym_follow_is_always_automatic(self, client_bob, gym_instance, user_bob):
+        # Following a gym is immediate and automatic
+        response = client_bob.post(f"/api/v1/gyms/{gym_instance.id}/follow/")
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        assert data["is_following"] is True
+        assert GymFollow.objects.filter(user=user_bob, gym=gym_instance).exists()
+
+    def test_public_user_follow_is_automatic_by_default(self, client_alice, user_alice, user_bob):
+        # Default setting: require_follow_approval is False
+        assert user_bob.get_settings().require_follow_approval is False
+
+        # Alice follows Bob -> automatic follow
+        response = client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        assert data["is_following"] is True
+        assert data["status"] == "following"
+        assert UserFollow.objects.filter(follower=user_alice, followed_user=user_bob).exists()
+
+    def test_user_can_toggle_require_follow_approval_in_settings(self, client_bob, user_bob):
+        # Bob enables require_follow_approval in settings
+        res = client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.json()["require_follow_approval"] is True
+        user_bob.settings.refresh_from_db()
+        assert user_bob.settings.require_follow_approval is True
+
+        # Bob disables it back
+        res2 = client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": False}, format="json")
+        assert res2.status_code == status.HTTP_200_OK
+        assert res2.json()["require_follow_approval"] is False
+        user_bob.settings.refresh_from_db()
+        assert user_bob.settings.require_follow_approval is False
+
+    def test_follow_user_with_approval_creates_pending_request(self, client_alice, client_bob, user_alice, user_bob):
+        # Bob enables require_follow_approval
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+
+        # Alice follows Bob
+        response = client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        assert data["is_following"] is False
+        assert data["status"] == "pending"
+        assert "request_id" in data
+        assert "Follow request sent" in data["message"]
+
+        # UserFollow should NOT exist yet
+        assert not UserFollow.objects.filter(follower=user_alice, followed_user=user_bob).exists()
+
+        # UserFollowRequest should exist with status 'pending'
+        req = UserFollowRequest.objects.get(requester=user_alice, target_user=user_bob)
+        assert req.status == FollowRequestStatus.PENDING
+
+    def test_follow_user_with_approval_idempotent(self, client_alice, client_bob, user_alice, user_bob):
+        # Bob enables approval
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+
+        # Alice sends first follow request
+        res1 = client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+        assert res1.status_code == status.HTTP_201_CREATED
+
+        # Alice sends follow request again while pending -> 200 OK idempotent
+        res2 = client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+        assert res2.status_code == status.HTTP_200_OK
+        data2 = res2.json()
+        assert data2["is_following"] is False
+        assert data2["status"] == "pending"
+        assert "already pending" in data2["message"].lower()
+        assert UserFollowRequest.objects.filter(requester=user_alice, target_user=user_bob, status=FollowRequestStatus.PENDING).count() == 1
+
+    def test_list_received_and_sent_follow_requests(self, client_alice, client_bob, user_alice, user_bob):
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+        client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+
+        # Bob lists received follow requests
+        res_received = client_bob.get("/api/v1/users/follow-requests/")
+        assert res_received.status_code == status.HTTP_200_OK
+        received_data = res_received.json()
+        assert len(received_data) == 1
+        assert received_data[0]["requester"]["email"] == user_alice.email
+        assert received_data[0]["status"] == "pending"
+
+        # Alice lists sent follow requests
+        res_sent = client_alice.get("/api/v1/users/follow-requests/?type=sent")
+        assert res_sent.status_code == status.HTTP_200_OK
+        sent_data = res_sent.json()
+        assert len(sent_data) == 1
+        assert sent_data[0]["target_user"]["email"] == user_bob.email
+        assert sent_data[0]["status"] == "pending"
+
+    def test_confirm_follow_request_success(self, client_alice, client_bob, user_alice, user_bob):
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+        follow_res = client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+        request_id = follow_res.json()["request_id"]
+
+        # Bob confirms/accepts the follow request
+        accept_res = client_bob.post(f"/api/v1/users/follow-requests/{request_id}/accept/")
+        assert accept_res.status_code == status.HTTP_200_OK
+        data = accept_res.json()
+        assert data["is_following"] is True
+        assert data["status"] == "accepted"
+
+        # UserFollow now exists
+        assert UserFollow.objects.filter(follower=user_alice, followed_user=user_bob).exists()
+
+        # Alice is now in Bob's followers list
+        followers_res = client_bob.get(f"/api/v1/users/{user_bob.id}/followers/")
+        assert followers_res.status_code == status.HTTP_200_OK
+        assert any(item["email"] == user_alice.email for item in followers_res.json())
+
+    def test_confirm_follow_request_by_user_id(self, client_alice, client_bob, user_alice, user_bob):
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+        client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+
+        # Bob confirms using user_id path
+        accept_res = client_bob.post(f"/api/v1/users/{user_alice.id}/follow/confirm/")
+        assert accept_res.status_code == status.HTTP_200_OK
+        assert accept_res.json()["is_following"] is True
+        assert UserFollow.objects.filter(follower=user_alice, followed_user=user_bob).exists()
+
+    def test_reject_follow_request_success(self, client_alice, client_bob, user_alice, user_bob):
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+        follow_res = client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+        request_id = follow_res.json()["request_id"]
+
+        # Bob rejects the follow request
+        reject_res = client_bob.post(f"/api/v1/users/follow-requests/{request_id}/reject/")
+        assert reject_res.status_code == status.HTTP_200_OK
+        assert reject_res.json()["status"] == "rejected"
+        assert not UserFollow.objects.filter(follower=user_alice, followed_user=user_bob).exists()
+
+        # Request status in DB is rejected
+        req = UserFollowRequest.objects.get(id=request_id)
+        assert req.status == FollowRequestStatus.REJECTED
+
+    def test_cancel_follow_request_by_requester(self, client_alice, client_bob, user_alice, user_bob):
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+        follow_res = client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+        request_id = follow_res.json()["request_id"]
+
+        # Alice cancels her own follow request
+        cancel_res = client_alice.post(f"/api/v1/users/follow-requests/{request_id}/cancel/")
+        assert cancel_res.status_code == status.HTTP_200_OK
+        assert cancel_res.json()["status"] == "cancelled"
+        assert not UserFollow.objects.filter(follower=user_alice, followed_user=user_bob).exists()
+
+    def test_unfollow_cancels_pending_request(self, client_alice, client_bob, user_alice, user_bob):
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+        client_alice.post(f"/api/v1/users/{user_bob.id}/follow/")
+        assert UserFollowRequest.objects.filter(requester=user_alice, target_user=user_bob, status=FollowRequestStatus.PENDING).exists()
+
+        # Alice unfollows -> cancels the pending request
+        unfollow_res = client_alice.delete(f"/api/v1/users/{user_bob.id}/follow/")
+        assert unfollow_res.status_code == status.HTTP_200_OK
+        assert unfollow_res.json()["is_following"] is False
+        assert not UserFollowRequest.objects.filter(requester=user_alice, target_user=user_bob, status=FollowRequestStatus.PENDING).exists()
+
+    def test_unified_follow_with_approval(self, client_alice, client_bob, user_alice, user_bob):
+        client_bob.patch("/api/v1/users/settings/", data={"require_follow_approval": True}, format="json")
+
+        # Unified endpoint follow
+        res = client_alice.post("/api/v1/follows/", data={"target_id": str(user_bob.id)}, format="json")
+        assert res.status_code == status.HTTP_201_CREATED
+        data = res.json()
+        assert data["is_following"] is False
+        assert data["status"] == "pending"
+        assert "request_id" in data
+
 
 
 
