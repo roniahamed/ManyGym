@@ -39,6 +39,8 @@ urlpatterns = [
     path("api/v1/reports/", include("apps.reports.rest_api.v1.reports_urls")),
     # Phase 9: Real-time End-to-End Encrypted Messaging (User-to-User, User-to-Gym, Gym-to-Gym)
     path("api/v1/messaging/", include("apps.messaging.rest_api.v1.urls")),
+    # Enquiries CRM Menu Feature
+    path("api/v1/enquiries/", include("apps.enquiries.rest_api.v1.urls")),
     # Unified Social Follow Endpoint (User & Gym Follow/Unfollow)
     path("api/v1/follows/", UnifiedFollowView.as_view(), name="unified-follow"),
     path("api/v1/follows/<uuid:target_id>/", UnifiedFollowView.as_view(), name="unified-follow-detail"),

@@ -56,6 +56,7 @@ LOCAL_APPS = [
     "apps.posts",
     "apps.reports",
     "apps.messaging",
+    "apps.enquiries",
 ]
 
 

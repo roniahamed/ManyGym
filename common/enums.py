@@ -370,3 +370,20 @@ class AdminLogActionType(models.TextChoices):
     # Custom / General
     CUSTOM_ACTION = "custom_action", "Custom Action"
 
+
+class EnquiryTypeEnum(models.TextChoices):
+    """Enquiry types imported from Afrobeutic."""
+    GENERAL_INQUIRY = "GENERAL_INQUIRY", "General Inquiry"
+    CALLBACK_REQUEST = "CALLBACK_REQUEST", "Callback Request"
+    COMPLAINT = "COMPLAINT", "Complaint"
+    EMERGENCY = "EMERGENCY", "Emergency"
+    SPECIAL_REQUEST = "SPECIAL_REQUEST", "Special Request"
+
+
+class EnquiryStatusEnum(models.TextChoices):
+    """Enquiry statuses imported from Afrobeutic."""
+    NEW = "NEW", "New"
+    CONTACTED = "CONTACTED", "Contacted"
+    VISIT = "VISIT", "Visit"
+    BOOKED = "BOOKED", "Booked"
+
