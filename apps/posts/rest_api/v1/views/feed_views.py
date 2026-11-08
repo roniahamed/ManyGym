@@ -17,6 +17,7 @@ from apps.posts.services import (
     delete_post,
 )
 from apps.posts.rest_api.v1.serializers import (
+    GymFeedFilterSerializer,
     GymPostListSerializer,
     GymPostDetailSerializer,
     GymPostCreateSerializer,
@@ -48,13 +49,7 @@ class GymFeedView(APIView):
         summary="List Gym Community Feed",
         description="Retrieves community posts for a gym or personalized feed globally when gym_id is omitted. Unauthenticated guests and non-members see only public posts; verified members and staff see both public and members_only posts. When gym_id is omitted, returns personalized feed of followed users/gyms, connected gyms, and public posts of any users or gyms.",
         parameters=[
-            OpenApiParameter(name="gym_id", type=str, location=OpenApiParameter.QUERY, required=False, description="UUID of a specific gym to filter wall posts."),
-            OpenApiParameter(name="feed_type", type=str, location=OpenApiParameter.QUERY, required=False, description="Feed filter: 'all' (default), 'followed', 'connected', or 'public'."),
-            OpenApiParameter(name="source", type=str, location=OpenApiParameter.QUERY, required=False, description="Alias for feed_type."),
-            OpenApiParameter(name="privacy", type=str, location=OpenApiParameter.QUERY, required=False, description="Filter by privacy: 'public' or 'members_only'."),
-            OpenApiParameter(name="search", type=str, location=OpenApiParameter.QUERY, required=False, description="Keyword search in post text, author name, or gym name."),
-            OpenApiParameter(name="page", type=int, location=OpenApiParameter.QUERY, required=False),
-            OpenApiParameter(name="page_size", type=int, location=OpenApiParameter.QUERY, required=False),
+            GymFeedFilterSerializer,
         ],
         responses={
             200: GymPostListSerializer(many=True),
@@ -63,8 +58,12 @@ class GymFeedView(APIView):
         },
     )
     def get(self, request):
+        filter_serializer = GymFeedFilterSerializer(data=request.query_params)
+        filter_serializer.is_valid(raise_exception=True)
+        params = filter_serializer.validated_data
+
         gym_id = (
-            request.query_params.get("gym_id")
+            params.get("gym_id")
             or getattr(request, "gym_id", None)
             or (request.data.get("gym_id") if isinstance(request.data, dict) else None)
         )
@@ -75,9 +74,9 @@ class GymFeedView(APIView):
             gym = None
             is_member_or_staff = False
 
-        privacy = request.query_params.get("privacy")
-        search = request.query_params.get("search")
-        feed_type = request.query_params.get("feed_type") or request.query_params.get("source")
+        privacy = params.get("privacy")
+        search = params.get("search")
+        feed_type = params.get("feed_type") or params.get("source")
 
         qs = list_gym_feed(
             gym=gym,

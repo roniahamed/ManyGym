@@ -37,6 +37,49 @@ class GymPostMediaSerializer(serializers.ModelSerializer):
         ]
 
 
+class GymFeedFilterSerializer(serializers.Serializer):
+    """
+    Validates and normalizes query parameters for community feed queries.
+    """
+    gym_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text="Optional UUID of a specific gym to view its wall.",
+    )
+    feed_type = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="Feed stream filter: 'all', 'followed', 'connected', or 'public'.",
+    )
+    source = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="Alias for feed_type.",
+    )
+    privacy = serializers.ChoiceField(
+        choices=[
+            PostPrivacyEnum.PUBLIC,
+            PostPrivacyEnum.MEMBERS_ONLY,
+            PostPrivacyEnum.GYM_MEMBERS_ONLY,
+        ],
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="Filter by post privacy level.",
+    )
+    search = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        max_length=200,
+        help_text="Keyword search matching post content, author name, or gym name.",
+    )
+    page = serializers.IntegerField(required=False, min_value=1, default=1)
+    page_size = serializers.IntegerField(required=False, min_value=1, max_value=100, default=20)
+
+
 class GymPostListSerializer(serializers.ModelSerializer):
     gym_name = serializers.CharField(source="gym.name", read_only=True)
     author_name = serializers.SerializerMethodField()
@@ -68,6 +111,17 @@ class GymPostListSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def _get_social_context(self) -> dict:
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
+            return {}
+        cached = getattr(request, "_user_social_context", None)
+        if cached is None:
+            from apps.posts.selectors import get_user_social_context
+            cached = get_user_social_context(request.user)
+            request._user_social_context = cached
+        return cached
+
     def get_author_name(self, obj) -> str:
         if obj.author_user:
             u = obj.author_user
@@ -89,41 +143,21 @@ class GymPostListSerializer(serializers.ModelSerializer):
 
     def get_is_following_gym(self, obj) -> bool:
         followed_gym_ids = self.context.get("followed_gym_ids")
-        if followed_gym_ids is not None:
-            return obj.gym_id in followed_gym_ids
-        request = self.context.get("request")
-        if request and getattr(request, "user", None) and request.user.is_authenticated:
-            from apps.gyms.models import GymFollow
-            return GymFollow.objects.filter(user=request.user, gym_id=obj.gym_id).exists()
-        return False
+        if followed_gym_ids is None:
+            followed_gym_ids = self._get_social_context().get("followed_gym_ids", set())
+        return obj.gym_id in followed_gym_ids
 
     def get_is_following_author(self, obj) -> bool:
         followed_user_ids = self.context.get("followed_user_ids")
-        if followed_user_ids is not None:
-            return obj.author_user_id in followed_user_ids
-        request = self.context.get("request")
-        if request and getattr(request, "user", None) and request.user.is_authenticated:
-            from apps.users.models import UserFollow
-            return UserFollow.objects.filter(follower=request.user, followed_user_id=obj.author_user_id).exists()
-        return False
+        if followed_user_ids is None:
+            followed_user_ids = self._get_social_context().get("followed_user_ids", set())
+        return obj.author_user_id in followed_user_ids
 
     def get_is_connected_gym(self, obj) -> bool:
         connected_gym_ids = self.context.get("connected_gym_ids")
-        if connected_gym_ids is not None:
-            return obj.gym_id in connected_gym_ids
-        request = self.context.get("request")
-        if request and getattr(request, "user", None) and request.user.is_authenticated:
-            from apps.members.models import Member
-            from apps.access_control.models import GymStaffAssignment
-            from common.enums import StaffStatus
-            from django.db.models import Q
-            u = request.user
-            if obj.gym.owner_user_id == u.id or u.is_superuser:
-                return True
-            if GymStaffAssignment.objects.filter(gym_id=obj.gym_id, user=u, status=StaffStatus.ACTIVE).exists():
-                return True
-            return Member.objects.filter(gym_id=obj.gym_id).filter(Q(user=u) | Q(email=u.email)).exists()
-        return False
+        if connected_gym_ids is None:
+            connected_gym_ids = self._get_social_context().get("connected_gym_ids", set())
+        return obj.gym_id in connected_gym_ids
 
 
 class GymPostDetailSerializer(GymPostListSerializer):

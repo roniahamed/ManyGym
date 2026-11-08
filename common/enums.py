@@ -206,6 +206,28 @@ class PostPrivacyEnum(models.TextChoices):
     PRIVATE = "private", "Private"
 
 
+class FeedTypeEnum(models.TextChoices):
+    """Filter categories for social community feed."""
+    ALL = "all", "All Posts"
+    FOLLOWED = "followed", "Followed Only"
+    CONNECTED = "connected", "Connected Gyms Only"
+    PUBLIC = "public", "Public Only"
+
+
+def normalize_feed_type(feed_type: str | None) -> str:
+    """Normalizes feed_type query parameter and user aliases to canonical FeedTypeEnum."""
+    if not feed_type:
+        return FeedTypeEnum.ALL
+    cleaned = feed_type.strip().lower()
+    if cleaned in (FeedTypeEnum.FOLLOWED, "following"):
+        return FeedTypeEnum.FOLLOWED
+    if cleaned in (FeedTypeEnum.CONNECTED, "connected_gym", "my_gym"):
+        return FeedTypeEnum.CONNECTED
+    if cleaned in (FeedTypeEnum.PUBLIC, "explore"):
+        return FeedTypeEnum.PUBLIC
+    return FeedTypeEnum.ALL
+
+
 class MediaTypeEnum(models.TextChoices):
     PICTURE = "picture", "Picture"
     VIDEO = "video", "Video"
