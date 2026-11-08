@@ -99,18 +99,40 @@ class EnquiryCreateSerializer(serializers.Serializer):
     first_name = StrictCharField(max_length=100, help_text="First name (required).")
     last_name = StrictCharField(max_length=100, help_text="Last name (required).")
     email = serializers.EmailField(required=False, allow_null=True, allow_blank=True, max_length=255)
-    phone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=50)
-    manygym_user_id = serializers.UUIDField(required=False, allow_null=True, help_text="Optional Manygym registered User ID.")
-    gym_id = serializers.UUIDField(required=False, allow_null=True, help_text="Optional Gym UUID.")
-    type = serializers.CharField(required=False, default=EnquiryTypeEnum.GENERAL_INQUIRY)
-    status = serializers.CharField(required=False, default=EnquiryStatusEnum.NEW)
-    summary = serializers.CharField(required=False, allow_blank=True, default="")
+    phone = StrictCharField(required=False, allow_null=True, allow_blank=True, max_length=50)
+    manygym_user_id = StrictUUIDField(required=False, allow_null=True, help_text="Optional Manygym registered User ID.")
+    gym_id = StrictUUIDField(required=False, allow_null=True, help_text="Optional Gym UUID.")
+    type = StrictCharField(required=False, default=EnquiryTypeEnum.GENERAL_INQUIRY)
+    status = StrictCharField(required=False, default=EnquiryStatusEnum.NEW)
+    summary = StrictCharField(required=False, allow_blank=True, default="")
     notes = serializers.ListField(
-        child=serializers.CharField(allow_blank=False),
+        child=StrictCharField(allow_blank=False),
         required=False,
         default=list,
         help_text="Optional list of text notes.",
     )
+
+    def validate_first_name(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("First name cannot be empty or whitespace.")
+        return str(value).strip()
+
+    def validate_last_name(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Last name cannot be empty or whitespace.")
+        return str(value).strip()
+
+    def validate_email(self, value):
+        if value is None:
+            return None
+        val = str(value).strip().lower()
+        return val if val else None
+
+    def validate_phone(self, value):
+        if value is None:
+            return None
+        val = str(value).strip()
+        return val if val else None
 
     def validate_type(self, value):
         if not value:
@@ -140,12 +162,10 @@ class EnquiryCreateSerializer(serializers.Serializer):
         )
 
     def validate(self, attrs):
-        email = (attrs.get("email") or "").strip()
-        phone = (attrs.get("phone") or "").strip()
+        email = attrs.get("email")
+        phone = attrs.get("phone")
         if not email and not phone:
             raise serializers.ValidationError("Either Email or Phone number is mandatory.")
-        attrs["email"] = email or None
-        attrs["phone"] = phone or None
         return attrs
 
 
@@ -156,21 +176,43 @@ class EnquiryUpdateSerializer(serializers.Serializer):
     first_name = StrictCharField(required=False, max_length=100)
     last_name = StrictCharField(required=False, max_length=100)
     email = serializers.EmailField(required=False, allow_null=True, allow_blank=True, max_length=255)
-    phone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=50)
-    manygym_user_id = serializers.UUIDField(required=False, allow_null=True)
-    type = serializers.CharField(required=False)
-    status = serializers.CharField(required=False)
-    summary = serializers.CharField(required=False, allow_blank=True)
+    phone = StrictCharField(required=False, allow_null=True, allow_blank=True, max_length=50)
+    manygym_user_id = StrictUUIDField(required=False, allow_null=True)
+    type = StrictCharField(required=False)
+    status = StrictCharField(required=False)
+    summary = StrictCharField(required=False, allow_blank=True)
     notes = serializers.ListField(
-        child=serializers.CharField(allow_blank=False),
+        child=StrictCharField(allow_blank=False),
         required=False,
         help_text="Full replacement list of text notes.",
     )
-    append_note = serializers.CharField(
+    append_note = StrictCharField(
         required=False,
         allow_blank=False,
         help_text="Convenience parameter to append a single new text note.",
     )
+
+    def validate_first_name(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("First name cannot be empty or whitespace.")
+        return str(value).strip()
+
+    def validate_last_name(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Last name cannot be empty or whitespace.")
+        return str(value).strip()
+
+    def validate_email(self, value):
+        if value is None:
+            return None
+        val = str(value).strip().lower()
+        return val if val else None
+
+    def validate_phone(self, value):
+        if value is None:
+            return None
+        val = str(value).strip()
+        return val if val else None
 
     def validate_type(self, value):
         if not value:
@@ -199,13 +241,22 @@ class EnquiryUpdateSerializer(serializers.Serializer):
             f"Invalid status '{value}'. Choices: {', '.join([c.value for c in EnquiryStatusEnum])}"
         )
 
+    def validate(self, attrs):
+        # If both email and phone are explicitly provided as empty/None, reject
+        has_email_key = "email" in attrs
+        has_phone_key = "phone" in attrs
+        if has_email_key and has_phone_key:
+            if not attrs.get("email") and not attrs.get("phone"):
+                raise serializers.ValidationError("Either Email or Phone number is mandatory.")
+        return attrs
+
 
 class EnquiryAddNoteSerializer(serializers.Serializer):
     """
     Serializer for appending a text note to an Enquiry.
     """
-    note = serializers.CharField(required=False, allow_blank=False)
-    note_text = serializers.CharField(required=False, allow_blank=False)
+    note = StrictCharField(required=False, allow_blank=False)
+    note_text = StrictCharField(required=False, allow_blank=False)
 
     def validate(self, attrs):
         text = attrs.get("note") or attrs.get("note_text")
