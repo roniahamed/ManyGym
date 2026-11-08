@@ -961,58 +961,58 @@ class TestAuthBusinessLogicAndStateTransitions:
         assert "not been verified" in res.json()["message"]
 
     def test_deactivated_user_login_without_flag_rejected(self, verified_user):
+        """Under new requirements: logging in again automatically removes deactivate status."""
         apply_user_access_control_action(verified_user, action="deactivate")
+        verified_user.refresh_from_db()
+        assert verified_user.status == UserStatus.DEACTIVATED
 
         client = APIClient()
-        # Login without reactivate flag
+        # Login with correct credentials automatically clears deactivation
         res = client.post(
             reverse("login"),
             {"email": "alice.verified@manygym.com", "password": "SecurePassword2026!"},
             format="json",
         )
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "deactivated" in res.json()["message"]
-
-        # Login with reactivate flag succeeds
-        res_reactivate = client.post(
-            reverse("login"),
-            {
-                "email": "alice.verified@manygym.com",
-                "password": "SecurePassword2026!",
-                "reactivate": True,
-            },
-            format="json",
-        )
-        assert res_reactivate.status_code == status.HTTP_200_OK
-        assert "reactivated" in res_reactivate.json()["message"]
+        assert res.status_code == status.HTTP_200_OK
+        verified_user.refresh_from_db()
+        assert verified_user.status == UserStatus.ACTIVE
+        assert verified_user.get_settings().is_deactivated is False
 
     def test_deleted_user_login_without_flag_rejected(self, verified_user):
+        """Under new requirements: logging in again within 24h removes deletion request; >24h is rejected."""
         apply_user_access_control_action(
             verified_user, action="delete", password="SecurePassword2026!", confirmation="delete"
         )
+        verified_user.refresh_from_db()
+        assert verified_user.status == UserStatus.DELETED
 
         client = APIClient()
-        # Login without restore flag
+        # Login within 24h grace period automatically restores the account
         res = client.post(
             reverse("login"),
             {"email": "alice.verified@manygym.com", "password": "SecurePassword2026!"},
             format="json",
         )
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "deleted" in res.json()["message"]
+        assert res.status_code == status.HTTP_200_OK
+        verified_user.refresh_from_db()
+        assert verified_user.status == UserStatus.ACTIVE
+        assert verified_user.get_settings().is_deleted is False
 
-        # Login with restore flag succeeds
-        res_restore = client.post(
+        # If deleted more than 24 hours ago, login is permanently rejected
+        apply_user_access_control_action(
+            verified_user, action="delete", password="SecurePassword2026!", confirmation="delete"
+        )
+        setting = verified_user.get_settings()
+        setting.deleted_at = timezone.now() - timedelta(hours=25)
+        setting.save(update_fields=["deleted_at"])
+
+        res_expired = client.post(
             reverse("login"),
-            {
-                "email": "alice.verified@manygym.com",
-                "password": "SecurePassword2026!",
-                "restore": True,
-            },
+            {"email": "alice.verified@manygym.com", "password": "SecurePassword2026!"},
             format="json",
         )
-        assert res_restore.status_code == status.HTTP_200_OK
-        assert "restored" in res_restore.json()["message"]
+        assert res_expired.status_code == status.HTTP_400_BAD_REQUEST
+        assert "permanently deleted" in res_expired.json()["message"]
 
     def test_cannot_verify_already_verified_user(self, verified_user):
         client = APIClient()
