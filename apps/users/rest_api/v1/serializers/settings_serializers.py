@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from apps.users.models import User, UserSetting, UserBlockedUser, UserDevice
-from common.serializers import StrictCharField, StrictBooleanField, StrictUUIDField
+from common.serializers import StrictCharField, StrictBooleanField, StrictUUIDField, StrictEmailField
 from common.enums import UserAudienceMessagingEnum, UserAudienceFollowEnum, UserAudienceVisibilityEnum
 
 
@@ -250,8 +250,8 @@ class UserContactInfoUpdateSerializer(serializers.Serializer):
     """
     primary_email = serializers.CharField(required=False)
     email = serializers.CharField(required=False)
-    secondary_email = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
-    phone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=50)
+    secondary_email = StrictEmailField(required=False, allow_null=True, allow_blank=True)
+    phone = StrictCharField(required=False, allow_null=True, allow_blank=True, max_length=50)
 
     def validate(self, attrs):
         if "primary_email" in self.initial_data or "email" in self.initial_data:
@@ -262,6 +262,8 @@ class UserContactInfoUpdateSerializer(serializers.Serializer):
 
     def validate_secondary_email(self, value):
         if value is not None and value != "":
+            if "\x00" in value:
+                raise serializers.ValidationError("Null characters are not allowed in secondary email.")
             cleaned = value.strip().lower()
             request = self.context.get("request")
             if request and hasattr(request, "user") and request.user.email.lower() == cleaned:
@@ -271,6 +273,8 @@ class UserContactInfoUpdateSerializer(serializers.Serializer):
 
     def validate_phone(self, value):
         if value is not None and value != "":
+            if "\x00" in value:
+                raise serializers.ValidationError("Null characters are not allowed in phone number.")
             return value.strip()
         return None
 
@@ -330,7 +334,7 @@ class Verify2FASerializer(serializers.Serializer):
     """
     Request payload serializer for verifying Two Factor Authentication OTP.
     """
-    email = serializers.EmailField(required=True)
+    email = StrictEmailField(required=True)
     otp_code = StrictCharField(
         min_length=6,
         max_length=6,
@@ -340,12 +344,18 @@ class Verify2FASerializer(serializers.Serializer):
     device_id = StrictCharField(required=False, allow_blank=True, max_length=100)
     device_name = StrictCharField(required=False, allow_blank=True, max_length=150)
 
+    def validate_otp_code(self, value):
+        cleaned = value.strip()
+        if not cleaned.isdigit() or len(cleaned) != 6:
+            raise serializers.ValidationError("OTP code must be a 6-digit numeric string.")
+        return cleaned
+
 
 class Resend2FASerializer(serializers.Serializer):
     """
     Request payload serializer for requesting a new 2FA code via fallback or specific channel.
     """
-    email = serializers.EmailField(required=True)
+    email = StrictEmailField(required=True)
     channel = serializers.ChoiceField(
         choices=["primary_email", "secondary_email", "phone_sms", "auto"],
         required=False,

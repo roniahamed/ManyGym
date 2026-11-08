@@ -12,6 +12,14 @@ class StrictCharField(serializers.CharField):
         return super().to_internal_value(data)
 
 
+class StrictEmailField(serializers.EmailField):
+    """EmailField that rejects non-string types such as booleans, integers, lists, or dicts."""
+    def to_internal_value(self, data):
+        if isinstance(data, bool) or not isinstance(data, str):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
 class StrictUUIDField(serializers.UUIDField):
     """UUIDField that strictly requires string UUID representation, rejecting integers or booleans."""
     def to_internal_value(self, data):

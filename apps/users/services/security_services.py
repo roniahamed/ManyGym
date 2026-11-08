@@ -63,6 +63,10 @@ def update_user_contact_info(
             user.secondary_email = None
             update_fields.append("secondary_email")
         else:
+            if not isinstance(secondary_email, str):
+                raise DomainValidationError("Secondary email must be a valid string.")
+            if "\x00" in secondary_email:
+                raise DomainValidationError("Null characters are not allowed in secondary email.")
             cleaned_email = secondary_email.strip().lower()
             if cleaned_email == user.email.lower():
                 raise DomainValidationError("Secondary email cannot be the same as primary email.")
@@ -74,6 +78,10 @@ def update_user_contact_info(
             user.phone = None
             update_fields.append("phone")
         else:
+            if not isinstance(phone, str):
+                raise DomainValidationError("Phone must be a valid string.")
+            if "\x00" in phone:
+                raise DomainValidationError("Null characters are not allowed in phone number.")
             cleaned_phone = phone.strip()
             if len(cleaned_phone) > 50:
                 raise DomainValidationError("Phone number cannot exceed 50 characters.")
@@ -304,8 +312,12 @@ def register_or_update_user_device(
     Enforces maximum of 5 concurrent devices.
     If the limit is exceeded, automatically evicts the oldest device(s) and cleans their keys.
     """
-    if not device_id:
+    if not device_id or not isinstance(device_id, str):
         device_id = str(uuid.uuid4())
+    if "\x00" in device_id:
+        raise DomainValidationError("Null characters are not allowed in device_id.")
+    if device_name and "\x00" in device_name:
+        raise DomainValidationError("Null characters are not allowed in device_name.")
 
     existing_device = UserDevice.objects.filter(user=user, device_id=device_id).first()
     if existing_device:
@@ -350,6 +362,11 @@ def delete_user_device(user: User, identifier: str) -> bool:
     Deletes a logged-in device by device_id or UUID id.
     Cleans associated cryptographic device keys and revokes active tokens for that device.
     """
+    if not identifier or not isinstance(identifier, str):
+        raise ResourceNotFoundError("Logged-in device not found.")
+    if "\x00" in identifier:
+        raise DomainValidationError("Null characters are not allowed.")
+
     device = None
     # Try finding by device_id
     device = UserDevice.objects.filter(user=user, device_id=identifier).first()

@@ -38,6 +38,15 @@ class ResetPasswordSerializer(serializers.Serializer):
 class ChangePasswordSerializer(serializers.Serializer):
     current_password = StrictCharField(required=True)
     new_password = StrictCharField(required=True, min_length=8)
+    confirm_password = StrictCharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if "\x00" in attrs.get("new_password", "") or "\x00" in attrs.get("current_password", ""):
+            raise serializers.ValidationError("Null characters are not allowed.")
+        confirm = attrs.get("confirm_password")
+        if confirm and confirm != attrs.get("new_password"):
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+        return attrs
 
 
 class RegisterResponseSerializer(serializers.Serializer):
