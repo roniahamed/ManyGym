@@ -3,7 +3,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.users.models import User
+from apps.users.models import User, UserFollow
 from apps.gyms.models import Gym, GymBlockedUser, GymSetting
 from apps.gyms.services import create_gym
 from apps.members.models import Member
@@ -99,6 +99,8 @@ def charlie_client(charlie):
 
 @pytest.fixture
 def alice_bob_conv(alice, bob):
+    UserFollow.objects.create(follower=alice, followed_user=bob)
+    UserFollow.objects.create(follower=bob, followed_user=alice)
     return get_or_create_user_to_user_conversation(alice, bob)
 
 

@@ -319,7 +319,7 @@ class TestUserAccessAndControl:
         user_alice.refresh_from_db()
         assert user_alice.status == UserStatus.DEACTIVATED
 
-        # 2. Attempt login while deactivated: returns clear deactivation message prompting reactivation
+        # 2. Login again while deactivated: automatically removes deactivate status and logs in
         anon_client = APIClient()
         login_url = "/api/v1/auth/login/"
         res_login = anon_client.post(
@@ -327,22 +327,13 @@ class TestUserAccessAndControl:
             {"email": user_alice.email, "password": "SecurePassword123!"},
             format="json",
         )
-        assert res_login.status_code == status.HTTP_400_BAD_REQUEST
-        err_msg = res_login.data.get("message") or res_login.data.get("detail")
-        assert "deactivated" in err_msg
-        assert "reactivate" in err_msg
-
-        # 3. Login with reactivate=True: reactivates account and logs in
-        res_reactivate_login = anon_client.post(
-            login_url,
-            {"email": user_alice.email, "password": "SecurePassword123!", "reactivate": True},
-            format="json",
-        )
-        assert res_reactivate_login.status_code == status.HTTP_200_OK
-        assert "reactivated" in res_reactivate_login.data["message"]
-        assert "tokens" in res_reactivate_login.data
+        assert res_login.status_code == status.HTTP_200_OK
+        assert "tokens" in res_login.data
 
         user_alice.refresh_from_db()
+        assert user_alice.status == UserStatus.ACTIVE
+        assert user_alice.is_active is True
+        assert user_alice.settings.is_deactivated is False
         assert user_alice.status == UserStatus.ACTIVE
         assert user_alice.settings.is_deactivated is False
 
@@ -388,7 +379,7 @@ class TestUserAccessAndControl:
         res_follow = bob_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
         assert res_follow.status_code == status.HTTP_404_NOT_FOUND
 
-        # 8. Login rejected for deleted user with clear prompt to restore
+        # 8. Login within 24 hours removes delete request and restores account
         anon_client = APIClient()
         login_url = "/api/v1/auth/login/"
         res_login_del = anon_client.post(
@@ -396,22 +387,28 @@ class TestUserAccessAndControl:
             {"email": user_alice.email, "password": "SecurePassword123!"},
             format="json",
         )
-        assert res_login_del.status_code == status.HTTP_400_BAD_REQUEST
-        err_msg = res_login_del.data.get("message") or res_login_del.data.get("detail")
-        assert "deleted" in err_msg
-        assert "restore" in err_msg
-
-        # 9. Restore user account via login with restore=True
-        res_restore = anon_client.post(
-            login_url,
-            {"email": user_alice.email, "password": "SecurePassword123!", "restore": True},
-            format="json",
-        )
-        assert res_restore.status_code == status.HTTP_200_OK
-        assert "restored" in res_restore.data["message"]
-        assert "tokens" in res_restore.data
+        assert res_login_del.status_code == status.HTTP_200_OK
+        assert "tokens" in res_login_del.data
 
         user_alice.refresh_from_db()
         assert user_alice.status == UserStatus.ACTIVE
         assert user_alice.is_active is True
         assert user_alice.settings.is_deleted is False
+
+        # 9. Verify that login after 24 hours grace period is rejected
+        from datetime import timedelta
+        from django.utils import timezone
+        user_alice.settings.soft_delete()
+        user_alice.settings.deleted_at = timezone.now() - timedelta(hours=25)
+        user_alice.settings.save()
+        user_alice.status = UserStatus.DELETED
+        user_alice.is_active = False
+        user_alice.save()
+
+        res_expired_login = anon_client.post(
+            login_url,
+            {"email": user_alice.email, "password": "SecurePassword123!"},
+            format="json",
+        )
+        assert res_expired_login.status_code == status.HTTP_400_BAD_REQUEST
+        assert "permanently deleted" in str(res_expired_login.data).lower()

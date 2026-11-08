@@ -5,7 +5,7 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.users.models import User, UserProfile
+from apps.users.models import User, UserProfile, UserFollow
 from apps.gyms.models import Gym
 from apps.gyms.services import create_gym
 from apps.authentication.services import issue_context_token
@@ -59,6 +59,8 @@ def perf_setup(db):
             is_verified=True,
         )
         UserProfile.objects.create(user=peer, avatar_url=f"https://example.com/peer_{i}.png")
+        UserFollow.objects.create(follower=alice, followed_user=peer)
+        UserFollow.objects.create(follower=peer, followed_user=alice)
         conv = get_or_create_user_to_user_conversation(alice, peer)
         conversations.append(conv)
 
@@ -105,6 +107,9 @@ class TestMessagingPerformanceBenchmarks:
 
     def test_conversations_list_query_count_and_n_plus_one_elimination(self, perf_setup, django_assert_num_queries):
         client = perf_setup["client"]
+
+        # Warmup request to eliminate initial lazy-loading and URL resolving latency
+        client.get("/api/v1/messaging/conversations/")
 
         # Measure baseline query count
         with CaptureQueriesContext(connection) as ctx:

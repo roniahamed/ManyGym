@@ -24,6 +24,7 @@ class AuthToken(models.Model):
         choices=TokenContextType.choices,
         default=TokenContextType.PERSONAL,
     )
+    device_id = models.CharField(max_length=100, blank=True, default="", db_index=True)
     expires_at = models.DateTimeField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

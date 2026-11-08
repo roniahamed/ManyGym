@@ -20,7 +20,11 @@ from apps.authentication.services import (
     revoke_token,
     refresh_context_token,
 )
-from apps.users.rest_api.v1.serializers import UserSerializer
+from apps.users.rest_api.v1.serializers import (
+    UserSerializer,
+    Verify2FASerializer,
+    Resend2FASerializer,
+)
 from common.enums import TokenContextType
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
 from common.throttling import LoginRateThrottle, TokenRefreshRateThrottle
@@ -135,12 +139,43 @@ Authenticates user credentials and issues a contextual JWT access & refresh toke
         serializer.is_valid(raise_exception=True)
         reactivate = serializer.validated_data.get("reactivate", False)
         restore = serializer.validated_data.get("restore", False)
+
+        device_id = (
+            request.data.get("device_id")
+            or request.headers.get("X-Device-Id")
+            or ""
+        )
+        device_name = request.data.get("device_name", "")
+        ip_address = request.META.get("HTTP_X_FORWARDED_FOR")
+        if ip_address:
+            ip_address = ip_address.split(",")[0].strip()
+        else:
+            ip_address = request.META.get("REMOTE_ADDR")
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+
         user, tokens = authenticate_user(
             email=serializer.validated_data["email"],
             password=serializer.validated_data["password"],
             reactivate=reactivate,
             restore=restore,
+            device_id=device_id,
+            device_name=device_name,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
+
+        if isinstance(tokens, dict) and tokens.get("two_factor_required"):
+            return Response(
+                {
+                    "two_factor_required": True,
+                    "message": tokens.get("message", "Two-factor authentication code sent."),
+                    "channel": tokens.get("channel"),
+                    "destination": tokens.get("destination"),
+                    "email": tokens.get("email"),
+                },
+                status=status.HTTP_200_OK,
+            )
+
         from apps.gyms.models import Gym
         deactivated_gyms = list(
             Gym.objects.filter(owner_user=user, settings__is_deactivated=True)
@@ -419,3 +454,125 @@ Exchanges an active refresh token for a fresh access and refresh token pair whil
             },
             status=status.HTTP_200_OK,
         )
+
+
+class Verify2FAView(APIView):
+    """
+    Endpoint for verifying 2FA OTP code and completing login.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
+
+    @extend_schema(
+        tags=["Authentication & Sessions"],
+        summary="Verify 2FA OTP Code",
+        description="""
+### Summary
+Validates submitted 2FA OTP code. Upon successful verification:
+- Registers/updates active logged-in device (enforcing max 5 devices limit).
+- Issues JWT personal access and refresh tokens.
+        """,
+        request=Verify2FASerializer,
+        responses={
+            200: OpenApiResponse(response=LoginResponseSerializer, description="2FA verified successfully; session tokens issued."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Invalid or expired verification code."),
+        },
+    )
+    def post(self, request):
+        from apps.users.rest_api.v1.serializers import Verify2FASerializer
+        from apps.users.services.security_services import verify_2fa_otp, register_or_update_user_device
+        from apps.authentication.services import issue_context_token
+        from common.enums import TokenContextType
+        import uuid
+
+        serializer = Verify2FASerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = verify_2fa_otp(
+            email=serializer.validated_data["email"],
+            otp_code=serializer.validated_data["otp_code"],
+        )
+
+        device_id = (
+            serializer.validated_data.get("device_id")
+            or request.headers.get("X-Device-Id")
+            or str(uuid.uuid4())
+        )
+        device_name = serializer.validated_data.get("device_name", "")
+        ip_address = request.META.get("HTTP_X_FORWARDED_FOR")
+        if ip_address:
+            ip_address = ip_address.split(",")[0].strip()
+        else:
+            ip_address = request.META.get("REMOTE_ADDR")
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+
+        register_or_update_user_device(
+            user=user,
+            device_id=device_id,
+            device_name=device_name,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
+        tokens = issue_context_token(user, context_type=TokenContextType.PERSONAL, device_id=device_id)
+
+        return Response(
+            {
+                "message": "Two-factor authentication verified successfully.",
+                "user": UserSerializer(user).data,
+                "tokens": tokens,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class Resend2FAView(APIView):
+    """
+    Endpoint for resending 2FA OTP code with optional fallback channel selection.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
+
+    @extend_schema(
+        tags=["Authentication & Sessions"],
+        summary="Resend 2FA OTP Code",
+        description="""
+### Summary
+Dispatches a new 2FA OTP code.
+Supports fallback sequence: Primary Email -> Secondary Email -> Phone SMS.
+Clients may optionally request a specific channel ('primary_email', 'secondary_email', 'phone_sms', or 'auto').
+        """,
+        request=Resend2FASerializer,
+        responses={
+            200: OpenApiResponse(response=MessageResponseSerializer, description="2FA OTP code resent successfully."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="User not found or delivery failed."),
+        },
+    )
+    def post(self, request):
+        from apps.users.rest_api.v1.serializers import Resend2FASerializer
+        from apps.users.services.security_services import dispatch_2fa_otp
+        from apps.users.models import User
+        from common.exceptions import ResourceNotFoundError
+
+        serializer = Resend2FASerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = User.objects.filter(email=serializer.validated_data["email"].lower().strip()).first()
+        if not user:
+            raise ResourceNotFoundError("User account not found.")
+
+        channel = serializer.validated_data.get("channel", "auto")
+        force_channel = None if channel == "auto" else channel
+
+        dispatch_info = dispatch_2fa_otp(user, force_channel=force_channel)
+
+        return Response(
+            {
+                "message": dispatch_info["message"],
+                "channel": dispatch_info["channel"],
+                "destination": dispatch_info["destination"],
+                "email": user.email,
+            },
+            status=status.HTTP_200_OK,
+        )
+

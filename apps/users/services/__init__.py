@@ -31,6 +31,17 @@ from apps.users.services.settings_services import (
     unblock_user_for_user,
     apply_user_access_control_action,
 )
+from apps.users.services.security_services import (
+    get_user_contact_info,
+    update_user_contact_info,
+    get_user_security_overview,
+    toggle_user_2fa,
+    dispatch_2fa_otp,
+    verify_2fa_otp,
+    list_user_devices,
+    register_or_update_user_device,
+    delete_user_device,
+)
 
 __all__ = [
     "register_user",
@@ -58,4 +69,13 @@ __all__ = [
     "block_user_for_user",
     "unblock_user_for_user",
     "apply_user_access_control_action",
+    "get_user_contact_info",
+    "update_user_contact_info",
+    "get_user_security_overview",
+    "toggle_user_2fa",
+    "dispatch_2fa_otp",
+    "verify_2fa_otp",
+    "list_user_devices",
+    "register_or_update_user_device",
+    "delete_user_device",
 ]

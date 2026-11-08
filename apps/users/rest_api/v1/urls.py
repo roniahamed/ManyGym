@@ -28,6 +28,12 @@ from apps.users.rest_api.v1.views import (
     UserEducationDetailView,
     UserSocialLinkListCreateView,
     UserSocialLinkDetailView,
+    UserSecuritySettingsView,
+    UserContactInfoView,
+    UserSecurityChangePasswordView,
+    UserTwoFactorSettingsView,
+    UserDeviceListView,
+    UserDeviceDetailView,
 )
 
 urlpatterns = [
@@ -72,5 +78,12 @@ urlpatterns = [
     path("settings/blocked-users/<uuid:user_id>/", UserBlockedUserDetailView.as_view(), name="user-settings-blocked-user-detail"),
     path("settings/followers/<uuid:user_id>/block/", UserFollowerBlockView.as_view(), name="user-settings-follower-block"),
     path("settings/blocked-users/followers/<uuid:user_id>/", UserFollowerBlockView.as_view(), name="user-settings-blocked-users-follower-block"),
+    # Section 5: Login and Security routes
+    path("settings/security/", UserSecuritySettingsView.as_view(), name="user-settings-security"),
+    path("settings/security/contact-info/", UserContactInfoView.as_view(), name="user-settings-security-contact-info"),
+    path("settings/security/change-password/", UserSecurityChangePasswordView.as_view(), name="user-settings-security-change-password"),
+    path("settings/security/2fa/", UserTwoFactorSettingsView.as_view(), name="user-settings-security-2fa"),
+    path("settings/security/devices/", UserDeviceListView.as_view(), name="user-settings-security-devices"),
+    path("settings/security/devices/<str:device_id>/", UserDeviceDetailView.as_view(), name="user-settings-security-device-detail"),
 ]
 

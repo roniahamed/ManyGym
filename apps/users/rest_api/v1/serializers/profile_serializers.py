@@ -210,6 +210,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "email",
+            "secondary_email",
             "first_name",
             "last_name",
             "phone",

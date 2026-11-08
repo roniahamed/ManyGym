@@ -19,7 +19,7 @@ def hash_token_string(token_str: str) -> str:
     return hashlib.sha256(token_str.encode("utf-8")).hexdigest()
 
 
-def issue_context_token(user: User, context_type: str = TokenContextType.PERSONAL, gym: Gym = None) -> dict:
+def issue_context_token(user: User, context_type: str = TokenContextType.PERSONAL, gym: Gym = None, device_id: str = "") -> dict:
     """
     Generates a JWT access and refresh token pair signed with specific context claims.
     Registers the session in AuthToken table.
@@ -66,6 +66,7 @@ def issue_context_token(user: User, context_type: str = TokenContextType.PERSONA
         gym=gym if context_type == TokenContextType.GYM else None,
         token_hash=token_hash,
         context_type=context_type,
+        device_id=device_id or "",
         expires_at=expires_at,
     )
 
@@ -84,14 +85,24 @@ def authenticate_user(
     password: str,
     reactivate: bool = False,
     restore: bool = False,
+    device_id: str = "",
+    device_name: str = "",
+    ip_address: str = None,
+    user_agent: str = "",
 ) -> tuple[User, dict]:
     """
     Authenticates user credentials and returns user and personal context tokens.
-    Handles deactivated and soft-deleted accounts by prompting for reactivation/restoration
-    or restoring when requested.
-    Includes brute-force account lockout protection: 5 consecutive failed attempts trigger
-    a 300-second lockout with Retry-After backoff.
+    Handles deactivated and soft-deleted accounts:
+    - Account Deactivate: if login again, the deactivate status will be removed automatically.
+    - Account Delete: 24 hours wait grace period; if login again within 24 hours, removes delete request.
+      If beyond 24 hours, permanently rejected.
+    Handles Two-Factor Authentication:
+    - If 2FA is ON, dispatches OTP via fallback (Primary email -> Secondary email -> Phone SMS)
+      and returns two_factor_required challenge.
+    Enforces maximum 5 logged-in devices.
     """
+    import uuid
+    from datetime import timedelta
     from django.core.cache import cache
     from rest_framework.exceptions import Throttled
     from django.utils import timezone as dj_timezone
@@ -136,25 +147,24 @@ def authenticate_user(
     cache.delete(lockout_key)
 
     setting = user.get_settings()
+
+    # Account Delete: 24 hours wait. If login again within this time, we will remove delete request.
     if setting.is_deleted or user.status == UserStatus.DELETED:
-        if restore:
+        deleted_at = setting.deleted_at or user.updated_at
+        if deleted_at and (dj_timezone.now() - deleted_at) <= timedelta(hours=24):
             from apps.users.services.settings_services import apply_user_access_control_action
             apply_user_access_control_action(user, action="restore", password=password)
             user.refresh_from_db()
+            setting.refresh_from_db()
         else:
-            raise DomainValidationError(
-                "This account has been deleted. Do you want to restore it? If so, please confirm restoration."
-            )
+            raise DomainValidationError("This account has been permanently deleted.")
 
+    # Account Deactivate: if login again, the deactivate status will be removed.
     if setting.is_deactivated or user.status == UserStatus.DEACTIVATED:
-        if reactivate:
-            from apps.users.services.settings_services import apply_user_access_control_action
-            apply_user_access_control_action(user, action="reactivate")
-            user.refresh_from_db()
-        else:
-            raise DomainValidationError(
-                "This account is deactivated. Do you want to reactivate it? If so, please reactivate your account."
-            )
+        from apps.users.services.settings_services import apply_user_access_control_action
+        apply_user_access_control_action(user, action="reactivate")
+        user.refresh_from_db()
+        setting.refresh_from_db()
 
     if user.status != UserStatus.ACTIVE or not user.is_active:
         raise DomainValidationError("Your account is currently inactive or suspended.")
@@ -162,7 +172,30 @@ def authenticate_user(
     if not user.is_verified:
         raise DomainValidationError("Your account has not been verified yet. Please verify your OTP.")
 
-    tokens = issue_context_token(user, context_type=TokenContextType.PERSONAL)
+    # Two Factor Authentication: ON/OFF
+    if getattr(setting, "two_factor_enabled", False):
+        from apps.users.services.security_services import dispatch_2fa_otp
+        dispatch_info = dispatch_2fa_otp(user)
+        return user, {
+            "two_factor_required": True,
+            "channel": dispatch_info["channel"],
+            "destination": dispatch_info["destination"],
+            "email": user.email,
+            "message": dispatch_info["message"],
+        }
+
+    # Logged in Devices (Max 5)
+    from apps.users.services.security_services import register_or_update_user_device
+    effective_device_id = device_id.strip() if device_id else str(uuid.uuid4())
+    register_or_update_user_device(
+        user=user,
+        device_id=effective_device_id,
+        device_name=device_name,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+    tokens = issue_context_token(user, context_type=TokenContextType.PERSONAL, device_id=effective_device_id)
     return user, tokens
 
 

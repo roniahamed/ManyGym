@@ -12,12 +12,25 @@ from apps.users.rest_api.v1.serializers import (
     UserFollowerBlockCreateSerializer,
     UserSearchToBlockSerializer,
     UserAccessControlActionSerializer,
+    UserContactInfoSerializer,
+    UserContactInfoUpdateSerializer,
+    UserTwoFactorToggleSerializer,
+    UserDeviceSerializer,
+    UserSecuritySettingsSerializer,
+    ChangePasswordSerializer,
 )
 from apps.users.services import (
     update_user_settings,
     block_user_for_user,
     unblock_user_for_user,
     apply_user_access_control_action,
+    get_user_contact_info,
+    update_user_contact_info,
+    get_user_security_overview,
+    toggle_user_2fa,
+    list_user_devices,
+    delete_user_device,
+    change_password,
 )
 from apps.users.selectors import (
     get_user_settings,
@@ -348,4 +361,236 @@ Executes administrative account lifecycle state transitions on the authenticated
             confirmation=serializer.validated_data.get("confirmation"),
         )
         return Response(UserSettingSerializer(updated_settings).data, status=status.HTTP_200_OK)
+
+
+# ==============================================================================
+# SECTION 5: LOGIN AND SECURITY VIEWS
+# ==============================================================================
+
+class UserSecuritySettingsView(APIView):
+    """
+    Overview endpoint for Login and Security settings.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Settings - Login & Security"],
+        summary="Retrieve Login and Security Overview",
+        description="""
+### Summary
+Retrieves comprehensive Login and Security settings including:
+- Contact info (primary email, optional secondary email, optional phone)
+- Two Factor Authentication (2FA) status (ON/OFF)
+- Active logged-in devices count (max 5)
+- Account status (deactivation, deletion grace period status)
+        """,
+        responses={
+            200: OpenApiResponse(response=UserSecuritySettingsSerializer, description="Security settings overview retrieved successfully."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def get(self, request):
+        overview = get_user_security_overview(request.user)
+        return Response(UserSecuritySettingsSerializer(overview).data, status=status.HTTP_200_OK)
+
+
+class UserContactInfoView(APIView):
+    """
+    Endpoint for retrieving and updating user contact info.
+    Primary email cannot be updated or deleted.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Settings - Login & Security"],
+        summary="Retrieve Contact Information",
+        description="""
+### Summary
+Retrieves the user's contact information:
+- Primary email (immutable/read-only)
+- Secondary email (optional)
+- Phone number (optional)
+        """,
+        responses={
+            200: OpenApiResponse(response=UserContactInfoSerializer, description="Contact information retrieved successfully."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def get(self, request):
+        contact_info = get_user_contact_info(request.user)
+        return Response(UserContactInfoSerializer(contact_info).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["User Settings - Login & Security"],
+        summary="Update Contact Information",
+        description="""
+### Summary
+Updates optional secondary email and/or phone.
+Primary email is immutable and cannot be updated or deleted.
+
+### Validation Rules
+- `primary_email` or `email`: Attempting to submit either will return a 400 Bad Request error.
+- `secondary_email`: Valid email string, or null/empty to remove. Cannot be identical to primary email.
+- `phone`: Max 50 characters, or null/empty to remove.
+        """,
+        request=UserContactInfoUpdateSerializer,
+        responses={
+            200: OpenApiResponse(response=UserContactInfoSerializer, description="Contact information updated successfully."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure or primary email modification attempt."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def patch(self, request):
+        serializer = UserContactInfoUpdateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        user = update_user_contact_info(
+            user=request.user,
+            secondary_email=serializer.validated_data.get("secondary_email", ...),
+            phone=serializer.validated_data.get("phone", ...),
+        )
+        return Response(UserContactInfoSerializer(get_user_contact_info(user)).data, status=status.HTTP_200_OK)
+
+
+class UserSecurityChangePasswordView(APIView):
+    """
+    Endpoint for authenticated password change under Login and Security.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Settings - Login & Security"],
+        summary="Change Password",
+        description="""
+### Summary
+Changes account password for the logged-in user after verifying current password.
+
+### Request Body
+- `current_password` (required): Current account password.
+- `new_password` (required): New password (at least 8 characters).
+- `confirm_password` (optional): Confirmation password matching new password.
+        """,
+        request=ChangePasswordSerializer,
+        responses={
+            200: OpenApiResponse(response=MessageResponseSerializer, description="Password successfully changed."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Incorrect current password or weak new password."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        change_password(
+            user=request.user,
+            current_password=serializer.validated_data["current_password"],
+            new_password=serializer.validated_data["new_password"],
+        )
+        return Response({"message": "Password successfully changed."}, status=status.HTTP_200_OK)
+
+
+class UserTwoFactorSettingsView(APIView):
+    """
+    Endpoint for viewing and toggling Two Factor Authentication state.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Settings - Login & Security"],
+        summary="Retrieve 2FA Status",
+        description="Retrieves whether Two Factor Authentication (2FA) is enabled for the account.",
+        responses={
+            200: OpenApiResponse(response=UserTwoFactorToggleSerializer, description="2FA status retrieved."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def get(self, request):
+        setting = request.user.get_settings()
+        return Response({"two_factor_enabled": setting.two_factor_enabled}, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["User Settings - Login & Security"],
+        summary="Toggle 2FA (ON/OFF)",
+        description="""
+### Summary
+Enables or disables Two Factor Authentication for the account.
+When ON, subsequent logins will require a 6-digit OTP code dispatched via fallback:
+Primary Email -> Secondary Email -> Phone SMS.
+        """,
+        request=UserTwoFactorToggleSerializer,
+        responses={
+            200: OpenApiResponse(response=UserTwoFactorToggleSerializer, description="2FA status updated."),
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation failure."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def patch(self, request):
+        serializer = UserTwoFactorToggleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        enabled = toggle_user_2fa(request.user, serializer.validated_data["two_factor_enabled"])
+        return Response({"two_factor_enabled": enabled}, status=status.HTTP_200_OK)
+
+
+class UserDeviceListView(APIView):
+    """
+    Endpoint for listing active logged-in devices (max 5).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Settings - Login & Security"],
+        summary="List Logged-In Devices",
+        description="""
+### Summary
+Lists all active logged-in devices for the authenticated user profile (up to 5 devices).
+Each device record displays device identifier, friendly name, IP address, user agent, and last active timestamp.
+        """,
+        responses={
+            200: OpenApiResponse(response=UserDeviceSerializer(many=True), description="Logged-in devices list retrieved."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+        },
+    )
+    def get(self, request):
+        devices = list_user_devices(request.user)
+        return Response(UserDeviceSerializer(devices, many=True, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+class UserDeviceDetailView(APIView):
+    """
+    Endpoint for deleting a logged-in device and cleaning its keys.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["User Settings - Login & Security"],
+        summary="Delete Logged-In Device",
+        description="""
+### Summary
+Removes a logged-in device session.
+- Revokes active authentication tokens associated with the device.
+- Cleans and purges all cryptographic device keys (`UserDeviceKey`) stored for this device.
+        """,
+        parameters=[
+            OpenApiParameter(
+                name="device_id",
+                description="Client device identifier string or device record UUID.",
+                required=True,
+                type=str,
+                location=OpenApiParameter.PATH,
+            )
+        ],
+        responses={
+            200: OpenApiResponse(response=MessageResponseSerializer, description="Device removed and keys cleaned successfully."),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Authentication required."),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Device not found."),
+        },
+    )
+    def delete(self, request, device_id):
+        delete_user_device(request.user, device_id)
+        return Response(
+            {"message": "Device removed and device key cleaned successfully."},
+            status=status.HTTP_200_OK,
+        )
+
 

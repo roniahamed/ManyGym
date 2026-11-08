@@ -47,6 +47,13 @@ from apps.users.rest_api.v1.serializers.settings_serializers import (
     UserFollowerBlockCreateSerializer,
     UserSearchToBlockSerializer,
     UserAccessControlActionSerializer,
+    UserContactInfoSerializer,
+    UserContactInfoUpdateSerializer,
+    UserTwoFactorToggleSerializer,
+    UserDeviceSerializer,
+    UserSecuritySettingsSerializer,
+    Verify2FASerializer,
+    Resend2FASerializer,
 )
 
 __all__ = [
@@ -92,4 +99,11 @@ __all__ = [
     "UserFollowerBlockCreateSerializer",
     "UserSearchToBlockSerializer",
     "UserAccessControlActionSerializer",
+    "UserContactInfoSerializer",
+    "UserContactInfoUpdateSerializer",
+    "UserTwoFactorToggleSerializer",
+    "UserDeviceSerializer",
+    "UserSecuritySettingsSerializer",
+    "Verify2FASerializer",
+    "Resend2FASerializer",
 ]

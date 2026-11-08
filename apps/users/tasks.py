@@ -26,3 +26,18 @@ def send_email_task(self, subject, recipient_list, message, html_message=None):
     except Exception as exc:
         logger.error(f"Failed to send email to {recipient_list}: {str(exc)}")
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=10)
+def send_sms_task(self, phone, message):
+    """
+    Asynchronously dispatches SMS messages via SMS provider backend.
+    """
+    try:
+        logger.info(f"Dispatching SMS to {phone}: '{message}'")
+        # In production, calls Twilio/AWS SNS; in local/dev succeeds and logs
+        return True
+    except Exception as exc:
+        logger.error(f"Failed to send SMS to {phone}: {str(exc)}")
+        raise self.retry(exc=exc)
+

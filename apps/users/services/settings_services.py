@@ -185,6 +185,11 @@ def apply_user_access_control_action(
         if not password or not user.check_password(password):
             raise DomainValidationError("Invalid password confirmation.")
 
+        if settings_obj.deleted_at:
+            from datetime import timedelta
+            if timezone.now() - settings_obj.deleted_at > timedelta(hours=24):
+                raise DomainValidationError("This account has been permanently deleted and cannot be restored.")
+
         settings_obj.restore()
         settings_obj.save()
 

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.users.models import User, UserSetting, UserBlockedUser
+from apps.users.models import User, UserSetting, UserBlockedUser, UserDevice
 from common.serializers import StrictCharField, StrictBooleanField, StrictUUIDField
 from common.enums import UserAudienceMessagingEnum, UserAudienceFollowEnum, UserAudienceVisibilityEnum
 
@@ -20,6 +20,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
             "language",
             "video_autoplay",
             "dark_mode",
+            "two_factor_enabled",
             "is_private",
             "require_follow_approval",
             "who_can_follow",
@@ -39,6 +40,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
             "user_id",
             "is_private",
             "who_can_follow_me",
+            "two_factor_enabled",
             "deactivated_at",
             "deleted_at",
             "created_at",
@@ -225,4 +227,129 @@ class UserAccessControlActionSerializer(serializers.Serializer):
             if not password:
                 raise serializers.ValidationError({"password": "Password is required to restore account."})
         return attrs
+
+
+# ==============================================================================
+# LOGIN AND SECURITY SERIALIZERS
+# ==============================================================================
+
+class UserContactInfoSerializer(serializers.Serializer):
+    """
+    Representation of User Contact Info in Login and Security.
+    Primary email is strictly read-only.
+    """
+    primary_email = serializers.EmailField(read_only=True)
+    secondary_email = serializers.EmailField(allow_null=True, required=False)
+    phone = serializers.CharField(allow_null=True, required=False, max_length=50)
+
+
+class UserContactInfoUpdateSerializer(serializers.Serializer):
+    """
+    Validation serializer for updating User Contact Info.
+    Primary email cannot be updated or deleted.
+    """
+    primary_email = serializers.CharField(required=False)
+    email = serializers.CharField(required=False)
+    secondary_email = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
+    phone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=50)
+
+    def validate(self, attrs):
+        if "primary_email" in self.initial_data or "email" in self.initial_data:
+            raise serializers.ValidationError({
+                "primary_email": "Primary email cannot be updated or deleted."
+            })
+        return attrs
+
+    def validate_secondary_email(self, value):
+        if value is not None and value != "":
+            cleaned = value.strip().lower()
+            request = self.context.get("request")
+            if request and hasattr(request, "user") and request.user.email.lower() == cleaned:
+                raise serializers.ValidationError("Secondary email cannot be the same as primary email.")
+            return cleaned
+        return None
+
+    def validate_phone(self, value):
+        if value is not None and value != "":
+            return value.strip()
+        return None
+
+
+class UserTwoFactorToggleSerializer(serializers.Serializer):
+    """
+    Validation serializer for toggling Two Factor Authentication state.
+    """
+    two_factor_enabled = StrictBooleanField(
+        required=True,
+        help_text="Two Factor Authentication toggle (true=ON, false=OFF).",
+    )
+
+
+class UserDeviceSerializer(serializers.ModelSerializer):
+    """
+    Projection serializer for logged-in devices (max 5 per user).
+    """
+    is_current_device = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserDevice
+        fields = [
+            "id",
+            "device_id",
+            "device_name",
+            "ip_address",
+            "user_agent",
+            "last_login",
+            "created_at",
+            "is_current_device",
+        ]
+        read_only_fields = fields
+
+    def get_is_current_device(self, obj: UserDevice) -> bool:
+        request = self.context.get("request")
+        if not request:
+            return False
+        req_dev_id = request.headers.get("X-Device-Id")
+        if req_dev_id and req_dev_id == obj.device_id:
+            return True
+        return False
+
+
+class UserSecuritySettingsSerializer(serializers.Serializer):
+    """
+    High-level dashboard serializer for Login and Security.
+    """
+    contact_info = UserContactInfoSerializer()
+    two_factor_enabled = serializers.BooleanField()
+    logged_in_devices_count = serializers.IntegerField()
+    max_devices = serializers.IntegerField(default=5)
+    account_status = serializers.DictField()
+
+
+class Verify2FASerializer(serializers.Serializer):
+    """
+    Request payload serializer for verifying Two Factor Authentication OTP.
+    """
+    email = serializers.EmailField(required=True)
+    otp_code = StrictCharField(
+        min_length=6,
+        max_length=6,
+        required=True,
+        help_text="6-digit numeric verification code.",
+    )
+    device_id = StrictCharField(required=False, allow_blank=True, max_length=100)
+    device_name = StrictCharField(required=False, allow_blank=True, max_length=150)
+
+
+class Resend2FASerializer(serializers.Serializer):
+    """
+    Request payload serializer for requesting a new 2FA code via fallback or specific channel.
+    """
+    email = serializers.EmailField(required=True)
+    channel = serializers.ChoiceField(
+        choices=["primary_email", "secondary_email", "phone_sms", "auto"],
+        required=False,
+        default="auto",
+    )
+
 

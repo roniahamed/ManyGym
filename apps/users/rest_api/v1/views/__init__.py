@@ -33,6 +33,12 @@ from apps.users.rest_api.v1.views.settings_views import (
     UserSearchUsersToBlockView,
     UserFollowerBlockView,
     UserAccessControlActionView,
+    UserSecuritySettingsView,
+    UserContactInfoView,
+    UserSecurityChangePasswordView,
+    UserTwoFactorSettingsView,
+    UserDeviceListView,
+    UserDeviceDetailView,
 )
 from apps.users.selectors import (
     resolve_target_entity,
@@ -70,4 +76,10 @@ __all__ = [
     "UserSearchUsersToBlockView",
     "UserFollowerBlockView",
     "UserAccessControlActionView",
+    "UserSecuritySettingsView",
+    "UserContactInfoView",
+    "UserSecurityChangePasswordView",
+    "UserTwoFactorSettingsView",
+    "UserDeviceListView",
+    "UserDeviceDetailView",
 ]

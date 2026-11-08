@@ -905,25 +905,15 @@ class TestUserSettingsBusinessLogicAndStateTransitions:
         res_revoked = alice_client.get(reverse("user-settings"))
         assert res_revoked.status_code == status.HTTP_401_UNAUTHORIZED
 
-        # Reactivate using login flow
+        # Reactivate using login flow: logging in again automatically removes deactivate status
         client = APIClient()
         login_res = client.post(
             reverse("login"),
             {"email": user_alice.email, "password": "SecurePassword123!"},
             format="json",
         )
-        # Should inform that account is deactivated
-        assert login_res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "deactivated" in str(login_res.data).lower()
-
-        # Reactivate via login parameter
-        reactivate_res = client.post(
-            reverse("login"),
-            {"email": user_alice.email, "password": "SecurePassword123!", "reactivate": True},
-            format="json",
-        )
-        assert reactivate_res.status_code == status.HTTP_200_OK
-        assert "tokens" in reactivate_res.data
+        assert login_res.status_code == status.HTTP_200_OK
+        assert "tokens" in login_res.data
 
         user_alice.refresh_from_db()
         assert user_alice.status == UserStatus.ACTIVE
@@ -938,27 +928,19 @@ class TestUserSettingsBusinessLogicAndStateTransitions:
         )
 
         client = APIClient()
-        # Normal login attempt returns 400 / restoration prompt
+        # Normal login attempt within 24 hours automatically removes delete request and restores account
         login_res = client.post(
             reverse("login"),
             {"email": user_alice.email, "password": "SecurePassword123!"},
             format="json",
         )
-        assert login_res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "deleted" in str(login_res.data).lower()
-
-        # Login with restore=True
-        restore_res = client.post(
-            reverse("login"),
-            {"email": user_alice.email, "password": "SecurePassword123!", "restore": True},
-            format="json",
-        )
-        assert restore_res.status_code == status.HTTP_200_OK
-        assert "tokens" in restore_res.data
+        assert login_res.status_code == status.HTTP_200_OK
+        assert "tokens" in login_res.data
 
         user_alice.refresh_from_db()
         assert user_alice.status == UserStatus.ACTIVE
         assert user_alice.is_active is True
+        assert user_alice.settings.is_deleted is False
 
 
 # ==============================================================================
@@ -1317,25 +1299,16 @@ class TestUserSettingsWorstCaseAdversarialScenarios:
         res4 = alice_client.get(reverse("user-settings"))
         assert res4.status_code == status.HTTP_401_UNAUTHORIZED
 
-        # 5. Normal login while deactivated informs user and prompts reactivation -> 400
+        # 5. Login while deactivated automatically removes deactivation -> 200 OK
         anon_client = APIClient()
         res5 = anon_client.post(
             reverse("login"),
             {"email": user_alice.email, "password": "SecurePassword123!"},
             format="json",
         )
-        assert res5.status_code == status.HTTP_400_BAD_REQUEST
-        assert "deactivated" in str(res5.data).lower()
-
-        # 6. Reactivate via login parameter -> 200 OK
-        res6 = anon_client.post(
-            reverse("login"),
-            {"email": user_alice.email, "password": "SecurePassword123!", "reactivate": True},
-            format="json",
-        )
-        assert res6.status_code == status.HTTP_200_OK
-        assert "tokens" in res6.data
-        new_token = res6.data["tokens"]["access"]
+        assert res5.status_code == status.HTTP_200_OK
+        assert "tokens" in res5.data
+        new_token = res5.data["tokens"]["access"]
         alice_client.credentials(HTTP_AUTHORIZATION=f"Bearer {new_token}")
 
         # 7. Delete account
@@ -1351,22 +1324,14 @@ class TestUserSettingsWorstCaseAdversarialScenarios:
         res8 = alice_client.get(reverse("user-settings"))
         assert res8.status_code == status.HTTP_401_UNAUTHORIZED
 
-        # 9. Normal login while deleted informs user and prompts restoration -> 400
+        # 9. Login while deleted within 24 hours automatically removes delete request -> 200 OK
         res9 = anon_client.post(
             reverse("login"),
             {"email": user_alice.email, "password": "SecurePassword123!"},
             format="json",
         )
-        assert res9.status_code == status.HTTP_400_BAD_REQUEST
-        assert "deleted" in str(res9.data).lower()
-
-        # 10. Restore via login parameter with valid password -> 200 OK
-        res10 = anon_client.post(
-            reverse("login"),
-            {"email": user_alice.email, "password": "SecurePassword123!", "restore": True},
-            format="json",
-        )
-        assert res10.status_code == status.HTTP_200_OK
+        assert res9.status_code == status.HTTP_200_OK
+        assert "tokens" in res9.data
         user_alice.refresh_from_db()
         assert user_alice.status == UserStatus.ACTIVE
         assert user_alice.is_active is True

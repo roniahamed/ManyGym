@@ -46,6 +46,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     phone = models.CharField(max_length=50, blank=True, null=True)
+    secondary_email = models.EmailField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Optional secondary/backup email address for security and recovery notifications.",
+    )
     status = models.CharField(
         max_length=20,
         choices=UserStatus.choices,
@@ -246,6 +252,7 @@ class OTPVerification(models.Model):
     class Purpose(models.TextChoices):
         SIGNUP_VERIFICATION = "signup_verification", "Signup Verification"
         PASSWORD_RESET = "password_reset", "Password Reset"
+        TWO_FACTOR = "two_factor", "Two Factor Authentication"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(db_index=True)
@@ -432,6 +439,12 @@ class UserSetting(models.Model):
         help_text="Dark Mode (ON/OFF).",
     )
 
+    # --- Login & Security ---
+    two_factor_enabled = models.BooleanField(
+        default=False,
+        help_text="Two Factor Authentication (ON/OFF).",
+    )
+
     # --- Privacy and Sharing -> Audience ---
     who_can_follow = models.CharField(
         max_length=50,
@@ -563,3 +576,35 @@ class UserBlockedUser(models.Model):
 
     def __str__(self):
         return f"{self.blocker.email} blocked {self.blocked_user.email}"
+
+
+class UserDevice(models.Model):
+    """
+    Tracks active/logged-in devices for an individual user profile.
+    Enforces maximum of 5 concurrent logged-in devices.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="devices",
+    )
+    device_id = models.CharField(max_length=100, db_index=True)
+    device_name = models.CharField(max_length=150, blank=True, default="")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default="")
+    last_login = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "user_devices"
+        verbose_name = "User Device"
+        verbose_name_plural = "User Devices"
+        ordering = ["-last_login"]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "device_id"], name="unique_user_device"),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.device_name or self.device_id}"
+
