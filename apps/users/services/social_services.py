@@ -3,11 +3,63 @@ from typing import Any, Optional, Tuple, Union
 from django.db import models, transaction
 
 from apps.users.models import User, UserFollow, UserFollowRequest, FollowRequestStatus
+from common.enums import UserAudienceFollowEnum
 from common.exceptions import (
     DomainValidationError,
     ResourceNotFoundError,
     PermissionDeniedError,
 )
+
+
+def is_friend_or_friend_of_friends(target_user: User, potential_follower: User) -> bool:
+    """
+    Evaluates whether potential_follower qualifies under 'friends_of_friends' audience follow rule:
+    1. If target_user already follows potential_follower directly, return True.
+    2. Identify target_user's active mutual friends (users where target follows X and X follows target).
+    3. Check if potential_follower is a mutual friend with any of target_user's active mutual friends.
+    """
+    if target_user.id == potential_follower.id:
+        return True
+
+    # Direct follow from target to potential_follower
+    if UserFollow.objects.filter(follower=target_user, followed_user=potential_follower).exists():
+        return True
+
+    # Identify active mutual friends of target_user (excluding deleted and deactivated accounts)
+    target_following = UserFollow.objects.filter(
+        follower=target_user,
+        followed_user__is_active=True,
+    ).exclude(
+        followed_user__settings__is_deleted=True
+    ).exclude(
+        followed_user__settings__is_deactivated=True
+    ).values_list("followed_user_id", flat=True)
+
+    mutual_friend_ids = UserFollow.objects.filter(
+        follower_id__in=target_following,
+        followed_user=target_user,
+        follower__is_active=True,
+    ).exclude(
+        follower__settings__is_deleted=True
+    ).exclude(
+        follower__settings__is_deactivated=True
+    ).values_list("follower_id", flat=True)
+
+    if not mutual_friend_ids.exists():
+        return False
+
+    # Check if potential_follower has mutual connection with any of target's mutual friends
+    follower_following = UserFollow.objects.filter(
+        follower=potential_follower,
+        followed_user_id__in=mutual_friend_ids,
+        followed_user__is_active=True,
+    ).values_list("followed_user_id", flat=True)
+
+    return UserFollow.objects.filter(
+        follower_id__in=follower_following,
+        followed_user=potential_follower,
+        follower__is_active=True,
+    ).exists()
 
 
 @transaction.atomic
@@ -63,6 +115,11 @@ def follow_user(follower: User, target_user_id) -> Tuple[Union[UserFollow, UserF
     ).first()
     if existing_follow:
         return existing_follow, False
+
+    # Check audience follow policy ('everyone' vs 'friends_of_friends')
+    if getattr(setting, "who_can_follow", None) == UserAudienceFollowEnum.FRIENDS_OF_FRIENDS:
+        if not is_friend_or_friend_of_friends(target_user, follower):
+            raise PermissionDeniedError("Only friends of friends can follow this user.")
 
     # Check if target user requires approval before accepting followers
     if setting.require_follow_approval:

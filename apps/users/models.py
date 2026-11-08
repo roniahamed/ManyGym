@@ -5,6 +5,7 @@ from django.utils import timezone
 from common.enums import (
     UserStatus,
     UserAudienceMessagingEnum,
+    UserAudienceFollowEnum,
     UserAudienceVisibilityEnum,
     GenderEnum,
     SocialPlatformEnum,
@@ -422,17 +423,27 @@ class UserSetting(models.Model):
         default="en",
         help_text="Display language (e.g. en, bn).",
     )
+    video_autoplay = models.BooleanField(
+        default=True,
+        help_text="Video Autoplay (ON/OFF).",
+    )
     dark_mode = models.BooleanField(
         default=False,
         help_text="Dark Mode (ON/OFF).",
     )
 
     # --- Privacy and Sharing -> Audience ---
+    who_can_follow = models.CharField(
+        max_length=50,
+        choices=UserAudienceFollowEnum.choices,
+        default=UserAudienceFollowEnum.EVERYONE,
+        help_text="Who can follow me? (Everyone, Friends of Friends)",
+    )
     who_can_message = models.CharField(
         max_length=50,
         choices=UserAudienceMessagingEnum.choices,
-        default=UserAudienceMessagingEnum.EVERYONE,
-        help_text="Who can send you messages? (Everyone, Followers, No one)",
+        default=UserAudienceMessagingEnum.FOLLOWERS,
+        help_text="Who can send you messages? (Everyone, Followers)",
     )
     who_can_see_followers = models.CharField(
         max_length=50,
@@ -481,6 +492,14 @@ class UserSetting(models.Model):
 
     def __str__(self):
         return f"Settings of {self.user.email}"
+
+    @property
+    def who_can_follow_me(self) -> str:
+        return self.who_can_follow
+
+    @who_can_follow_me.setter
+    def who_can_follow_me(self, value: str) -> None:
+        self.who_can_follow = value
 
     def deactivate(self) -> None:
         """Transitions user profile to deactivated state and records timestamp."""

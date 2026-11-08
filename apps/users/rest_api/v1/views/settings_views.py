@@ -32,8 +32,8 @@ class UserSettingsView(APIView):
     API endpoint for retrieving and updating personal user settings.
 
     Covers:
-    - Display Preferences (language, dark mode)
-    - Privacy & Audience (who can message, who can see followers/following, private profile)
+    - Display Preferences (language, video autoplay, dark mode)
+    - Privacy & Audience (who can follow, who can message, who can see followers/following, private profile)
     - Access & Control (deactivation, deletion)
     """
     permission_classes = [IsAuthenticated]
@@ -50,7 +50,7 @@ Retrieves comprehensive personal profile settings for the authenticated user, co
 - **Authorization**: Authenticated personal account context.
 
 ### Success Response
-Returns the current `UserSetting` state including personal display choices, privacy rules, and account status timestamps.
+Returns the current `UserSetting` state including personal display choices (language, video autoplay, dark mode), audience privacy rules (who can follow, who can message, follower/following visibility), and account status timestamps.
         """,
         responses={
             200: OpenApiResponse(response=UserSettingSerializer, description="User settings retrieved successfully."),
@@ -74,9 +74,13 @@ Updates display preferences, privacy policies, audience rules, or private profil
 
 ### Request Fields
 - `language` (optional, string, max 20 chars): Display language code (e.g. `'en'`, `'es'`).
-- `dark_mode` (optional, boolean): Dark mode theme toggle.
+- `video_autoplay` (optional, boolean): Video Autoplay toggle (ON/OFF).
+- `dark_mode` (optional, boolean): Dark mode theme toggle (ON/OFF).
 - `is_private` (optional, boolean): Sets account visibility to private profile.
-- `who_can_message` (optional, enum): `'everyone'`, `'followers'`, `'no_one'`.
+- `require_follow_approval` (optional, boolean): Require confirmation before someone can follow you.
+- `who_can_follow` (optional, enum): `'everyone'`, `'friends_of_friends'`.
+- `who_can_follow_me` (optional, enum): Alias for `who_can_follow`.
+- `who_can_message` (optional, enum): `'everyone'`, `'followers'`, `'no_one'`. Default is `'followers'`.
 - `who_can_see_followers` (optional, enum): `'everyone'`, `'followers'`, `'private'`.
 - `who_can_see_following` (optional, enum): `'everyone'`, `'followers'`, `'private'`.
 

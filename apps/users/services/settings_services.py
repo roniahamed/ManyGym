@@ -28,9 +28,15 @@ def update_user_settings(user: User, **data: Any) -> UserSetting:
     """
     settings_obj = get_or_create_user_settings(user)
 
+    if "who_can_follow_me" in data and ("who_can_follow" not in data or data["who_can_follow"] is None):
+        data["who_can_follow"] = data["who_can_follow_me"]
+    data.pop("who_can_follow_me", None)
+
     allowed_fields = {
         "language",
+        "video_autoplay",
         "dark_mode",
+        "who_can_follow",
         "who_can_message",
         "who_can_see_followers",
         "who_can_see_following",

@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 from channels.testing import WebsocketCommunicator
 
-from apps.users.models import User
+from apps.users.models import User, UserFollow
 from apps.gyms.models import Gym, GymBlockedUser, GymSetting
 from apps.gyms.services import create_gym
 from apps.members.models import Member
@@ -215,6 +215,10 @@ class TestUserToUserMessaging:
     """Tests 1-on-1 Manygym user to Manygym user encrypted messaging flow."""
 
     def test_user_to_user_conversation_and_message_delivery(self, alice_client, bob_client, alice, bob):
+        # Mutual follow to permit direct messaging under default 'followers' policy
+        UserFollow.objects.create(follower=alice, followed_user=bob)
+        UserFollow.objects.create(follower=bob, followed_user=alice)
+
         # 1. Alice creates conversation with Bob
         res = alice_client.post(
             "/api/v1/messaging/conversations/",
@@ -271,7 +275,10 @@ class TestUserToUserMessaging:
         assert msg_obj.delivery_status == MessageDeliveryStatusEnum.READ
         assert msg_obj.read_at is not None
 
-    def test_auto_detect_conversation_type_when_omitted(self, alice_client, bob, gym_a):
+    def test_auto_detect_conversation_type_when_omitted(self, alice_client, bob, gym_a, alice):
+        # Alice follows Bob to satisfy default 'followers' policy
+        UserFollow.objects.create(follower=alice, followed_user=bob)
+
         # 1. User to User auto-detected
         res_u2u = alice_client.post(
             "/api/v1/messaging/conversations/",
@@ -290,7 +297,8 @@ class TestUserToUserMessaging:
         assert res_u2g.status_code == status.HTTP_201_CREATED
         assert res_u2g.data["conversation_type"] == "user_to_gym"
 
-    def test_initiate_conversation_using_user_profile_id(self, alice_client, bob):
+    def test_initiate_conversation_using_user_profile_id(self, alice_client, bob, alice):
+        UserFollow.objects.create(follower=alice, followed_user=bob)
         from apps.users.models import UserProfile
         profile, _ = UserProfile.objects.get_or_create(user=bob)
 

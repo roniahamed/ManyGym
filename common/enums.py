@@ -16,6 +16,12 @@ class UserAudienceMessagingEnum(models.TextChoices):
     NO_ONE = "no_one", "No one"
 
 
+class UserAudienceFollowEnum(models.TextChoices):
+    """User audience setting: Who can follow the user profile."""
+    EVERYONE = "everyone", "Everyone"
+    FRIENDS_OF_FRIENDS = "friends_of_friends", "Friends of Friends"
+
+
 class UserAudienceVisibilityEnum(models.TextChoices):
     """User audience setting: Who can see followers or following lists of the user profile."""
     EVERYONE = "everyone", "Everyone"

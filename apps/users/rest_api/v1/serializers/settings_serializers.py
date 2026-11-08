@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from apps.users.models import User, UserSetting, UserBlockedUser
 from common.serializers import StrictCharField, StrictBooleanField, StrictUUIDField
-from common.enums import UserAudienceMessagingEnum, UserAudienceVisibilityEnum
+from common.enums import UserAudienceMessagingEnum, UserAudienceFollowEnum, UserAudienceVisibilityEnum
 
 
 class UserSettingSerializer(serializers.ModelSerializer):
@@ -10,6 +10,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
     """
     user_id = serializers.UUIDField(read_only=True)
     is_private = serializers.BooleanField(source="user.profile.is_private", read_only=True)
+    who_can_follow_me = serializers.CharField(source="who_can_follow", read_only=True)
 
     class Meta:
         model = UserSetting
@@ -17,9 +18,12 @@ class UserSettingSerializer(serializers.ModelSerializer):
             "id",
             "user_id",
             "language",
+            "video_autoplay",
             "dark_mode",
             "is_private",
             "require_follow_approval",
+            "who_can_follow",
+            "who_can_follow_me",
             "who_can_message",
             "who_can_see_followers",
             "who_can_see_following",
@@ -34,6 +38,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
             "id",
             "user_id",
             "is_private",
+            "who_can_follow_me",
             "deactivated_at",
             "deleted_at",
             "created_at",
@@ -46,10 +51,21 @@ class UserSettingUpdateSerializer(serializers.Serializer):
     Validation and deserialization serializer for updating User Settings.
     """
     language = StrictCharField(required=False, max_length=20)
+    video_autoplay = StrictBooleanField(required=False, help_text="Video Autoplay (ON/OFF).")
     dark_mode = StrictBooleanField(required=False)
     is_private = StrictBooleanField(required=False, help_text="Toggle private profile state.")
     require_follow_approval = StrictBooleanField(required=False, help_text="Require approval before someone can follow you.")
 
+    who_can_follow = serializers.ChoiceField(
+        choices=UserAudienceFollowEnum.choices,
+        required=False,
+        help_text="Who can follow me: 'everyone', 'friends_of_friends'",
+    )
+    who_can_follow_me = serializers.ChoiceField(
+        choices=UserAudienceFollowEnum.choices,
+        required=False,
+        help_text="Alias for who_can_follow: 'everyone', 'friends_of_friends'",
+    )
     who_can_message = serializers.ChoiceField(
         choices=UserAudienceMessagingEnum.choices,
         required=False,
@@ -65,6 +81,11 @@ class UserSettingUpdateSerializer(serializers.Serializer):
         required=False,
         help_text="Visibility of followed pages/users: 'everyone', 'followers', 'private'",
     )
+
+    def validate(self, attrs):
+        if "who_can_follow_me" in attrs and "who_can_follow" not in attrs:
+            attrs["who_can_follow"] = attrs["who_can_follow_me"]
+        return attrs
 
     def validate_language(self, value: str) -> str:
         cleaned = value.strip()

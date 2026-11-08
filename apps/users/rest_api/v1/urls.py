@@ -70,5 +70,7 @@ urlpatterns = [
     path("settings/blocked-users/", UserBlockedUsersListView.as_view(), name="user-settings-blocked-users"),
     path("settings/blocked-users/search/", UserSearchUsersToBlockView.as_view(), name="user-settings-blocked-users-search"),
     path("settings/blocked-users/<uuid:user_id>/", UserBlockedUserDetailView.as_view(), name="user-settings-blocked-user-detail"),
+    path("settings/followers/<uuid:user_id>/block/", UserFollowerBlockView.as_view(), name="user-settings-follower-block"),
+    path("settings/blocked-users/followers/<uuid:user_id>/", UserFollowerBlockView.as_view(), name="user-settings-blocked-users-follower-block"),
 ]
 

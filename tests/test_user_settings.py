@@ -8,6 +8,7 @@ from apps.authentication.services import issue_context_token
 from common.enums import (
     TokenContextType,
     UserAudienceMessagingEnum,
+    UserAudienceFollowEnum,
     UserAudienceVisibilityEnum,
     UserStatus,
 )
@@ -81,8 +82,11 @@ class TestUserSettings:
     def test_default_user_settings(self, user_alice):
         settings_obj = user_alice.get_settings()
         assert settings_obj.language == "en"
+        assert settings_obj.video_autoplay is True
         assert settings_obj.dark_mode is False
-        assert settings_obj.who_can_message == UserAudienceMessagingEnum.EVERYONE
+        assert settings_obj.who_can_follow == UserAudienceFollowEnum.EVERYONE
+        assert settings_obj.who_can_follow_me == UserAudienceFollowEnum.EVERYONE
+        assert settings_obj.who_can_message == UserAudienceMessagingEnum.FOLLOWERS
         assert settings_obj.who_can_see_followers == UserAudienceVisibilityEnum.EVERYONE
         assert settings_obj.who_can_see_following == UserAudienceVisibilityEnum.EVERYONE
         assert settings_obj.is_deactivated is False
@@ -94,9 +98,12 @@ class TestUserSettings:
         assert res.status_code == status.HTTP_200_OK
         assert res.data["user_id"] == str(user_alice.id)
         assert res.data["language"] == "en"
+        assert res.data["video_autoplay"] is True
         assert res.data["dark_mode"] is False
         assert res.data["is_private"] is False
-        assert res.data["who_can_message"] == "everyone"
+        assert res.data["who_can_follow"] == "everyone"
+        assert res.data["who_can_follow_me"] == "everyone"
+        assert res.data["who_can_message"] == "followers"
         assert res.data["who_can_see_followers"] == "everyone"
         assert res.data["who_can_see_following"] == "everyone"
 
@@ -104,25 +111,42 @@ class TestUserSettings:
         url = reverse("user-settings")
         payload = {
             "language": "bn",
+            "video_autoplay": False,
             "dark_mode": True,
             "is_private": True,
-            "who_can_message": "followers",
+            "who_can_follow": "friends_of_friends",
+            "who_can_message": "everyone",
             "who_can_see_followers": "private",
             "who_can_see_following": "followers",
         }
         res = alice_client.patch(url, payload, format="json")
         assert res.status_code == status.HTTP_200_OK
         assert res.data["language"] == "bn"
+        assert res.data["video_autoplay"] is False
         assert res.data["dark_mode"] is True
         assert res.data["is_private"] is True
-        assert res.data["who_can_message"] == "followers"
+        assert res.data["who_can_follow"] == "friends_of_friends"
+        assert res.data["who_can_follow_me"] == "friends_of_friends"
+        assert res.data["who_can_message"] == "everyone"
         assert res.data["who_can_see_followers"] == "private"
         assert res.data["who_can_see_following"] == "followers"
 
         user_alice.refresh_from_db()
         assert user_alice.profile.is_private is True
         assert user_alice.settings.language == "bn"
+        assert user_alice.settings.video_autoplay is False
         assert user_alice.settings.dark_mode is True
+        assert user_alice.settings.who_can_follow == "friends_of_friends"
+        assert user_alice.settings.who_can_message == "everyone"
+
+    def test_patch_who_can_follow_me_alias(self, alice_client, user_alice):
+        url = reverse("user-settings")
+        res = alice_client.patch(url, {"who_can_follow_me": "friends_of_friends"}, format="json")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["who_can_follow"] == "friends_of_friends"
+        assert res.data["who_can_follow_me"] == "friends_of_friends"
+        user_alice.refresh_from_db()
+        assert user_alice.settings.who_can_follow == "friends_of_friends"
 
 
 @pytest.mark.django_db
@@ -253,6 +277,31 @@ class TestUserAudienceAndPrivacySettings:
         UserBlockedUser.objects.create(blocker=user_alice, blocked_user=user_bob)
         with pytest.raises(PermissionDeniedError, match="blocked from messaging"):
             get_or_create_user_to_user_conversation(user_bob, user_alice)
+
+    def test_who_can_follow_friends_of_friends_policy(self, alice_client, bob_client, user_alice, user_bob, user_charlie):
+        # Alice restricts who can follow to friends_of_friends
+        settings = user_alice.get_settings()
+        settings.who_can_follow = UserAudienceFollowEnum.FRIENDS_OF_FRIENDS
+        settings.save()
+
+        # Bob (not a friend of friend) tries to follow Alice -> 403 Forbidden
+        follow_url = reverse("user-unified-follow")
+        res_bob = bob_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_bob.status_code == status.HTTP_403_FORBIDDEN
+        assert "friends of friends" in res_bob.data["message"].lower()
+
+        # Now set up mutual friendship: Alice <-> Charlie
+        UserFollow.objects.create(follower=user_alice, followed_user=user_charlie)
+        UserFollow.objects.create(follower=user_charlie, followed_user=user_alice)
+
+        # Charlie <-> Bob also mutual friendship
+        UserFollow.objects.create(follower=user_charlie, followed_user=user_bob)
+        UserFollow.objects.create(follower=user_bob, followed_user=user_charlie)
+
+        # Now Bob IS a friend of friend of Alice!
+        res_bob_success = bob_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_bob_success.status_code == status.HTTP_201_CREATED
+        assert UserFollow.objects.filter(follower=user_bob, followed_user=user_alice).exists()
 
 
 @pytest.mark.django_db

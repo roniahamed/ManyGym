@@ -9,6 +9,7 @@ from apps.authentication.services import issue_context_token
 from common.enums import (
     TokenContextType,
     UserAudienceMessagingEnum,
+    UserAudienceFollowEnum,
     UserAudienceVisibilityEnum,
     UserStatus,
 )
@@ -100,38 +101,56 @@ class TestUserSettingsTypeJuggling:
             ({"dark_mode": "1"}, 400),
             ({"dark_mode": "yes"}, 400),
             ({"dark_mode": "false"}, 400),
+            ({"video_autoplay": "true"}, 400),
+            ({"video_autoplay": "1"}, 400),
+            ({"video_autoplay": "yes"}, 400),
+            ({"video_autoplay": "false"}, 400),
             ({"is_private": "true"}, 400),
             ({"is_private": "yes"}, 400),
             # Integer where boolean expected
             ({"dark_mode": 1}, 400),
             ({"dark_mode": 0}, 400),
+            ({"video_autoplay": 1}, 400),
+            ({"video_autoplay": 0}, 400),
             ({"is_private": 1}, 400),
             ({"is_private": 0}, 400),
             # Float where boolean expected
             ({"dark_mode": 1.5}, 400),
+            ({"video_autoplay": 1.5}, 400),
             ({"is_private": 0.0}, 400),
             # List where boolean expected
             ({"dark_mode": [True]}, 400),
+            ({"video_autoplay": [True]}, 400),
             ({"is_private": []}, 400),
             # Dict where boolean expected
             ({"dark_mode": {"enabled": True}}, 400),
+            ({"video_autoplay": {"enabled": True}}, 400),
             ({"is_private": {"val": False}}, 400),
             # Integer where enum string expected
+            ({"who_can_follow": 999}, 400),
+            ({"who_can_follow_me": 999}, 400),
             ({"who_can_message": 999}, 400),
             ({"who_can_see_followers": 1}, 400),
             ({"who_can_see_following": 2}, 400),
             # List where enum string expected
+            ({"who_can_follow": ["everyone"]}, 400),
+            ({"who_can_follow_me": ["friends_of_friends"]}, 400),
             ({"who_can_message": ["everyone"]}, 400),
             ({"who_can_see_followers": ["everyone"]}, 400),
             ({"who_can_see_following": ["everyone"]}, 400),
             # Dict where enum string expected
+            ({"who_can_follow": {"val": "everyone"}}, 400),
+            ({"who_can_follow_me": {"val": "friends_of_friends"}}, 400),
             ({"who_can_message": {"val": "everyone"}}, 400),
             ({"who_can_see_followers": {"val": "everyone"}}, 400),
             ({"who_can_see_following": {"val": "everyone"}}, 400),
             # Null where non-null expected
             ({"language": None}, 400),
+            ({"video_autoplay": None}, 400),
             ({"dark_mode": None}, 400),
             ({"is_private": None}, 400),
+            ({"who_can_follow": None}, 400),
+            ({"who_can_follow_me": None}, 400),
             ({"who_can_message": None}, 400),
             ({"who_can_see_followers": None}, 400),
             ({"who_can_see_following": None}, 400),
@@ -174,7 +193,11 @@ class TestUserSettingsTypeJuggling:
             assert res.status_code == status.HTTP_400_BAD_REQUEST, f"Failed for payload: {payload}, got {res.status_code}: {res.data}"
 
     def test_follower_block_type_mismatches(self, alice_client, user_bob):
-        url = reverse("user-follower-block", kwargs={"user_id": user_bob.id})
+        urls = [
+            reverse("user-follower-block", kwargs={"user_id": user_bob.id}),
+            reverse("user-settings-follower-block", kwargs={"user_id": user_bob.id}),
+            reverse("user-settings-blocked-users-follower-block", kwargs={"user_id": user_bob.id}),
+        ]
 
         invalid_payloads = [
             {"reason": 12345},
@@ -183,9 +206,10 @@ class TestUserSettingsTypeJuggling:
             {"reason": {"msg": "spam"}},
         ]
 
-        for payload in invalid_payloads:
-            res = alice_client.post(url, payload, format="json")
-            assert res.status_code == status.HTTP_400_BAD_REQUEST, f"Failed for follower block payload: {payload}, got {res.status_code}: {res.data}"
+        for target_url in urls:
+            for payload in invalid_payloads:
+                res = alice_client.post(target_url, payload, format="json")
+                assert res.status_code == status.HTTP_400_BAD_REQUEST, f"Failed for follower block payload: {payload} on {target_url}, got {res.status_code}: {res.data}"
 
     def test_access_control_action_type_mismatches(self, alice_client):
         url = reverse("user-settings-access-control")
@@ -460,15 +484,26 @@ class TestUserSettingsFormatSpecificInvalidInputs:
         res = alice_client.delete(url_unblock)
         assert res.status_code == status.HTTP_404_NOT_FOUND
 
-        # 3. Follower block non-existent user -> 404 Not Found
-        url_follower_block = reverse("user-follower-block", kwargs={"user_id": random_uuid})
-        res = alice_client.post(url_follower_block, {})
-        assert res.status_code == status.HTTP_404_NOT_FOUND
+        # 3. Follower block non-existent user -> 404 Not Found (across all alias endpoints)
+        for url_name in [
+            "user-follower-block",
+            "user-settings-follower-block",
+            "user-settings-blocked-users-follower-block",
+        ]:
+            res = alice_client.post(reverse(url_name, kwargs={"user_id": random_uuid}), {})
+            assert res.status_code == status.HTTP_404_NOT_FOUND, f"Expected 404 on {url_name}"
 
     def test_invalid_enum_choices(self, alice_client):
         url = reverse("user-settings")
 
         invalid_enums = [
+            ({"who_can_follow": "nobody"}, 400),
+            ({"who_can_follow": "friends"}, 400),
+            ({"who_can_follow": "PUBLIC"}, 400),
+            ({"who_can_follow": ""}, 400),
+            ({"who_can_follow_me": "nobody"}, 400),
+            ({"who_can_follow_me": "family"}, 400),
+            ({"who_can_follow_me": ""}, 400),
             ({"who_can_message": "nobody"}, 400),
             ({"who_can_message": "aliens"}, 400),
             ({"who_can_message": "ADMINS"}, 400),
@@ -531,6 +566,11 @@ class TestUserSettingsQueryParametersAndSearch:
         res = alice_client.get(f"{url}?q=Bob&extra=garbage&foo=bar&q=Bob")
         assert res.status_code == status.HTTP_200_OK
         assert any(u["id"] == str(user_bob.id) for u in res.data)
+
+        # 7. Null byte query -> 400 Bad Request (handled gracefully without PostgreSQL DataError 500)
+        res = alice_client.get(f"{url}?q=test%00user")
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "null" in str(res.data).lower()
 
 
 # ==============================================================================
@@ -703,7 +743,7 @@ class TestUserSettingsIDORAndUserIsolation:
         assert res.data["language"] == "en"
         assert res.data["dark_mode"] is False
         assert res.data["is_private"] is False
-        assert res.data["who_can_message"] == UserAudienceMessagingEnum.EVERYONE
+        assert res.data["who_can_message"] == UserAudienceMessagingEnum.FOLLOWERS
 
     def test_cross_user_blocklist_isolation(self, alice_client, bob_client, user_charlie):
         # Alice blocks Charlie
@@ -950,9 +990,16 @@ class TestUserSettingsHTTPMethodValidation:
             ("get", reverse("user-settings-blocked-user-detail", kwargs={"user_id": user_bob.id}), None),
             ("post", reverse("user-settings-blocked-user-detail", kwargs={"user_id": user_bob.id}), {}),
             ("put", reverse("user-settings-blocked-user-detail", kwargs={"user_id": user_bob.id}), {}),
-            # UserFollowerBlockView only supports POST
+            # UserFollowerBlockView only supports POST (across all route aliases)
             ("get", reverse("user-follower-block", kwargs={"user_id": user_bob.id}), None),
+            ("put", reverse("user-follower-block", kwargs={"user_id": user_bob.id}), {}),
             ("delete", reverse("user-follower-block", kwargs={"user_id": user_bob.id}), None),
+            ("get", reverse("user-settings-follower-block", kwargs={"user_id": user_bob.id}), None),
+            ("put", reverse("user-settings-follower-block", kwargs={"user_id": user_bob.id}), {}),
+            ("delete", reverse("user-settings-follower-block", kwargs={"user_id": user_bob.id}), None),
+            ("get", reverse("user-settings-blocked-users-follower-block", kwargs={"user_id": user_bob.id}), None),
+            ("put", reverse("user-settings-blocked-users-follower-block", kwargs={"user_id": user_bob.id}), {}),
+            ("delete", reverse("user-settings-blocked-users-follower-block", kwargs={"user_id": user_bob.id}), None),
         ]
 
         for method, endpoint, payload in unsupported_calls:
@@ -1323,4 +1370,282 @@ class TestUserSettingsWorstCaseAdversarialScenarios:
         user_alice.refresh_from_db()
         assert user_alice.status == UserStatus.ACTIVE
         assert user_alice.is_active is True
+
+    def test_who_can_follow_deep_social_graph_scenarios(self, alice_client, bob_client, charlie_client, user_alice, user_bob, user_charlie):
+        """
+        Deep social graph edge cases for 'friends_of_friends' audience follow rule:
+        - Alice has who_can_follow='friends_of_friends'.
+        - 1-way follow is NOT a friend: Alice follows Bob, Bob does not follow Alice.
+          Bob & Charlie are mutual friends. Charlie tries to follow Alice -> 403 Forbidden.
+        - Mutual friends: Alice & Bob follow each other. Now Charlie IS a friend of friend -> 201 Created.
+        - 3-hop graph (Alice <-> Bob <-> Charlie <-> Dave):
+          Dave follows Charlie, Charlie follows Dave. Dave tries to follow Alice -> 403 Forbidden.
+        - Inactive/deleted bridge: If Bob deactivates or is deleted, Bob cannot serve as bridge -> 403.
+        """
+        from apps.users.models import User, UserFollow, UserProfile
+
+        # User Dave
+        user_dave = User.objects.create_user(
+            email="dave.qa@manygym.com",
+            password="SecurePassword123!",
+            first_name="Dave",
+            last_name="FarAway",
+            is_verified=True,
+        )
+        UserProfile.objects.create(user=user_dave, is_private=False)
+        dave_client = APIClient()
+        token_dave = issue_context_token(user_dave, TokenContextType.PERSONAL)["access"]
+        dave_client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_dave}")
+
+        # Alice sets who_can_follow = 'friends_of_friends'
+        alice_client.patch(reverse("user-settings"), {"who_can_follow": "friends_of_friends"}, format="json")
+
+        follow_url = reverse("user-unified-follow")
+
+        # 1. 1-way follow is NOT a friendship bridge
+        # Alice follows Bob, but Bob does NOT follow Alice back
+        UserFollow.objects.create(follower=user_alice, followed_user=user_bob)
+        # Charlie & Bob are mutual friends
+        UserFollow.objects.create(follower=user_bob, followed_user=user_charlie)
+        UserFollow.objects.create(follower=user_charlie, followed_user=user_bob)
+
+        # Charlie tries to follow Alice -> 403 Forbidden (Bob is not Alice's mutual friend!)
+        res_charlie = charlie_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_charlie.status_code == status.HTTP_403_FORBIDDEN
+        assert "friends of friends" in res_charlie.data["message"].lower()
+
+        # 2. Make Alice & Bob mutual friends
+        UserFollow.objects.create(follower=user_bob, followed_user=user_alice)
+
+        # Now Charlie IS a friend of friend -> 201 Created!
+        res_charlie_success = charlie_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_charlie_success.status_code == status.HTTP_201_CREATED
+        assert UserFollow.objects.filter(follower=user_charlie, followed_user=user_alice).exists()
+
+        # 3. 3-hop distance (Alice <-> Bob <-> Charlie <-> Dave)
+        # Dave is Charlie's friend, but NOT Bob's friend
+        UserFollow.objects.create(follower=user_charlie, followed_user=user_dave)
+        UserFollow.objects.create(follower=user_dave, followed_user=user_charlie)
+
+        # Dave tries to follow Alice -> 403 Forbidden! (3 hops away)
+        res_dave = dave_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_dave.status_code == status.HTTP_403_FORBIDDEN
+        assert "friends of friends" in res_dave.data["message"].lower()
+
+        # 4. Deactivated / deleted intermediary cannot serve as bridge
+        # Clean up Charlie's follow
+        UserFollow.objects.filter(follower=user_charlie, followed_user=user_alice).delete()
+
+        # User Eve is Charlie's friend
+        user_eve = User.objects.create_user(
+            email="eve.bridge@manygym.com",
+            password="SecurePassword123!",
+            first_name="Eve",
+            last_name="Bridge",
+            is_verified=True,
+        )
+        UserProfile.objects.create(user=user_eve, is_private=False)
+        # Alice <-> Eve are mutual
+        UserFollow.objects.create(follower=user_alice, followed_user=user_eve)
+        UserFollow.objects.create(follower=user_eve, followed_user=user_alice)
+        # Dave <-> Eve are mutual
+        UserFollow.objects.create(follower=user_dave, followed_user=user_eve)
+        UserFollow.objects.create(follower=user_eve, followed_user=user_dave)
+
+        # Deactivate Eve
+        user_eve.is_active = False
+        user_eve.status = UserStatus.DEACTIVATED
+        user_eve.save()
+        eve_setting = user_eve.get_settings()
+        eve_setting.is_deactivated = True
+        eve_setting.save()
+
+        # Dave tries to follow Alice using deactivated Eve as bridge -> 403 Forbidden!
+        res_dave_via_inactive = dave_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_dave_via_inactive.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_who_can_follow_with_approval_workflow(self, alice_client, bob_client, charlie_client, user_alice, user_bob, user_charlie):
+        """
+        Tests interaction between who_can_follow='friends_of_friends' and require_follow_approval=True:
+        - Stranger cannot follow -> 403 Forbidden (no pending request created).
+        - Friend of friend follows -> 201 Created (pending UserFollowRequest created).
+        - Confirmation workflow succeeds.
+        """
+        from apps.users.models import UserFollow, UserFollowRequest, FollowRequestStatus
+
+        # Alice requires approval AND restricts to friends_of_friends
+        alice_client.patch(
+            reverse("user-settings"),
+            {"who_can_follow": "friends_of_friends", "require_follow_approval": True},
+            format="json",
+        )
+
+        follow_url = reverse("user-unified-follow")
+
+        # 1. Bob (stranger) attempts to follow Alice -> 403 Forbidden
+        res_bob = bob_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_bob.status_code == status.HTTP_403_FORBIDDEN
+        assert not UserFollowRequest.objects.filter(requester=user_bob, target_user=user_alice).exists()
+
+        # 2. Set up Charlie as friend of friend (Alice <-> Bob mutual, Bob <-> Charlie mutual)
+        UserFollow.objects.create(follower=user_alice, followed_user=user_bob)
+        UserFollow.objects.create(follower=user_bob, followed_user=user_alice)
+        UserFollow.objects.create(follower=user_bob, followed_user=user_charlie)
+        UserFollow.objects.create(follower=user_charlie, followed_user=user_bob)
+
+        # 3. Charlie attempts to follow Alice -> 201 Created with follow request
+        res_charlie = charlie_client.post(follow_url, {"target_id": str(user_alice.id), "target_type": "user"}, format="json")
+        assert res_charlie.status_code == status.HTTP_201_CREATED
+        assert res_charlie.data.get("is_pending_request") is True or res_charlie.data.get("status") == "pending"
+
+        # Verify request exists in DB
+        pending_req = UserFollowRequest.objects.filter(requester=user_charlie, target_user=user_alice).first()
+        assert pending_req is not None
+        assert pending_req.status == FollowRequestStatus.PENDING
+
+        # 4. Alice accepts Charlie's follow request
+        accept_url = reverse("user-follow-request-accept", kwargs={"request_id": pending_req.id})
+        res_accept = alice_client.post(accept_url, format="json")
+        assert res_accept.status_code == status.HTTP_200_OK
+        assert UserFollow.objects.filter(follower=user_charlie, followed_user=user_alice).exists()
+
+    def test_who_can_message_followers_default_enforcement(self, user_alice, user_bob, user_charlie):
+        """
+        Tests who_can_message policy:
+        - Default is FOLLOWERS.
+        - Stranger cannot initiate messaging -> DomainValidationError (400).
+        - Follower can initiate messaging -> 201.
+        - Setting to EVERYONE allows strangers.
+        - Setting to NO_ONE rejects everyone.
+        """
+        from apps.messaging.services.conversation_services import get_or_create_user_to_user_conversation
+        from apps.users.models import UserFollow
+        from common.exceptions import DomainValidationError
+
+        # Alice has default settings: who_can_message == FOLLOWERS
+        assert user_alice.get_settings().who_can_message == UserAudienceMessagingEnum.FOLLOWERS
+
+        # Bob (not following) tries to message Alice -> DomainValidationError
+        with pytest.raises(DomainValidationError, match="only accepts direct messages from their followers"):
+            get_or_create_user_to_user_conversation(user_bob, user_alice)
+
+        # Bob follows Alice -> now allowed!
+        UserFollow.objects.create(follower=user_bob, followed_user=user_alice)
+        conv = get_or_create_user_to_user_conversation(user_bob, user_alice)
+        assert conv is not None
+
+        # Charlie (not following) tries to message Alice while policy is EVERYONE
+        user_alice.settings.who_can_message = UserAudienceMessagingEnum.EVERYONE
+        user_alice.settings.save()
+        conv_charlie = get_or_create_user_to_user_conversation(user_charlie, user_alice)
+        assert conv_charlie is not None
+
+        # Alice sets who_can_message to NO_ONE -> even follower Bob is rejected
+        user_alice.settings.who_can_message = UserAudienceMessagingEnum.NO_ONE
+        user_alice.settings.save()
+        with pytest.raises(DomainValidationError, match="does not accept direct messages"):
+            get_or_create_user_to_user_conversation(user_bob, user_alice)
+
+    def test_follower_block_alias_endpoints_exhaustive(self, alice_client, user_alice, user_bob):
+        """
+        Tests follower blocking across all alias endpoints:
+        - /api/v1/users/followers/<uuid>/block/
+        - /api/v1/users/settings/followers/<uuid>/block/
+        - /api/v1/users/settings/blocked-users/followers/<uuid>/block/
+        """
+        from apps.users.models import UserFollow, UserBlockedUser
+
+        alias_url_names = [
+            "user-follower-block",
+            "user-settings-follower-block",
+            "user-settings-blocked-users-follower-block",
+        ]
+
+        for idx, url_name in enumerate(alias_url_names):
+            # Clean up prior state
+            UserBlockedUser.objects.filter(blocker=user_alice).delete()
+            UserFollow.objects.filter(follower=user_bob, followed_user=user_alice).delete()
+
+            # 1. Self-block attempt -> 400 Bad Request
+            self_url = reverse(url_name, kwargs={"user_id": user_alice.id})
+            res_self = alice_client.post(self_url, {"reason": "self block"}, format="json")
+            assert res_self.status_code == status.HTTP_400_BAD_REQUEST
+            assert "cannot block yourself" in str(res_self.data).lower()
+
+            # 2. Block follower
+            UserFollow.objects.create(follower=user_bob, followed_user=user_alice)
+            assert UserFollow.objects.filter(follower=user_bob, followed_user=user_alice).exists()
+
+            target_url = reverse(url_name, kwargs={"user_id": user_bob.id})
+            res_block = alice_client.post(target_url, {"reason": f"Block reason {idx}"}, format="json")
+            assert res_block.status_code == status.HTTP_200_OK
+
+            # Follow is deleted and block record created
+            assert not UserFollow.objects.filter(follower=user_bob, followed_user=user_alice).exists()
+            assert UserBlockedUser.objects.filter(blocker=user_alice, blocked_user=user_bob).exists()
+
+    def test_all_settings_endpoints_unauthenticated_and_token_tampering(self, user_bob):
+        """
+        Security: Verifies that every single settings and blocking endpoint
+        strictly rejects unauthenticated and malformed requests with 401 Unauthorized.
+        """
+        anon_client = APIClient()
+        dummy_uuid = user_bob.id
+
+        endpoints = [
+            ("get", reverse("user-settings")),
+            ("patch", reverse("user-settings")),
+            ("get", reverse("user-settings-blocked-users")),
+            ("post", reverse("user-settings-blocked-users")),
+            ("get", reverse("user-settings-blocked-users-search")),
+            ("delete", reverse("user-settings-blocked-user-detail", kwargs={"user_id": dummy_uuid})),
+            ("post", reverse("user-follower-block", kwargs={"user_id": dummy_uuid})),
+            ("post", reverse("user-settings-follower-block", kwargs={"user_id": dummy_uuid})),
+            ("post", reverse("user-settings-blocked-users-follower-block", kwargs={"user_id": dummy_uuid})),
+            ("post", reverse("user-settings-access-control")),
+        ]
+
+        # 1. No token provided
+        for method, url in endpoints:
+            call_fn = getattr(anon_client, method)
+            res = call_fn(url, {}) if method in ("post", "patch") else call_fn(url)
+            assert res.status_code == status.HTTP_401_UNAUTHORIZED, f"Expected 401 on unauthenticated {method.upper()} {url}"
+
+        # 2. Invalid / forged token
+        for method, url in endpoints:
+            anon_client.credentials(HTTP_AUTHORIZATION="Bearer invalid.forged.jwt")
+            call_fn = getattr(anon_client, method)
+            res = call_fn(url, {}) if method in ("post", "patch") else call_fn(url)
+            assert res.status_code == status.HTTP_401_UNAUTHORIZED, f"Expected 401 on invalid token {method.upper()} {url}"
+
+        # 3. Empty / malformed Authorization header
+        for method, url in endpoints:
+            anon_client.credentials(HTTP_AUTHORIZATION="Bearer ")
+            call_fn = getattr(anon_client, method)
+            res = call_fn(url, {}) if method in ("post", "patch") else call_fn(url)
+            assert res.status_code == status.HTTP_401_UNAUTHORIZED, f"Expected 401 on empty Bearer token {method.upper()} {url}"
+
+    def test_video_autoplay_toggle_and_persistence(self, alice_client, user_alice):
+        """
+        Verifies video_autoplay toggle, idempotency, and database persistence.
+        """
+        url = reverse("user-settings")
+
+        # 1. Initial state is True (default)
+        res_initial = alice_client.get(url)
+        assert res_initial.data["video_autoplay"] is True
+
+        # 2. Toggle to False
+        res_off = alice_client.patch(url, {"video_autoplay": False}, format="json")
+        assert res_off.status_code == status.HTTP_200_OK
+        assert res_off.data["video_autoplay"] is False
+        user_alice.refresh_from_db()
+        assert user_alice.settings.video_autoplay is False
+
+        # 3. Toggle back to True
+        res_on = alice_client.patch(url, {"video_autoplay": True}, format="json")
+        assert res_on.status_code == status.HTTP_200_OK
+        assert res_on.data["video_autoplay"] is True
+        user_alice.refresh_from_db()
+        assert user_alice.settings.video_autoplay is True
 

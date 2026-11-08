@@ -1,7 +1,7 @@
 from typing import Optional
 from django.db import models
 from apps.users.models import User, UserSetting, UserBlockedUser
-from common.exceptions import ResourceNotFoundError
+from common.exceptions import ResourceNotFoundError, DomainValidationError
 
 
 def get_user_settings(user: User) -> UserSetting:
@@ -59,6 +59,8 @@ def search_users_to_block_for_user(user: User, query: Optional[str] = None) -> m
 
     if query and query.strip():
         q = query.strip()
+        if "\x00" in q:
+            raise DomainValidationError("Null characters are not allowed.")
         qs = qs.filter(
             models.Q(email__icontains=q)
             | models.Q(first_name__icontains=q)
