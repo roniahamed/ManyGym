@@ -270,7 +270,7 @@ class TestQueryCountThresholds:
     def test_follow_user_post_query_budget(self, auth_client_factory, target_user):
         client, viewer = auth_client_factory()
 
-        # Auto-detect mode: maximum 8 operational queries (auth + gym check + user check + settings + mutual block check (2) + is_following check + insert)
+        # Auto-detect mode: maximum 10 operational queries (auth + gym check + user check + settings + follow request check (2) + mutual block check (2) + is_following check + insert)
         with CaptureQueriesContext(connection) as ctx:
             response = client.post(
                 "/api/v1/follows/",
@@ -280,8 +280,8 @@ class TestQueryCountThresholds:
             assert response.status_code == status.HTTP_201_CREATED
 
         op_queries = get_operational_queries(ctx)
-        assert len(op_queries) <= 8, (
-            f"Expected <= 8 queries for POST /api/v1/follows/, but got {len(op_queries)}: "
+        assert len(op_queries) <= 10, (
+            f"Expected <= 10 queries for POST /api/v1/follows/, but got {len(op_queries)}: "
             f"{[q['sql'] for q in op_queries]}"
         )
 
@@ -294,13 +294,14 @@ class TestQueryCountThresholds:
             assert response.status_code == status.HTTP_200_OK
 
         op_queries = get_operational_queries(ctx)
-        # Expected <= 4 operational queries:
+        # Expected <= 5 operational queries:
         # 1. Auth lookup
         # 2. Target check Gym
         # 3. Target resolution User
         # 4. UserFollow.objects.filter(...).delete()
-        assert len(op_queries) <= 4, (
-            f"Expected <= 4 queries for DELETE /api/v1/follows/, but got {len(op_queries)}: "
+        # 5. UserFollowRequest.objects.filter(...).delete()
+        assert len(op_queries) <= 5, (
+            f"Expected <= 5 queries for DELETE /api/v1/follows/, but got {len(op_queries)}: "
             f"{[q['sql'] for q in op_queries]}"
         )
 

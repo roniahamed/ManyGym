@@ -22,7 +22,7 @@ def resolve_post_gym(request) -> Gym:
         raise DomainValidationError("An active Gym context token or 'gym_id' parameter is required.")
     try:
         uuid.UUID(str(gym_id))
-        gym = Gym.objects.only("id", "owner_user_id", "name", "timezone").get(id=gym_id)
+        gym = Gym.objects.select_related("settings").get(id=gym_id)
     except (Gym.DoesNotExist, ValueError, AttributeError):
         raise ResourceNotFoundError("Gym not found.")
     request._resolved_gym = gym

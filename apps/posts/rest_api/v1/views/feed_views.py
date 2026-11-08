@@ -89,7 +89,23 @@ class GymFeedView(APIView):
 
         context = {"request": request}
         if request.user and request.user.is_authenticated:
-            context.update(get_user_social_context(request.user))
+            if gym:
+                from apps.gyms.models import GymFollow
+                from apps.users.models import UserFollow
+                followed_gym_ids = {gym.id} if GymFollow.objects.filter(user=request.user, gym=gym).exists() else set()
+                connected_gym_ids = {gym.id} if is_member_or_staff else set()
+                followed_user_ids = set(
+                    UserFollow.objects.filter(follower=request.user).values_list("followed_user_id", flat=True)
+                )
+                context.update({
+                    "connected_gym_ids": connected_gym_ids,
+                    "followed_gym_ids": followed_gym_ids,
+                    "followed_user_ids": followed_user_ids,
+                    "blocked_gym_ids": set(),
+                    "blocked_user_ids": set(),
+                })
+            else:
+                context.update(get_user_social_context(request.user))
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
@@ -178,7 +194,23 @@ class GymPostDetailView(APIView):
         )
         context = {"request": request}
         if request.user and request.user.is_authenticated:
-            context.update(get_user_social_context(request.user))
+            if gym:
+                from apps.gyms.models import GymFollow
+                from apps.users.models import UserFollow
+                followed_gym_ids = {gym.id} if GymFollow.objects.filter(user=request.user, gym=gym).exists() else set()
+                connected_gym_ids = {gym.id} if is_member_or_staff else set()
+                followed_user_ids = set(
+                    UserFollow.objects.filter(follower=request.user).values_list("followed_user_id", flat=True)
+                )
+                context.update({
+                    "connected_gym_ids": connected_gym_ids,
+                    "followed_gym_ids": followed_gym_ids,
+                    "followed_user_ids": followed_user_ids,
+                    "blocked_gym_ids": set(),
+                    "blocked_user_ids": set(),
+                })
+            else:
+                context.update(get_user_social_context(request.user))
         return Response(GymPostDetailSerializer(post, context=context).data, status=status.HTTP_200_OK)
 
     @extend_schema(

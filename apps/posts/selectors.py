@@ -310,7 +310,10 @@ def _list_single_gym_feed(
     """Retrieves posts for a specific gym with lifecycle and visibility checks."""
     setting = getattr(gym, "settings", None)
     if not setting:
-        setting = GymSetting.objects.filter(gym=gym).first()
+        try:
+            setting = gym.settings
+        except Exception:
+            setting = GymSetting.objects.filter(gym=gym).first()
 
     if setting and setting.is_deleted:
         raise ResourceNotFoundError("Gym not found.")
@@ -328,7 +331,7 @@ def _list_single_gym_feed(
     if setting and setting.is_deactivated and not is_member_or_staff:
         return GymPost.objects.none()
 
-    if requesting_user and requesting_user.is_authenticated:
+    if requesting_user and requesting_user.is_authenticated and not is_owner_or_staff:
         if GymBlockedUser.objects.filter(gym=gym, user=requesting_user).exists():
             return GymPost.objects.none()
 
@@ -351,7 +354,7 @@ def _list_single_gym_feed(
         qs = qs.filter(privacy=PostPrivacyEnum.PUBLIC)
 
     qs = _apply_feed_search(qs, search)
-    return qs.distinct()
+    return qs
 
 
 def list_gym_feed(
