@@ -536,30 +536,40 @@ class TestSecurityAndInjection:
 class TestAuthenticationAndPermissions:
     """Verifies that all enquiry endpoints require valid authentication."""
 
-    def test_unauthenticated_requests_return_401(self, sample_enquiry):
+    def test_unauthenticated_requests_return_401(self, sample_enquiry, gym_instance):
         anon_client = APIClient()
 
-        # List
+        # 1. Unauthenticated users cannot create enquiries
+        res_create = anon_client.post(
+            "/api/v1/enquiries/",
+            data={
+                "gym_id": str(gym_instance.id),
+                "first_name": "Public",
+                "last_name": "Lead",
+                "email": "public.lead@example.com",
+                "summary": "Public inquiry without auth",
+            },
+            format="json",
+        )
+        assert res_create.status_code == status.HTTP_401_UNAUTHORIZED
+
+        # 2. List enquiries requires authentication (staff only)
         res_list = anon_client.get("/api/v1/enquiries/")
         assert res_list.status_code == status.HTTP_401_UNAUTHORIZED
 
-        # Create
-        res_create = anon_client.post("/api/v1/enquiries/", data={"first_name": "A", "last_name": "B", "email": "a@b.com"}, format="json")
-        assert res_create.status_code == status.HTTP_401_UNAUTHORIZED
-
-        # Detail
+        # 3. View detail requires authentication
         res_detail = anon_client.get(f"/api/v1/enquiries/{sample_enquiry.id}/")
         assert res_detail.status_code == status.HTTP_401_UNAUTHORIZED
 
-        # Update
+        # 4. Update requires authentication
         res_update = anon_client.patch(f"/api/v1/enquiries/{sample_enquiry.id}/", data={"summary": "New"}, format="json")
         assert res_update.status_code == status.HTTP_401_UNAUTHORIZED
 
-        # Delete
+        # 5. Delete requires authentication
         res_del = anon_client.delete(f"/api/v1/enquiries/{sample_enquiry.id}/")
         assert res_del.status_code == status.HTTP_401_UNAUTHORIZED
 
-        # Add note
+        # 6. Add note requires authentication
         res_note = anon_client.post(f"/api/v1/enquiries/{sample_enquiry.id}/notes/", data={"note_text": "Note"}, format="json")
         assert res_note.status_code == status.HTTP_401_UNAUTHORIZED
 

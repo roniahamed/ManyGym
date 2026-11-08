@@ -38,16 +38,21 @@ class GymPostMediaSerializer(serializers.ModelSerializer):
 
 
 class GymPostListSerializer(serializers.ModelSerializer):
+    gym_name = serializers.CharField(source="gym.name", read_only=True)
     author_name = serializers.SerializerMethodField()
     author_avatar_url = serializers.SerializerMethodField()
     media_count = serializers.SerializerMethodField()
     media_attachments = GymPostMediaSerializer(many=True, read_only=True)
+    is_following_gym = serializers.SerializerMethodField()
+    is_following_author = serializers.SerializerMethodField()
+    is_connected_gym = serializers.SerializerMethodField()
 
     class Meta:
         model = GymPost
         fields = [
             "id",
             "gym_id",
+            "gym_name",
             "author_user_id",
             "author_name",
             "author_avatar_url",
@@ -56,6 +61,9 @@ class GymPostListSerializer(serializers.ModelSerializer):
             "published_at",
             "media_count",
             "media_attachments",
+            "is_following_gym",
+            "is_following_author",
+            "is_connected_gym",
             "created_at",
             "updated_at",
         ]
@@ -78,6 +86,44 @@ class GymPostListSerializer(serializers.ModelSerializer):
         if hasattr(obj, "_prefetched_objects_cache") and "media_attachments" in obj._prefetched_objects_cache:
             return len(obj.media_attachments.all())
         return obj.media_attachments.count()
+
+    def get_is_following_gym(self, obj) -> bool:
+        followed_gym_ids = self.context.get("followed_gym_ids")
+        if followed_gym_ids is not None:
+            return obj.gym_id in followed_gym_ids
+        request = self.context.get("request")
+        if request and getattr(request, "user", None) and request.user.is_authenticated:
+            from apps.gyms.models import GymFollow
+            return GymFollow.objects.filter(user=request.user, gym_id=obj.gym_id).exists()
+        return False
+
+    def get_is_following_author(self, obj) -> bool:
+        followed_user_ids = self.context.get("followed_user_ids")
+        if followed_user_ids is not None:
+            return obj.author_user_id in followed_user_ids
+        request = self.context.get("request")
+        if request and getattr(request, "user", None) and request.user.is_authenticated:
+            from apps.users.models import UserFollow
+            return UserFollow.objects.filter(follower=request.user, followed_user_id=obj.author_user_id).exists()
+        return False
+
+    def get_is_connected_gym(self, obj) -> bool:
+        connected_gym_ids = self.context.get("connected_gym_ids")
+        if connected_gym_ids is not None:
+            return obj.gym_id in connected_gym_ids
+        request = self.context.get("request")
+        if request and getattr(request, "user", None) and request.user.is_authenticated:
+            from apps.members.models import Member
+            from apps.access_control.models import GymStaffAssignment
+            from common.enums import StaffStatus
+            from django.db.models import Q
+            u = request.user
+            if obj.gym.owner_user_id == u.id or u.is_superuser:
+                return True
+            if GymStaffAssignment.objects.filter(gym_id=obj.gym_id, user=u, status=StaffStatus.ACTIVE).exists():
+                return True
+            return Member.objects.filter(gym_id=obj.gym_id).filter(Q(user=u) | Q(email=u.email)).exists()
+        return False
 
 
 class GymPostDetailSerializer(GymPostListSerializer):

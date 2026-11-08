@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional, Union
+from typing import Optional, Union, List
 from django.db.models import QuerySet, Q
 
 from apps.enquiries.models import Enquiry
@@ -12,12 +12,16 @@ def list_enquiries(
     type: Optional[str] = None,
     search: Optional[str] = None,
     user_id: Optional[Union[str, uuid.UUID]] = None,
+    allowed_gym_ids: Optional[List[uuid.UUID]] = None,
 ) -> QuerySet[Enquiry]:
     """
     Retrieves filtered and search-optimized QuerySet of Enquiry entities.
     Eagerly loads related manygym_user, profile, and gym to prevent N+1 queries.
     """
     qs = Enquiry.objects.select_related("manygym_user", "manygym_user__profile", "gym")
+
+    if allowed_gym_ids is not None:
+        qs = qs.filter(gym_id__in=allowed_gym_ids)
 
     if gym_id:
         try:

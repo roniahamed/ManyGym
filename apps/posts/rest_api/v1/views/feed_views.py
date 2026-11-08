@@ -9,6 +9,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter
 from apps.posts.selectors import (
     list_gym_feed,
     get_post_detail,
+    get_user_social_context,
 )
 from apps.posts.services import (
     create_post,
@@ -45,11 +46,13 @@ class GymFeedView(APIView):
     @extend_schema(
         tags=["Community Feed"],
         summary="List Gym Community Feed",
-        description="Retrieves community posts for a gym or public posts globally when gym_id is omitted. Unauthenticated guests and non-members see only public posts; verified members and staff see both public and members_only posts.",
+        description="Retrieves community posts for a gym or personalized feed globally when gym_id is omitted. Unauthenticated guests and non-members see only public posts; verified members and staff see both public and members_only posts. When gym_id is omitted, returns personalized feed of followed users/gyms, connected gyms, and public posts of any users or gyms.",
         parameters=[
-            OpenApiParameter(name="gym_id", type=str, location=OpenApiParameter.QUERY, required=False),
-            OpenApiParameter(name="privacy", type=str, location=OpenApiParameter.QUERY, required=False),
-            OpenApiParameter(name="search", type=str, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name="gym_id", type=str, location=OpenApiParameter.QUERY, required=False, description="UUID of a specific gym to filter wall posts."),
+            OpenApiParameter(name="feed_type", type=str, location=OpenApiParameter.QUERY, required=False, description="Feed filter: 'all' (default), 'followed', 'connected', or 'public'."),
+            OpenApiParameter(name="source", type=str, location=OpenApiParameter.QUERY, required=False, description="Alias for feed_type."),
+            OpenApiParameter(name="privacy", type=str, location=OpenApiParameter.QUERY, required=False, description="Filter by privacy: 'public' or 'members_only'."),
+            OpenApiParameter(name="search", type=str, location=OpenApiParameter.QUERY, required=False, description="Keyword search in post text, author name, or gym name."),
             OpenApiParameter(name="page", type=int, location=OpenApiParameter.QUERY, required=False),
             OpenApiParameter(name="page_size", type=int, location=OpenApiParameter.QUERY, required=False),
         ],
@@ -74,6 +77,7 @@ class GymFeedView(APIView):
 
         privacy = request.query_params.get("privacy")
         search = request.query_params.get("search")
+        feed_type = request.query_params.get("feed_type") or request.query_params.get("source")
 
         qs = list_gym_feed(
             gym=gym,
@@ -81,15 +85,20 @@ class GymFeedView(APIView):
             privacy_filter=privacy,
             search=search,
             requesting_user=request.user,
+            feed_type=feed_type,
         )
+
+        context = {"request": request}
+        if request.user and request.user.is_authenticated:
+            context.update(get_user_social_context(request.user))
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
         if page is not None:
-            serializer = GymPostListSerializer(page, many=True, context={"request": request})
+            serializer = GymPostListSerializer(page, many=True, context=context)
             return paginator.get_paginated_response(serializer.data)
 
-        serializer = GymPostListSerializer(qs, many=True, context={"request": request})
+        serializer = GymPostListSerializer(qs, many=True, context=context)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
@@ -168,7 +177,10 @@ class GymPostDetailView(APIView):
             is_member_or_staff=is_member_or_staff,
             requesting_user=request.user,
         )
-        return Response(GymPostDetailSerializer(post, context={"request": request}).data, status=status.HTTP_200_OK)
+        context = {"request": request}
+        if request.user and request.user.is_authenticated:
+            context.update(get_user_social_context(request.user))
+        return Response(GymPostDetailSerializer(post, context=context).data, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["Community Feed"],

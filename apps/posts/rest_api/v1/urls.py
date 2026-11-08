@@ -7,6 +7,7 @@ from apps.posts.rest_api.v1.views import (
 
 urlpatterns = [
     path("", GymFeedView.as_view(), name="gym-post-feed"),
+    path("feed/", GymFeedView.as_view(), name="gym-post-feed-alias"),
     path("<uuid:post_id>/", GymPostDetailView.as_view(), name="gym-post-detail"),
     path(
         "<uuid:post_id>/media/<uuid:media_id>/thumbnail/",

@@ -48,6 +48,38 @@ def auth_client(auth_user):
 
 
 @pytest.fixture
+def registered_client(registered_user):
+    token = issue_context_token(user=registered_user, context_type=TokenContextType.PERSONAL)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token['access']}")
+    return client
+
+
+@pytest.fixture
+def staff_client(db, gym_instance):
+    from apps.access_control.models import Role, GymStaffAssignment
+    from common.enums import StaffStatus
+    user = User.objects.create_user(
+        email="gym_staff@example.com",
+        password="SecurePassword123!",
+        first_name="Gym",
+        last_name="Staff",
+        is_verified=True,
+    )
+    role = Role.objects.create(gym=gym_instance, name="Receptionist", slug="receptionist", is_custom=True)
+    GymStaffAssignment.objects.create(
+        user=user,
+        gym=gym_instance,
+        role=role,
+        status=StaffStatus.ACTIVE,
+    )
+    token = issue_context_token(user=user, context_type=TokenContextType.PERSONAL)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token['access']}")
+    return client
+
+
+@pytest.fixture
 def gym_instance(auth_user):
     return create_gym(
         owner_user=auth_user,
@@ -382,3 +414,93 @@ class TestEnquiryCRUDLifecycle:
         # Second delete returns 404
         del_res_2 = auth_client.delete(f"/api/v1/enquiries/{enquiry_id}/")
         assert del_res_2.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_unauthenticated_user_cannot_create_enquiry(self, gym_instance):
+        anon_client = APIClient()
+        payload = {
+            "gym_id": str(gym_instance.id),
+            "first_name": "Public",
+            "last_name": "Visitor",
+            "email": "visitor@example.com",
+            "summary": "Can I visit your gym tomorrow morning?",
+        }
+        res = anon_client.post("/api/v1/enquiries/", data=payload, format="json")
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_authenticated_non_staff_user_can_create_enquiry_for_gym(self, registered_client, gym_instance):
+        payload = {
+            "gym_id": str(gym_instance.id),
+            "first_name": "Member",
+            "last_name": "Lead",
+            "email": "member.lead@example.com",
+            "summary": "Asking about gym membership as an authenticated user.",
+        }
+        res = registered_client.post("/api/v1/enquiries/", data=payload, format="json")
+        assert res.status_code == status.HTTP_201_CREATED
+        assert res.json()["first_name"] == "Member"
+
+    def test_authenticated_non_staff_user_cannot_view_or_manage_gym_enquiries(
+        self, auth_client, registered_client, gym_instance
+    ):
+        # 1. Staff creates enquiry
+        create_res = auth_client.post(
+            "/api/v1/enquiries/",
+            data={
+                "gym_id": str(gym_instance.id),
+                "first_name": "Private",
+                "last_name": "Lead",
+                "email": "private.lead@example.com",
+            },
+            format="json",
+        )
+        enquiry_id = create_res.json()["id"]
+
+        # 2. Non-staff user tries to list enquiries of this gym -> 403 Forbidden
+        list_res = registered_client.get(f"/api/v1/enquiries/?gym_id={gym_instance.id}")
+        assert list_res.status_code == status.HTTP_403_FORBIDDEN
+
+        # 3. Non-staff user tries to view detail -> 403 Forbidden
+        detail_res = registered_client.get(f"/api/v1/enquiries/{enquiry_id}/")
+        assert detail_res.status_code == status.HTTP_403_FORBIDDEN
+
+        # 4. Non-staff user tries to update -> 403 Forbidden
+        update_res = registered_client.patch(f"/api/v1/enquiries/{enquiry_id}/", data={"summary": "Hacked"}, format="json")
+        assert update_res.status_code == status.HTTP_403_FORBIDDEN
+
+        # 5. Non-staff user tries to add note -> 403 Forbidden
+        note_res = registered_client.post(f"/api/v1/enquiries/{enquiry_id}/notes/", data={"note_text": "Spam"}, format="json")
+        assert note_res.status_code == status.HTTP_403_FORBIDDEN
+
+        # 6. Non-staff user tries to delete -> 403 Forbidden
+        del_res = registered_client.delete(f"/api/v1/enquiries/{enquiry_id}/")
+        assert del_res.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_assigned_gym_staff_can_view_and_manage_gym_enquiry(
+        self, auth_client, staff_client, gym_instance
+    ):
+        # 1. Enquiry created
+        create_res = auth_client.post(
+            "/api/v1/enquiries/",
+            data={
+                "gym_id": str(gym_instance.id),
+                "first_name": "StaffManaged",
+                "last_name": "Lead",
+                "email": "managed.lead@example.com",
+            },
+            format="json",
+        )
+        enquiry_id = create_res.json()["id"]
+
+        # 2. Active staff views enquiry detail -> 200 OK
+        detail_res = staff_client.get(f"/api/v1/enquiries/{enquiry_id}/")
+        assert detail_res.status_code == status.HTTP_200_OK
+        assert detail_res.json()["id"] == enquiry_id
+
+        # 3. Active staff lists enquiries of this gym -> 200 OK
+        list_res = staff_client.get(f"/api/v1/enquiries/?gym_id={gym_instance.id}")
+        assert list_res.status_code == status.HTTP_200_OK
+
+        # 4. Active staff adds a note -> 200 OK
+        note_res = staff_client.post(f"/api/v1/enquiries/{enquiry_id}/notes/", data={"note_text": "Followed up by staff."}, format="json")
+        assert note_res.status_code == status.HTTP_200_OK
+        assert "Followed up by staff." in str(note_res.json()["notes"])
