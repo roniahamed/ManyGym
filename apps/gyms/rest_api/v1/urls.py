@@ -24,6 +24,8 @@ from apps.gyms.rest_api.v1.views import (
     GymAdminLogsMetricsView,
     GymAdminLogsActionTypesView,
     GymAdminLogsExportView,
+    GymNearbySearchView,
+    GymPublicDetailView,
 )
 from apps.members.rest_api.v1.views import (
     MemberRequestListView,
@@ -60,6 +62,11 @@ urlpatterns = [
     path("admin-logs/actions/", GymAdminLogsActionTypesView.as_view(), name="gym-admin-logs-alias-actions"),
     path("admin-logs/export/", GymAdminLogsExportView.as_view(), name="gym-admin-logs-alias-export"),
     path("admin-logs/<uuid:log_id>/", GymAdminLogDetailView.as_view(), name="gym-admin-log-alias-detail"),
+    # Nearby Discovery & Public Search routes
+    path("nearby/", GymNearbySearchView.as_view(), name="gym-nearby-search"),
+    path("search/", GymNearbySearchView.as_view(), name="gym-search"),
+    path("<uuid:gym_id>/public/", GymPublicDetailView.as_view(), name="gym-public-detail"),
+    path("<uuid:gym_id>/detail/", GymPublicDetailView.as_view(), name="gym-public-detail-alias"),
     # Social follow & audience routes
     path("followed/", UserFollowedGymsListView.as_view(), name="gym-followed-list"),
     path("<uuid:gym_id>/follow/", GymFollowToggleView.as_view(), name="gym-follow-toggle"),

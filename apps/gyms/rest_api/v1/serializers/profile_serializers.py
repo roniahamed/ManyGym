@@ -87,8 +87,8 @@ class GymCreateSerializer(serializers.Serializer):
     min_age = serializers.IntegerField(default=1, min_value=1, max_value=99)
     timezone = StrictCharField(default="UTC", max_length=100)
     address = StrictCharField(required=False, default="Unspecified Location")
-    latitude = serializers.DecimalField(max_digits=10, decimal_places=8, default=0.0)
-    longitude = serializers.DecimalField(max_digits=11, decimal_places=8, default=0.0)
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=8, default=0.0, min_value=-90, max_value=90)
+    longitude = serializers.DecimalField(max_digits=11, decimal_places=8, default=0.0, min_value=-180, max_value=180)
     city = StrictCharField(required=False, allow_blank=True, max_length=100)
     country = StrictCharField(required=False, allow_blank=True, max_length=100)
     postal_code = StrictCharField(required=False, allow_blank=True, max_length=30)
@@ -128,8 +128,8 @@ class GymOverviewUpdateSerializer(serializers.Serializer):
 
 class GymLocationUpdateSerializer(serializers.Serializer):
     address = StrictCharField(required=True)
-    latitude = serializers.DecimalField(max_digits=10, decimal_places=8, required=True)
-    longitude = serializers.DecimalField(max_digits=11, decimal_places=8, required=True)
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=8, required=True, min_value=-90, max_value=90)
+    longitude = serializers.DecimalField(max_digits=11, decimal_places=8, required=True, min_value=-180, max_value=180)
     city = StrictCharField(required=False, allow_blank=True, max_length=100)
     country = StrictCharField(required=False, allow_blank=True, max_length=100)
     postal_code = StrictCharField(required=False, allow_blank=True, max_length=30)

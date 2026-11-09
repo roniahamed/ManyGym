@@ -36,6 +36,10 @@ from apps.gyms.rest_api.v1.views.admin_log_views import (
     GymAdminLogsActionTypesView,
     GymAdminLogsExportView,
 )
+from apps.gyms.rest_api.v1.views.geo_views import (
+    GymNearbySearchView,
+    GymPublicDetailView,
+)
 
 __all__ = [
     "resolve_gym_context",
@@ -64,4 +68,6 @@ __all__ = [
     "GymAdminLogsMetricsView",
     "GymAdminLogsActionTypesView",
     "GymAdminLogsExportView",
+    "GymNearbySearchView",
+    "GymPublicDetailView",
 ]

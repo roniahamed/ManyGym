@@ -41,6 +41,11 @@ from apps.gyms.rest_api.v1.serializers.admin_log_serializers import (
     GymAdminLogsMetricsSerializer,
     AdminLogOptionsResponseSerializer,
 )
+from apps.gyms.rest_api.v1.serializers.geo_serializers import (
+    GymSearchQuerySerializer,
+    GymSearchItemSerializer,
+    GymPublicDetailSerializer,
+)
 
 __all__ = [
     "GymLocationSerializer",
@@ -76,4 +81,7 @@ __all__ = [
     "GymAdminLogsPaginatedResponseSerializer",
     "GymAdminLogsMetricsSerializer",
     "AdminLogOptionsResponseSerializer",
+    "GymSearchQuerySerializer",
+    "GymSearchItemSerializer",
+    "GymPublicDetailSerializer",
 ]

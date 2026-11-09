@@ -89,6 +89,12 @@ def create_gym(
         is_primary=True,
     )
 
+    try:
+        from apps.gyms.services.geo_services import sync_gym_location_to_redis
+        sync_gym_location_to_redis(gym.id, latitude, longitude)
+    except Exception:
+        pass
+
     # Seed default 7-day operating hours (0=Sunday ... 6=Saturday)
     default_hours = [
         {"day_of_week": 0, "start_time": time(8, 0), "end_time": time(20, 0), "is_closed": False},
@@ -236,6 +242,13 @@ def update_gym_location(
         location.postal_code = postal_code
 
     location.save()
+
+    try:
+        from apps.gyms.services.geo_services import sync_gym_location_to_redis
+        sync_gym_location_to_redis(gym.id, latitude, longitude)
+    except Exception:
+        pass
+
     return location
 
 

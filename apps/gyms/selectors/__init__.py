@@ -27,6 +27,12 @@ from apps.gyms.selectors.admin_log_selectors import (
     get_admin_logs_metrics,
     get_admin_logs_export_iterator,
 )
+from apps.gyms.selectors.geo_selectors import (
+    search_nearby_gyms,
+    get_gym_public_details,
+    compute_today_opening_hours,
+    is_postgis_available,
+)
 
 __all__ = [
     "stream_accessible_gyms_for_user",
@@ -48,4 +54,8 @@ __all__ = [
     "get_admin_log_by_id",
     "get_admin_logs_metrics",
     "get_admin_logs_export_iterator",
+    "search_nearby_gyms",
+    "get_gym_public_details",
+    "compute_today_opening_hours",
+    "is_postgis_available",
 ]

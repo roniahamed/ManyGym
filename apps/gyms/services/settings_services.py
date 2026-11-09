@@ -227,6 +227,18 @@ def apply_access_control_action(
     settings_obj.save()
     logger.info("Applied access control '%s' to gym %s by user %s", action, gym.name, user.email)
 
+    try:
+        from apps.gyms.services.geo_services import (
+            remove_gym_location_from_redis,
+            sync_gym_primary_location_to_cache,
+        )
+        if action in ("unpublish", "deactivate", "delete"):
+            remove_gym_location_from_redis(gym.id)
+        elif action in ("publish", "reactivate", "restore"):
+            sync_gym_primary_location_to_cache(gym.id)
+    except Exception as geo_err:
+        logger.warning("Failed to update gym geo cache on action %s: %s", action, geo_err)
+
     from apps.gyms.services.admin_log_services import log_admin_action
     from common.enums import AdminLogCategory, AdminLogActionType
 

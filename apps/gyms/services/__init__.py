@@ -28,6 +28,13 @@ from apps.gyms.services.admin_log_services import (
     generate_admin_logs_csv_content,
     get_admin_logs_export_filename,
 )
+from apps.gyms.services.geo_services import (
+    sync_gym_location_to_redis,
+    remove_gym_location_from_redis,
+    sync_gym_primary_location_to_cache,
+    search_nearby_gym_ids_redis,
+    warm_gym_geo_cache,
+)
 
 __all__ = [
     "create_gym",
@@ -50,4 +57,9 @@ __all__ = [
     "log_admin_action",
     "generate_admin_logs_csv_content",
     "get_admin_logs_export_filename",
+    "sync_gym_location_to_redis",
+    "remove_gym_location_from_redis",
+    "sync_gym_primary_location_to_cache",
+    "search_nearby_gym_ids_redis",
+    "warm_gym_geo_cache",
 ]
