@@ -81,16 +81,13 @@ def get_member_active_routine(gym: Gym, member_id: uuid.UUID) -> Optional[Member
     """
     Retrieves the current active workout routine prescribed to a member.
     """
-    try:
-        Member.objects.get(id=member_id, gym=gym)
-    except Member.DoesNotExist:
+    if not Member.objects.filter(id=member_id, gym=gym).exists():
         raise ResourceNotFoundError("Member not found.")
 
     return (
-        MemberRoutine.objects.filter(member_id=member_id, member__gym=gym, is_active=True)
+        MemberRoutine.objects.filter(member_id=member_id, is_active=True)
         .select_related("prescribed_by_staff__user", "source_template")
         .prefetch_related("days__exercises")
-        .annotate(annotated_days_count=Count("days", distinct=True))
         .first()
     )
 
@@ -99,16 +96,13 @@ def list_member_routine_history(gym: Gym, member_id: uuid.UUID) -> QuerySet[Memb
     """
     Retrieves all current and previous routine assignments for a member.
     """
-    try:
-        Member.objects.get(id=member_id, gym=gym)
-    except Member.DoesNotExist:
+    if not Member.objects.filter(id=member_id, gym=gym).exists():
         raise ResourceNotFoundError("Member not found.")
 
     return (
-        MemberRoutine.objects.filter(member_id=member_id, member__gym=gym)
+        MemberRoutine.objects.filter(member_id=member_id)
         .select_related("prescribed_by_staff__user", "source_template")
         .prefetch_related("days__exercises")
-        .annotate(annotated_days_count=Count("days", distinct=True))
         .order_by("-is_active", "-assigned_at")
     )
 
