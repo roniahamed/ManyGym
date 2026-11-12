@@ -15,6 +15,11 @@ from apps.posts.rest_api.v1.views.feed_views import (
 from apps.posts.rest_api.v1.views.media_views import (
     GymPostMediaThumbnailView,
 )
+from apps.posts.rest_api.v1.views.comment_views import (
+    PostCommentsView,
+    CommentRepliesView,
+    CommentDetailView,
+)
 
 GymPostFeedListCreateView = GymFeedView
 
@@ -31,4 +36,7 @@ __all__ = [
     "GymPostDetailView",
     "GymPostFeedListCreateView",
     "GymPostMediaThumbnailView",
+    "PostCommentsView",
+    "CommentRepliesView",
+    "CommentDetailView",
 ]

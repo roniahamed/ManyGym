@@ -267,6 +267,13 @@ class MediaTypeEnum(models.TextChoices):
     VIDEO = "video", "Video"
 
 
+class CommentMediaTypeEnum(models.TextChoices):
+    """Supported single-attachment media types for post comments and replies."""
+    PHOTO = "photo", "Photo"
+    VIDEO = "video", "Video"
+    GIF = "gif", "GIF"
+
+
 class StoryOwnerTypeEnum(models.TextChoices):
     """Identifies whether a story was uploaded by a public user or a gym."""
     USER = "user", "Public User"
