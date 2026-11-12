@@ -11,11 +11,9 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.access_control.models import GymStaffAssignment
-from apps.gyms.models import Gym, GymBlockedUser, GymSetting
-from apps.members.models import Member
+from apps.gyms.models import Gym
 from apps.posts.models import GymPost
-from apps.posts.selectors import check_posts_age_restriction
+from apps.posts.services.post_services import validate_source_post_access
 from apps.stories.models import Story, StoryView
 from apps.stories.permissions import (
     check_story_creation_permission,
@@ -27,9 +25,7 @@ from common.enums import (
     AdminLogCategory,
     GYM_STORY_PRIVACY_VALUES,
     MediaTypeEnum,
-    PostPrivacyEnum,
     ProcessingStatus,
-    StaffStatus,
     StoryLifetimeEnum,
     StoryOwnerTypeEnum,
     StoryPrivacyEnum,
@@ -195,67 +191,6 @@ def _validate_media_url_and_type(media_url: str, media_type: Optional[str]) -> t
     return cleaned_url, resolved_type
 
 
-def validate_source_post_access(source_post_id, actor_user: User) -> GymPost:
-    """
-    Validates that source_post_id exists and is accessible to the story uploader.
-    Prevents IDOR leaks of private, deleted, or restricted gym posts.
-    """
-    try:
-        post_uuid = uuid.UUID(str(source_post_id))
-    except (ValueError, TypeError, AttributeError):
-        raise DomainValidationError("Invalid source_post_id UUID.")
-
-    post = (
-        GymPost.objects.select_related("gym", "gym__settings")
-        .prefetch_related("media_attachments")
-        .filter(id=post_uuid)
-        .first()
-    )
-    if not post:
-        raise ResourceNotFoundError("Source post not found.")
-
-    gym = post.gym
-    setting = getattr(gym, "settings", None) or GymSetting.objects.filter(gym=gym).first()
-    if setting and setting.is_deleted:
-        raise ResourceNotFoundError("Source post not found.")
-
-    is_owner_or_staff = (
-        actor_user.is_superuser
-        or gym.owner_user_id == actor_user.id
-        or GymStaffAssignment.objects.filter(
-            gym=gym, user=actor_user, status=StaffStatus.ACTIVE
-        ).exists()
-    )
-
-    if setting and not setting.is_published and not is_owner_or_staff:
-        raise ResourceNotFoundError("Source post not found.")
-
-    if setting and setting.is_deactivated and not is_owner_or_staff:
-        is_member = Member.objects.filter(gym=gym).filter(
-            Q(user=actor_user) | Q(email=actor_user.email)
-        ).exists()
-        if not is_member:
-            raise PermissionDeniedError("Cannot share a post from a deactivated gym.")
-
-    if not is_owner_or_staff and GymBlockedUser.objects.filter(gym=gym, user=actor_user).exists():
-        raise PermissionDeniedError("You are blocked by this gym and cannot share its posts.")
-
-    if not check_posts_age_restriction(gym, actor_user):
-        raise PermissionDeniedError("You do not meet the age requirement to share this post.")
-
-    if post.privacy == PostPrivacyEnum.PRIVATE and not is_owner_or_staff:
-        raise PermissionDeniedError("You do not have permission to share this private post.")
-
-    if post.privacy in (PostPrivacyEnum.MEMBERS_ONLY, PostPrivacyEnum.GYM_MEMBERS_ONLY) and not is_owner_or_staff:
-        is_member = Member.objects.filter(gym=gym).filter(
-            Q(user=actor_user) | Q(email=actor_user.email)
-        ).exists()
-        if not is_member:
-            raise PermissionDeniedError("This source post is restricted to gym members.")
-
-    return post
-
-
 def _clean_optional_caption(caption: Optional[str]) -> Optional[str]:
     if caption is None:
         return None
@@ -394,10 +329,25 @@ def create_story(
             processing_status=ProcessingStatus.COMPLETED,
         )
 
-    elif source_post is not None and source_post.media_attachments.exists():
-        first_media = source_post.media_attachments.order_by("order_index", "created_at").first()
-        inherited_url = first_media.resolved_media_url
-        inherited_thumb = first_media.resolved_thumbnail_url
+    elif source_post is not None:
+        inherited_media = None
+        if source_post.media_attachments.exists():
+            inherited_media = source_post.media_attachments.order_by("order_index", "created_at").first()
+        elif source_post.is_repost and source_post.source_post_id:
+            try:
+                root_post = validate_source_post_access(source_post.source_post_id, actor_user=user)
+                if root_post.media_attachments.exists():
+                    inherited_media = root_post.media_attachments.order_by("order_index", "created_at").first()
+            except (PermissionDeniedError, ResourceNotFoundError):
+                inherited_media = None
+
+        if inherited_media is None:
+            raise DomainValidationError(
+                "A single media file (image or video) or media_url is required to upload a story."
+            )
+
+        inherited_url = inherited_media.resolved_media_url
+        inherited_thumb = inherited_media.resolved_thumbnail_url
         story = Story.objects.create(
             owner_type=owner_type,
             user=user,
@@ -406,11 +356,11 @@ def create_story(
             media_url=inherited_url,
             original_url=inherited_url,
             thumbnail_url=inherited_thumb,
-            media_type=first_media.media_type,
-            file_size_bytes=first_media.file_size_bytes or 0,
-            size_bytes=first_media.size_bytes or first_media.file_size_bytes or 0,
-            width=first_media.width,
-            height=first_media.height,
+            media_type=inherited_media.media_type,
+            file_size_bytes=inherited_media.file_size_bytes or 0,
+            size_bytes=inherited_media.size_bytes or inherited_media.file_size_bytes or 0,
+            width=inherited_media.width,
+            height=inherited_media.height,
             duration_seconds=duration_seconds,
             caption=clean_caption,
             background_color=clean_bg,

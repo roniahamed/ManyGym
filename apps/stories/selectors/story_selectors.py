@@ -97,6 +97,7 @@ def _build_base_stories_queryset(requesting_user: Optional[User] = None) -> Quer
         "gym__settings",
         "source_post",
         "source_post__gym",
+        "source_post__author_user",
     )
     if requesting_user and getattr(requesting_user, "is_authenticated", False):
         qs = qs.annotate(

@@ -205,11 +205,39 @@ class RoutineLevelEnum(models.TextChoices):
     ADVANCED = "advanced", "Advanced"
 
 
+class PostOwnerTypeEnum(models.TextChoices):
+    """Identifies whether a community post/repost belongs to a public user or a gym."""
+    USER = "user", "Public User"
+    GYM = "gym", "Gym"
+
+
+class RepostTargetEnum(models.TextChoices):
+    """Destination target when reposting/sharing a post."""
+    PROFILE = "profile", "Profile Feed"
+    STORY = "story", "Story"
+
+
 class PostPrivacyEnum(models.TextChoices):
     PUBLIC = "public", "Public"
+    FOLLOWERS = "followers", "Followers"
     MEMBERS_ONLY = "members_only", "Gym Members Only"
     GYM_MEMBERS_ONLY = "gym_members_only", "Gym Members Only"
     PRIVATE = "private", "Private"
+
+
+USER_POST_PRIVACY_VALUES = (
+    PostPrivacyEnum.PUBLIC,
+    PostPrivacyEnum.FOLLOWERS,
+    PostPrivacyEnum.PRIVATE,
+)
+
+GYM_POST_PRIVACY_VALUES = (
+    PostPrivacyEnum.PUBLIC,
+    PostPrivacyEnum.FOLLOWERS,
+    PostPrivacyEnum.MEMBERS_ONLY,
+    PostPrivacyEnum.GYM_MEMBERS_ONLY,
+    PostPrivacyEnum.PRIVATE,
+)
 
 
 class FeedTypeEnum(models.TextChoices):

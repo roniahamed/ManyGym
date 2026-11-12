@@ -168,19 +168,39 @@ class StoryUpdateSerializer(serializers.Serializer):
 
 
 class StorySourcePostSummarySerializer(serializers.ModelSerializer):
-    gym_id = serializers.UUIDField(read_only=True)
-    gym_name = serializers.CharField(source="gym.name", read_only=True)
+    owner_type = serializers.CharField(read_only=True)
+    gym_id = serializers.UUIDField(read_only=True, allow_null=True)
+    gym_name = serializers.SerializerMethodField()
+    author_user_id = serializers.UUIDField(read_only=True)
+    author_name = serializers.SerializerMethodField()
+    is_repost = serializers.BooleanField(read_only=True)
+    source_post_id = serializers.UUIDField(read_only=True, allow_null=True)
 
     class Meta:
         model = GymPost
         fields = [
             "id",
+            "owner_type",
             "gym_id",
             "gym_name",
+            "author_user_id",
+            "author_name",
             "content_text",
             "privacy",
+            "is_repost",
+            "source_post_id",
             "published_at",
         ]
+
+    def get_gym_name(self, obj) -> str | None:
+        return obj.gym.name if obj.gym else None
+
+    def get_author_name(self, obj) -> str:
+        u = obj.author_user
+        if u:
+            full_name = f"{u.first_name} {u.last_name}".strip()
+            return full_name or u.email
+        return "Unknown"
 
 
 class StorySerializer(serializers.ModelSerializer):

@@ -15,6 +15,7 @@ from apps.posts.rest_api.v1.serializers import (
 from apps.posts.rest_api.v1.views.base_views import (
     resolve_post_gym,
     check_post_management_permission,
+    check_post_owner_manage_permission,
 )
 from common.exceptions import DomainValidationError
 from common.serializers import ErrorDetailSerializer
@@ -44,10 +45,17 @@ class GymPostMediaThumbnailView(APIView):
         },
     )
     def patch(self, request, post_id: uuid.UUID, media_id: uuid.UUID):
-        gym = resolve_post_gym(request)
-        check_post_management_permission(request, gym)
-
-        media = get_post_media_by_id(gym=gym, post_id=post_id, media_id=media_id)
+        explicit_gym_id = (
+            request.query_params.get("gym_id")
+            or (request.data.get("gym_id") if isinstance(request.data, dict) else None)
+        )
+        if explicit_gym_id:
+            gym = resolve_post_gym(request)
+            check_post_management_permission(request, gym)
+            media = get_post_media_by_id(gym=gym, post_id=post_id, media_id=media_id)
+        else:
+            media = get_post_media_by_id(post_id=post_id, media_id=media_id)
+            check_post_owner_manage_permission(request, media.post)
 
         file = request.FILES.get("thumbnail_image") or request.FILES.get("file")
         if not file:
