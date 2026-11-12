@@ -1,78 +1,48 @@
-# Nearby Gym Search API & Frontend Integration Documentation
+# Frontend Integration Document: Search Nearby Gym & Location Management
 
-## 1. Overview & Architecture
+## 1. Overview
 
-The **Nearby Gym Search** system provides high-performance, real-time discovery of gyms for prospective members, travelers, and fitness enthusiasts.
-
-It supports dual search modes:
-1. **Live Location Radius Search**: Browser / Device live GPS sharing with user consent, querying gyms within a **20 km radius** (customizable via `radius` parameter) and ordering by proximity.
-2. **City & Category Search**: Manual city selection (e.g. Dhaka, New York, London) and fitness domain category filtering (e.g. Strength & Bodybuilding, Yoga & Pilates Studio).
-
-```
-   ┌────────────────────────────────────────────────────────────────────────┐
-   │                       Client (Web / Mobile App)                        │
-   │  - Browser Live Geolocation API (navigator.geolocation + Consent)     │
-   │  - Fallback City Dropdown & Gym Category Selector                      │
-   └───────────────────────────────────┬────────────────────────────────────┘
-                                       │
-                                       ▼
-                     GET /api/v1/gyms/nearby/?lat=...&lon=...
-                                       │
-                  ┌────────────────────┴────────────────────┐
-                  │                                         │
-                  ▼                                         ▼
-        [1. Fast Path: Redis GEO]              [2. Fallback Path: PostgreSQL / PostGIS]
-       - Redis GEOSEARCH (<1ms)                 - PostGIS ST_DistanceSphere (if installed)
-       - Key: `gyms:geo:locations`              - Standard Haversine spherical formula
-       - Returns IDs & Distances (km)           - Auto-warms Redis GEO on cache miss
-                  │                                         │
-                  └────────────────────┬────────────────────┘
-                                       │
-                                       ▼
-                       Hydrate with Prefetched Data:
-             - Operating Hours (Live is_open_now & today hours)
-             - Primary Location Details & Pin Coordinates
-             - Categorized Amenities Preview (Complimentary & Paid)
-             - Follower Count & Following Status (if authenticated)
-```
+This document specifies the frontend API contract for Gym Discovery, Nearby Search (Live Location Radius and City/Category filters), Public Gym Details, and Gym Location Management.
 
 ---
 
-## 2. API Endpoints Reference
+## 2. API Endpoints Summary
 
-### 2.1. Search Nearby Gyms
-- **Endpoint:** `GET /api/v1/gyms/nearby/` (Alias: `GET /api/v1/gyms/search/`)
-- **Authentication:** Optional (`AllowAny`). If a valid Bearer JWT is supplied, `is_following` will reflect the user's relationship with each gym.
-- **Query Parameters:**
+| Feature | Method | Endpoint | Auth Required |
+|---|---|---|---|
+| Search Nearby Gyms | `GET` | `/api/v1/gyms/nearby/` (Alias: `/api/v1/gyms/search/`) | Optional |
+| Get Public Gym Details | `GET` | `/api/v1/gyms/{gym_id}/public/` (Alias: `/api/v1/gyms/{gym_id}/detail/`) | Optional |
+| Get Gym Location | `GET` | `/api/v1/gyms/profile/location/` | Required (Bearer JWT) |
+| Update Gym Location | `PATCH` | `/api/v1/gyms/profile/location/` | Required (Owner/Staff) |
 
-| Parameter | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `latitude` | `float` | Optional* | None | User's live latitude (-90.0 to 90.0). *Must be provided with `longitude`. |
-| `longitude` | `float` | Optional* | None | User's live longitude (-180.0 to 180.0). *Must be provided with `latitude`. |
-| `radius` | `float` | Optional | `20.0` | Search radius in kilometers (min: 0.1, max: 500.0). |
-| `category` | `string` | Optional | None | Choice from `GymTypeEnum` (e.g. `strength_bodybuilding_gym`, `functional_fitness_gym`, `yoga_pilates_studio`). Matches primary or secondary type. |
-| `city` | `string` | Optional | None | Case-insensitive city search (e.g. `Dhaka`, `Chittagong`). |
-| `search` / `q` | `string` | Optional | None | Free-text keyword search matching gym name, bio, address, or city. |
-| `page` | `integer` | Optional | `1` | Pagination page number. |
-| `page_size` | `integer` | Optional | `20` | Results per page (max: 100). |
+---
 
-#### Request Examples:
-- **Live Location 20 km search:**
-  ```http
-  GET /api/v1/gyms/nearby/?latitude=23.7465&longitude=90.3760&radius=20 HTTP/1.1
-  Host: api.manygym.com
-  Accept: application/json
-  ```
-- **Category + 20 km radius search:**
-  ```http
-  GET /api/v1/gyms/nearby/?latitude=23.7465&longitude=90.3760&category=strength_bodybuilding_gym HTTP/1.1
-  ```
-- **City search without GPS:**
-  ```http
-  GET /api/v1/gyms/nearby/?city=Dhaka&category=functional_fitness_gym HTTP/1.1
-  ```
+## 3. Endpoint 1: Search Nearby Gyms
 
-#### Response `200 OK`:
+Searches gyms within a default 20 km live location radius or by city, category, and keyword.
+
+- **Method:** `GET`
+- **Path:** `/api/v1/gyms/nearby/`
+- **Headers:**
+  - `Accept: application/json`
+  - `Authorization: Bearer <access_token>` (Optional)
+
+### 3.1. Query Parameters
+
+| Parameter | Type | Required | Default | Validation & Constraints | Description |
+|---|---|---|---|---|---|
+| `latitude` | `number` | Optional | `null` | Min: `-90.0`, Max: `90.0`. Required if `longitude` is provided. | User live latitude from browser Geolocation API. |
+| `longitude` | `number` | Optional | `null` | Min: `-180.0`, Max: `180.0`. Required if `latitude` is provided. | User live longitude from browser Geolocation API. |
+| `radius` | `number` | Optional | `20.0` | Min: `0.1`, Max: `500.0`. Unit: kilometers. | Search radius in kilometers. Defaults to 20 km. |
+| `category` | `string` | Optional | `null` | Allowed values: `general_fitness_gym`, `strength_bodybuilding_gym`, `functional_fitness_gym`, `personal_training_studio`, `boutique_fitness_studio`, `boxing_martial_arts_gym`, `yoga_pilates_studio`, `indoor_cycling_studio`, `sports_performance_centre`, `other`. | Filters matching gym primary or secondary type. |
+| `city` | `string` | Optional | `null` | Max length: 100 characters. | Case-insensitive city search when user does not share GPS. |
+| `search` | `string` | Optional | `null` | Max length: 255 characters. | Free-text search matching name, bio, address, or city. |
+| `q` | `string` | Optional | `null` | Max length: 255 characters. | Alias for `search`. |
+| `page` | `integer` | Optional | `1` | Min: `1`. | Page number. |
+| `page_size` | `integer` | Optional | `20` | Min: `1`, Max: `100`. | Number of items per page. |
+
+### 3.2. Response Payload (`200 OK`)
+
 ```json
 {
   "count": 2,
@@ -86,7 +56,7 @@ It supports dual search modes:
       "name": "Titan Strength Club",
       "profile_picture_url": "https://api.manygym.com/media/gyms/profiles/titan.webp",
       "cover_photo_url": "https://api.manygym.com/media/gyms/covers/titan_cover.webp",
-      "short_description": "A premier fitness institution dedicated to empowering members with elite bodybuilding equipment, powerlifting platforms, and certified personal trainers.",
+      "short_description": "A premier fitness institution dedicated to empowering members with elite equipment and guidance.",
       "primary_type": "strength_bodybuilding_gym",
       "primary_type_display": "Strength & Bodybuilding Gym",
       "secondary_type": null,
@@ -111,7 +81,7 @@ It supports dual search modes:
       "today_opening_hours": "06:00 - 22:00",
       "amenities_preview": [
         "Infrared Sauna",
-        "Changing Rooms & Showers",
+        "Showers",
         "Free Wi-Fi"
       ],
       "followers_count": 142,
@@ -123,7 +93,7 @@ It supports dual search modes:
       "name": "Uttara Functional Arena",
       "profile_picture_url": "https://api.manygym.com/media/gyms/profiles/uttara.webp",
       "cover_photo_url": null,
-      "short_description": "Elite functional fitness studio offering daily HIIT classes, endurance conditioning, and community workout challenges for all levels.",
+      "short_description": "Elite functional fitness studio offering daily HIIT and strength workouts.",
       "primary_type": "functional_fitness_gym",
       "primary_type_display": "Functional Fitness Gym",
       "secondary_type": null,
@@ -148,7 +118,7 @@ It supports dual search modes:
       "today_opening_hours": "06:00 - 22:00",
       "amenities_preview": [
         "Lockers",
-        "Drinking Water Station"
+        "Water Station"
       ],
       "followers_count": 89,
       "is_following": false,
@@ -158,28 +128,74 @@ It supports dual search modes:
 }
 ```
 
+### 3.3. Response Fields Specification
+
+| Field Path | Type | Nullable | Description |
+|---|---|---|---|
+| `count` | `integer` | No | Total number of matching gyms across all pages. |
+| `total_pages` | `integer` | No | Total number of pagination pages. |
+| `current_page` | `integer` | No | Active page number. |
+| `next` | `string` | Yes | URL link for the next results page (`null` if on the last page). |
+| `previous` | `string` | Yes | URL link for the previous results page (`null` if on the first page). |
+| `results[]` | `array` | No | List of gym search item objects. |
+| `results[].id` | `string (uuid)` | No | Gym unique identifier. |
+| `results[].name` | `string` | No | Registered gym workspace name. |
+| `results[].profile_picture_url` | `string (url)` | Yes | Absolute URL to gym profile image. |
+| `results[].cover_photo_url` | `string (url)` | Yes | Absolute URL to gym cover banner photo. |
+| `results[].short_description` | `string` | Yes | Gym bio description text. |
+| `results[].primary_type` | `string` | No | Primary fitness category identifier. |
+| `results[].primary_type_display` | `string` | No | Human-readable label for primary category. |
+| `results[].secondary_type` | `string` | Yes | Secondary fitness category identifier. |
+| `results[].secondary_type_display` | `string` | Yes | Human-readable label for secondary category. |
+| `results[].gender_required` | `string` | No | Gender restriction (`everyone`, `women_only`, `men_only`). |
+| `results[].gender_required_display` | `string` | No | Human-readable label for gender restriction. |
+| `results[].min_age` | `integer` | No | Minimum allowed member age (1-99). |
+| `results[].timezone` | `string` | No | Gym IANA timezone identifier (e.g. `UTC`, `Asia/Dhaka`). |
+| `results[].location` | `object` | Yes | Primary gym location object. |
+| `results[].location.id` | `string (uuid)` | No | Location record identifier. |
+| `results[].location.address` | `string` | No | Physical street address. |
+| `results[].location.latitude` | `string (decimal)` | No | Latitude coordinate string (8 decimal places). |
+| `results[].location.longitude` | `string (decimal)` | No | Longitude coordinate string (8 decimal places). |
+| `results[].location.city` | `string` | Yes | City name. |
+| `results[].location.country` | `string` | Yes | Country name. |
+| `results[].location.postal_code` | `string` | Yes | Postal / ZIP code. |
+| `results[].location.is_primary` | `boolean` | No | Whether this is the main headquarters branch. |
+| `results[].location.updated_at` | `string (datetime)` | No | ISO 8601 timestamp of last location update. |
+| `results[].distance_km` | `number` | Yes | Distance from user GPS coordinates in kilometers. `null` if searched by city without coordinates. |
+| `results[].is_open_now` | `boolean` | No | Real-time open/closed status based on gym timezone and current operating schedule. |
+| `results[].today_opening_hours` | `string` | No | Today's operating schedule (e.g. `06:00 - 22:00` or `Closed`). |
+| `results[].amenities_preview[]` | `array of strings` | No | List of up to 5 prominent amenity names available at the gym. |
+| `results[].followers_count` | `integer` | No | Count of total active gym followers. |
+| `results[].is_following` | `boolean` | No | `true` if authenticated user follows this gym; `false` otherwise. |
+| `results[].created_at` | `string (datetime)` | No | ISO 8601 creation timestamp of gym. |
+
 ---
 
-### 2.2. Get Public Gym Details
-- **Endpoint:** `GET /api/v1/gyms/<uuid:gym_id>/public/` (Alias: `GET /api/v1/gyms/<uuid:gym_id>/detail/`)
-- **Authentication:** Optional (`AllowAny`).
-- **Response `200 OK`:** Complete profile payload including:
-  - Full branding info & overview
-  - Primary location and multi-branch addresses with GPS coordinates
-  - 7-day schedule with live `is_open_now` indicator for current local time
-  - Amenities divided into complimentary vs paid with prices
-  - Media gallery items (with original, WebP optimized, and thumbnail variants)
-  - Active membership pricing plans
-  - Follower & member statistics
+## 4. Endpoint 2: Get Public Gym Details
 
-#### Response Example:
+Retrieves complete public information for a selected gym.
+
+- **Method:** `GET`
+- **Path:** `/api/v1/gyms/{gym_id}/public/` (Alias: `/api/v1/gyms/{gym_id}/detail/`)
+- **Headers:**
+  - `Accept: application/json`
+  - `Authorization: Bearer <access_token>` (Optional)
+
+### 4.1. Path Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `gym_id` | `string (uuid)` | Yes | UUID of the target gym workspace. |
+
+### 4.2. Response Payload (`200 OK`)
+
 ```json
 {
   "id": "e93f9dc2-7c18-4b72-9112-78d10b7b1201",
   "name": "Titan Strength Club",
   "profile_picture_url": "https://api.manygym.com/media/gyms/profiles/titan.webp",
   "cover_photo_url": "https://api.manygym.com/media/gyms/covers/titan_cover.webp",
-  "short_description": "A premier fitness institution dedicated to empowering members...",
+  "short_description": "A premier fitness institution dedicated to empowering members with elite equipment and guidance.",
   "primary_type": "strength_bodybuilding_gym",
   "primary_type_display": "Strength & Bodybuilding Gym",
   "secondary_type": null,
@@ -237,13 +253,53 @@ It supports dual search modes:
       "start_time": "06:00:00",
       "end_time": "22:00:00",
       "is_closed": false
+    },
+    {
+      "id": "c1111111-0000-0000-0000-000000000003",
+      "day_of_week": 2,
+      "day_name": "Tuesday",
+      "start_time": "06:00:00",
+      "end_time": "22:00:00",
+      "is_closed": false
+    },
+    {
+      "id": "c1111111-0000-0000-0000-000000000004",
+      "day_of_week": 3,
+      "day_name": "Wednesday",
+      "start_time": "06:00:00",
+      "end_time": "22:00:00",
+      "is_closed": false
+    },
+    {
+      "id": "c1111111-0000-0000-0000-000000000005",
+      "day_of_week": 4,
+      "day_name": "Thursday",
+      "start_time": "06:00:00",
+      "end_time": "22:00:00",
+      "is_closed": false
+    },
+    {
+      "id": "c1111111-0000-0000-0000-000000000006",
+      "day_of_week": 5,
+      "day_name": "Friday",
+      "start_time": "06:00:00",
+      "end_time": "22:00:00",
+      "is_closed": false
+    },
+    {
+      "id": "c1111111-0000-0000-0000-000000000007",
+      "day_of_week": 6,
+      "day_name": "Saturday",
+      "start_time": "08:00:00",
+      "end_time": "20:00:00",
+      "is_closed": false
     }
   ],
   "amenities": {
     "free_amenities": [
       {
-        "id": "ga-01",
-        "amenity_id": "cat-01",
+        "id": "ga-001",
+        "amenity_id": "cat-001",
         "name": "Infrared Sauna",
         "group_name": "wellness_and_recovery",
         "group_display": "Wellness & Recovery",
@@ -251,12 +307,22 @@ It supports dual search modes:
         "default_price": "0.00"
       }
     ],
-    "paid_amenities": [],
-    "total_count": 1
+    "paid_amenities": [
+      {
+        "id": "ga-002",
+        "amenity_id": "cat-002",
+        "name": "Personal Lockers",
+        "group_name": "changing_and_storage",
+        "group_display": "Changing & Storage",
+        "is_paid": true,
+        "default_price": "15.00"
+      }
+    ],
+    "total_count": 2
   },
   "gallery": [
     {
-      "id": "gal-01",
+      "id": "d1234567-0000-0000-0000-000000000001",
       "media_url": "https://api.manygym.com/media/gyms/gallery/original/weights.jpg",
       "media_type": "picture",
       "category": "equipment",
@@ -271,7 +337,7 @@ It supports dual search modes:
   ],
   "membership_plans": [
     {
-      "id": "plan-01",
+      "id": "p1234567-0000-0000-0000-000000000001",
       "name": "Monthly Gold Pass",
       "description": "Full access to gym equipment and sauna.",
       "plan_type": "time_based",
@@ -291,174 +357,215 @@ It supports dual search modes:
 }
 ```
 
+### 4.3. Response Fields Specification
+
+| Field Path | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `string (uuid)` | No | Gym identifier. |
+| `name` | `string` | No | Gym name. |
+| `profile_picture_url` | `string (url)` | Yes | Absolute URL to profile image. |
+| `cover_photo_url` | `string (url)` | Yes | Absolute URL to cover banner photo. |
+| `short_description` | `string` | Yes | Bio / description text. |
+| `primary_type` | `string` | No | Primary category code. |
+| `primary_type_display` | `string` | No | Human-readable primary category label. |
+| `secondary_type` | `string` | Yes | Secondary category code. |
+| `secondary_type_display` | `string` | Yes | Human-readable secondary category label. |
+| `gender_required` | `string` | No | Gender restriction code. |
+| `gender_required_display` | `string` | No | Human-readable gender restriction label. |
+| `min_age` | `integer` | No | Minimum allowed member age. |
+| `timezone` | `string` | No | Gym IANA timezone identifier. |
+| `created_at` | `string (datetime)` | No | ISO 8601 gym creation timestamp. |
+| `owner_public` | `object` | No | Public owner information. |
+| `owner_public.id` | `string (uuid)` | No | Owner user identifier. |
+| `owner_public.name` | `string` | No | Owner public full name. |
+| `location` | `object` | Yes | Primary gym location object. |
+| `locations[]` | `array` | No | Array of all gym branches and physical addresses. |
+| `today_status` | `object` | No | Today's open status summary. |
+| `today_status.is_open_now` | `boolean` | No | `true` if gym is currently open at this exact moment; `false` otherwise. |
+| `today_status.today_hours` | `string` | No | Human-readable today hours string. |
+| `operating_hours[]` | `array` | No | 7-day operating schedule array (sorted 0=Sunday to 6=Saturday). |
+| `operating_hours[].id` | `string (uuid)` | No | Schedule record identifier. |
+| `operating_hours[].day_of_week` | `integer` | No | Integer day of week (`0`=Sunday through `6`=Saturday). |
+| `operating_hours[].day_name` | `string` | No | Full day name (`Sunday`, `Monday`, etc.). |
+| `operating_hours[].start_time` | `string (time)` | Yes | Opening time (`HH:MM:SS`). `null` if closed. |
+| `operating_hours[].end_time` | `string (time)` | Yes | Closing time (`HH:MM:SS`). `null` if closed. |
+| `operating_hours[].is_closed` | `boolean` | No | `true` if gym is closed on this day. |
+| `amenities` | `object` | No | Categorized amenities container. |
+| `amenities.free_amenities[]` | `array` | No | List of complimentary / free amenities. |
+| `amenities.paid_amenities[]` | `array` | No | List of extra paid amenities with pricing. |
+| `amenities.free_amenities[].id` | `string` | No | Gym amenity mapping record identifier. |
+| `amenities.free_amenities[].amenity_id` | `string` | No | Master catalog amenity identifier. |
+| `amenities.free_amenities[].name` | `string` | No | Amenity title (e.g. `Infrared Sauna`). |
+| `amenities.free_amenities[].group_name` | `string` | No | Domain group key (e.g. `wellness_and_recovery`). |
+| `amenities.free_amenities[].group_display` | `string` | No | Human-readable group label (e.g. `Wellness & Recovery`). |
+| `amenities.free_amenities[].is_paid` | `boolean` | No | `false` for free amenities. |
+| `amenities.free_amenities[].default_price` | `string` | No | Price string (`0.00`). |
+| `amenities.paid_amenities[].default_price` | `string` | No | Additional fee string (e.g. `15.00`). |
+| `amenities.total_count` | `integer` | No | Total count of configured amenities (`free` + `paid`). |
+| `gallery[]` | `array` | No | Media gallery assets list. |
+| `gallery[].id` | `string (uuid)` | No | Media item identifier. |
+| `gallery[].media_url` | `string (url)` | No | Direct media asset URL. |
+| `gallery[].media_type` | `string` | No | Asset media type (`picture`, `video`). |
+| `gallery[].category` | `string` | No | Gallery asset category key. |
+| `gallery[].category_display` | `string` | No | Human-readable gallery category label. |
+| `gallery[].caption` | `string` | Yes | Photo/video caption text. |
+| `gallery[].order_index` | `integer` | No | Integer sequence index for UI ordering. |
+| `gallery[].original_url` | `string (url)` | Yes | URL of untouched original uploaded file. |
+| `gallery[].optimized_url` | `string (url)` | Yes | WebP high-resolution variant URL. |
+| `gallery[].thumbnail_url` | `string (url)` | Yes | WebP thumbnail variant URL. |
+| `gallery[].processing_status` | `string` | No | Pipeline status (`pending`, `processing`, `completed`, `failed`). |
+| `membership_plans[]` | `array` | No | Active public membership pricing plans. |
+| `membership_plans[].id` | `string (uuid)` | No | Plan record identifier. |
+| `membership_plans[].name` | `string` | No | Plan display title. |
+| `membership_plans[].description` | `string` | Yes | Plan description. |
+| `membership_plans[].plan_type` | `string` | No | Plan billing structure (`time_based`, `session_based`). |
+| `membership_plans[].plan_type_display` | `string` | No | Human-readable plan type label. |
+| `membership_plans[].price` | `string` | No | Fee amount string (e.g. `49.99`). |
+| `membership_plans[].duration_value` | `integer` | No | Duration integer (e.g. `1`, `3`, `12`). |
+| `membership_plans[].duration_unit` | `string` | No | Duration unit code (`day`, `week`, `month`, `session`). |
+| `membership_plans[].duration_unit_display` | `string` | No | Human-readable duration unit label. |
+| `membership_plans[].joining_fee` | `string` | No | One-time joining fee string (e.g. `0.00`). |
+| `social` | `object` | No | Social statistics block. |
+| `social.followers_count` | `integer` | No | Total active gym followers. |
+| `social.members_count` | `integer` | No | Total enrolled gym members. |
+| `social.is_following` | `boolean` | No | `true` if authenticated user follows this gym. |
+
 ---
 
-## 3. Frontend Integration Guide (Browser Live Location + Consent)
+## 5. Endpoint 3: Update Gym Location Coordinates
 
-### 3.1. Standard Workflow
-1. When user lands on the **"Search Nearby Gym"** page, display a location prompt asking for permission to access their live location to find gyms within **20 km**.
-2. Call the HTML5 Geolocation API: `navigator.geolocation.getCurrentPosition(successCallback, errorCallback, options)`.
-3. If permission is granted:
-   - Extract `latitude = position.coords.latitude` and `longitude = position.coords.longitude`.
-   - Call `/api/v1/gyms/nearby/?latitude=${latitude}&longitude=${longitude}&radius=20`.
-4. If permission is denied or device does not support geolocation:
-   - Gracefully display the **City Selector Dropdown / Input** (e.g. "Dhaka", "Chittagong", "Sylhet").
-   - Call `/api/v1/gyms/nearby/?city=${selectedCity}`.
+Saves map pinpoint coordinates and address details for a gym. Automatically updates both PostgreSQL and the Redis Geospatial proximity index.
 
-### 3.2. Complete React Hook Implementation
+- **Method:** `PATCH`
+- **Path:** `/api/v1/gyms/profile/location/`
+- **Headers:**
+  - `Content-Type: application/json`
+  - `Authorization: Bearer <access_token>` (Required: Gym Owner or staff with `gym_profile:edit` scope)
+- **Query Parameters:**
+  - `gym_id`: `string (uuid)` (Optional if using active gym context token)
 
-```typescript
-import { useState, useEffect, useCallback } from "react";
+### 5.1. Request Payload
 
-interface GymLocation {
-  address: string;
-  city: string;
-  country: string;
-  latitude: number;
-  longitude: number;
+```json
+{
+  "address": "Sector 3, Road 7, Uttara",
+  "latitude": 23.87590000,
+  "longitude": 90.37950000,
+  "city": "Dhaka",
+  "country": "Bangladesh",
+  "postal_code": "1230"
 }
+```
 
-interface GymSearchItem {
-  id: string;
-  name: string;
-  profile_picture_url: string | null;
-  short_description: string | null;
-  primary_type: string;
-  primary_type_display: string;
-  location: GymLocation | null;
-  distance_km: number | null;
-  is_open_now: boolean;
-  today_opening_hours: string;
-  amenities_preview: string[];
-  followers_count: number;
-  is_following: boolean;
-}
+### 5.2. Request Payload Fields Specification
 
-export function useNearbyGyms() {
-  const [gyms, setGyms] = useState<GymSearchItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [locationPermission, setLocationPermission] = useState<"prompt" | "granted" | "denied">("prompt");
+| Field | Type | Required | Validation Rules | Description |
+|---|---|---|---|---|
+| `address` | `string` | Yes | Cannot be empty or blank. | Physical street address of the gym. |
+| `latitude` | `number / decimal` | Yes | Min: `-90.0`, Max: `90.0`. Up to 8 decimal places. | Pinned map latitude coordinate. |
+| `longitude` | `number / decimal` | Yes | Min: `-180.0`, Max: `180.0`. Up to 8 decimal places. | Pinned map longitude coordinate. |
+| `city` | `string` | No | Max length: 100 characters. | City name. |
+| `country` | `string` | No | Max length: 100 characters. | Country name. |
+| `postal_code` | `string` | No | Max length: 30 characters. | Postal / ZIP code. |
 
-  // Request browser live location with consent
-  const requestLiveLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      setLocationPermission("denied");
-      setError("Geolocation is not supported by your browser.");
-      return;
-    }
+### 5.3. Response Payload (`200 OK`)
 
-    setLoading(true);
-    setError(null);
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const userLat = position.coords.latitude;
-        const userLon = position.coords.longitude;
-        setCoords({ latitude: userLat, longitude: userLon });
-        setLocationPermission("granted");
-        fetchGyms({ latitude: userLat, longitude: userLon, radius: 20 });
-      },
-      (err) => {
-        setLoading(false);
-        setLocationPermission("denied");
-        if (err.code === err.PERMISSION_DENIED) {
-          setError("Location access was denied. Please select your city to discover gyms.");
-        } else {
-          setError("Unable to retrieve your location. Please select your city.");
-        }
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 60000, // Cache GPS for 60 seconds
-      }
-    );
-  }, []);
-
-  // Fetch gyms from Many Gym API
-  const fetchGyms = async (params: {
-    latitude?: number;
-    longitude?: number;
-    radius?: number;
-    city?: string;
-    category?: string;
-    search?: string;
-  }) => {
-    setLoading(true);
-    setError(null);
-
-    const query = new URLSearchParams();
-    if (params.latitude !== undefined && params.longitude !== undefined) {
-      query.append("latitude", params.latitude.toString());
-      query.append("longitude", params.longitude.toString());
-      query.append("radius", (params.radius || 20).toString());
-    }
-    if (params.city) query.append("city", params.city);
-    if (params.category) query.append("category", params.category);
-    if (params.search) query.append("search", params.search);
-
-    try {
-      const response = await fetch(`/api/v1/gyms/nearby/?${query.toString()}`, {
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to search gyms.");
-      }
-
-      const data = await response.json();
-      setGyms(data.results || []);
-    } catch (err: any) {
-      setError(err.message || "An unexpected error occurred.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return {
-    gyms,
-    loading,
-    error,
-    coords,
-    locationPermission,
-    requestLiveLocation,
-    fetchGyms,
-  };
+```json
+{
+  "id": "b23cd45e-0000-0000-0000-000000000002",
+  "address": "Sector 3, Road 7, Uttara",
+  "latitude": "23.87590000",
+  "longitude": "90.37950000",
+  "city": "Dhaka",
+  "country": "Bangladesh",
+  "postal_code": "1230",
+  "is_primary": true,
+  "updated_at": "2026-11-09T18:30:00Z"
 }
 ```
 
 ---
 
-## 4. Backend Geospatial Synchronization Details
+## 6. Endpoint 4: Get Gym Location
 
-### 4.1. Location Recording (`create_gym` & `update_gym_location`)
-When a gym owner or staff creates or updates physical location (`latitude` and `longitude`):
-1. **Validation**: Latitude must be between `-90.0` and `+90.0`, longitude between `-180.0` and `+180.0`.
-2. **PostgreSQL Persistence**: Saved in `gym_locations` table with `is_primary=True`.
-3. **Redis Geospatial Indexing (`GEOADD`)**:
-   ```python
-   # Key: gyms:geo:locations
-   # Coordinates: (longitude, latitude, member_id)
-   redis_client.geoadd("gyms:geo:locations", (lon, lat, str(gym.id)))
-   ```
+Retrieves the saved physical address and map coordinates of the active gym.
 
-### 4.2. Access Control & Deactivation Synchronization
-When a gym workspace state transitions:
-- **`unpublish` / `deactivate` / `delete`**: The gym member ID is immediately removed from Redis GEO via `ZREM gyms:geo:locations <gym_id>`.
-- **`publish` / `reactivate` / `restore`**: The primary location coordinates are re-indexed via `GEOADD`.
+- **Method:** `GET`
+- **Path:** `/api/v1/gyms/profile/location/`
+- **Headers:**
+  - `Accept: application/json`
+  - `Authorization: Bearer <access_token>` (Required: Gym Owner or staff with `gym_profile:read` scope)
+- **Query Parameters:**
+  - `gym_id`: `string (uuid)` (Optional if using active gym context token)
 
-### 4.3. Management Command for Operators
-To warm up or re-index all published gyms into Redis GEO:
-```bash
-python manage.py warm_gym_geo_cache
+### 6.1. Response Payload (`200 OK`)
+
+```json
+{
+  "id": "a12bc34d-0000-0000-0000-000000000001",
+  "address": "House 12, Road 7, Dhanmondi",
+  "latitude": "23.74650000",
+  "longitude": "90.37600000",
+  "city": "Dhaka",
+  "country": "Bangladesh",
+  "postal_code": "1205",
+  "is_primary": true,
+  "updated_at": "2026-11-09T18:00:00Z"
+}
 ```
-Example output:
-```text
-Warming Redis GEO cache with active gym locations...
-Successfully cached 124 gym locations in Redis GEO index.
+
+---
+
+## 7. Global Error Responses
+
+### 7.1. Missing Coordinates Pair (`400 Bad Request`)
+Returned when `latitude` is provided without `longitude`, or vice versa:
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed.",
+  "details": {
+    "coordinates": [
+      "Both 'latitude' and 'longitude' must be provided together for live location radius search."
+    ]
+  }
+}
 ```
 
+### 7.2. Out-of-Range Coordinates (`400 Bad Request`)
+Returned when `latitude` is not between `-90.0` and `90.0`, or `longitude` is not between `-180.0` and `180.0`:
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed.",
+  "details": {
+    "latitude": [
+      "Ensure this value is less than or equal to 90.0."
+    ]
+  }
+}
+```
+
+### 7.3. Resource Not Found (`404 Not Found`)
+Returned when querying an invalid gym UUID or a gym that is deactivated, soft-deleted, or unpublished:
+
+```json
+{
+  "code": "RESOURCE_NOT_FOUND",
+  "message": "Gym not found or currently unavailable.",
+  "details": null
+}
+```
+
+### 7.4. Permission Denied (`403 Forbidden`)
+Returned when an unauthorized user attempts to update gym location:
+
+```json
+{
+  "code": "PERMISSION_DENIED",
+  "message": "You do not possess the required 'gym_profile:edit' scope for this gym operation.",
+  "details": null
+}
+```

@@ -239,6 +239,43 @@ class MediaTypeEnum(models.TextChoices):
     VIDEO = "video", "Video"
 
 
+class StoryOwnerTypeEnum(models.TextChoices):
+    """Identifies whether a story was uploaded by a public user or a gym."""
+    USER = "user", "Public User"
+    GYM = "gym", "Gym"
+
+
+class StoryLifetimeEnum(models.IntegerChoices):
+    """Selectable expiration lifetimes (in hours) for stories."""
+    HOURS_6 = 6, "6 hours"
+    HOURS_12 = 12, "12 hours"
+    HOURS_18 = 18, "18 hours"
+    HOURS_24 = 24, "24 hours"
+    HOURS_48 = 48, "48 hours"
+
+
+class StoryPrivacyEnum(models.TextChoices):
+    """Privacy visibility levels for stories (Public users: public/followers/private; Gym: public/followers/members_only/private)."""
+    PUBLIC = "public", "Public"
+    FOLLOWERS = "followers", "Followers"
+    MEMBERS_ONLY = "members_only", "Members Only"
+    PRIVATE = "private", "Private"
+
+
+USER_STORY_PRIVACY_VALUES = (
+    StoryPrivacyEnum.PUBLIC,
+    StoryPrivacyEnum.FOLLOWERS,
+    StoryPrivacyEnum.PRIVATE,
+)
+
+GYM_STORY_PRIVACY_VALUES = (
+    StoryPrivacyEnum.PUBLIC,
+    StoryPrivacyEnum.FOLLOWERS,
+    StoryPrivacyEnum.MEMBERS_ONLY,
+    StoryPrivacyEnum.PRIVATE,
+)
+
+
 class ProcessingStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     PROCESSING = "processing", "Processing"

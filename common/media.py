@@ -9,6 +9,56 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+MAX_PICTURE_SIZE_BYTES = 10 * 1024 * 1024    # 10 MB
+MAX_VIDEO_SIZE_BYTES = 200 * 1024 * 1024     # 200 MB
+
+ALLOWED_PICTURE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov"}
+
+
+def validate_media_file(file) -> str:
+    """
+    Validates uploaded media file format and size constraints.
+    Returns detected MediaTypeEnum ('picture' or 'video').
+    Raises DomainValidationError on invalid format, null bytes, or excessive size.
+    """
+    from common.enums import MediaTypeEnum
+    from common.exceptions import DomainValidationError
+
+    filename = getattr(file, "name", "") or ""
+    if "\x00" in filename:
+        raise DomainValidationError("Invalid filename.")
+
+    ext = Path(filename).suffix.lower()
+    content_type = (getattr(file, "content_type", "") or "").lower()
+    file_size = getattr(file, "size", 0) or 0
+
+    if ext in ALLOWED_PICTURE_EXTENSIONS or content_type.startswith("image/"):
+        if ext not in ALLOWED_PICTURE_EXTENSIONS:
+            raise DomainValidationError(
+                f"Unsupported image format '{ext}'. Allowed formats: JPG, JPEG, PNG, WEBP."
+            )
+        if file_size > MAX_PICTURE_SIZE_BYTES:
+            raise DomainValidationError(
+                f"Image size exceeds the 10 MB limit ({file_size / (1024 * 1024):.2f} MB)."
+            )
+        return MediaTypeEnum.PICTURE
+
+    if ext in ALLOWED_VIDEO_EXTENSIONS or content_type.startswith("video/"):
+        if ext not in ALLOWED_VIDEO_EXTENSIONS:
+            raise DomainValidationError(
+                f"Unsupported video format '{ext}'. Allowed formats: MP4, MOV."
+            )
+        if file_size > MAX_VIDEO_SIZE_BYTES:
+            raise DomainValidationError(
+                f"Video size exceeds the 200 MB limit ({file_size / (1024 * 1024):.2f} MB)."
+            )
+        return MediaTypeEnum.VIDEO
+
+    raise DomainValidationError(
+        f"Unsupported file format '{ext or filename}'. Supported formats are pictures (JPG, JPEG, PNG, WEBP) and videos (MP4, MOV)."
+    )
+
 
 class MediaOptimizerService:
     """

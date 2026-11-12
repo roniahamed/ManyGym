@@ -34,6 +34,8 @@ urlpatterns = [
     path("api/v1/", include("apps.routines.rest_api.v1.urls")),
     # Phase 7: Community Feed, Social Posts & Asynchronous Media Pipeline
     path("api/v1/posts/", include("apps.posts.rest_api.v1.urls")),
+    # Stories Feature (Public Users & Gyms)
+    path("api/v1/stories/", include("apps.stories.rest_api.v1.urls")),
     # Phase 8: Gym Studio Reports, Analytics & Executive Dashboard
     path("api/v1/dashboard/", include("apps.reports.rest_api.v1.dashboard_urls")),
     path("api/v1/reports/", include("apps.reports.rest_api.v1.reports_urls")),
