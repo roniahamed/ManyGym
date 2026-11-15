@@ -255,6 +255,7 @@ class StorySerializer(serializers.ModelSerializer):
             "is_expired",
             "is_archived",
             "views_count",
+            "reactions_count",
             "has_viewed",
             "created_at",
             "updated_at",

@@ -7,6 +7,10 @@ from apps.stories.rest_api.v1.views import (
     StoryRecordViewView,
     StoryViewersListView,
 )
+from apps.reactions.rest_api.v1.views import (
+    StoryReactionsView,
+    StoryReactionSummaryView,
+)
 
 urlpatterns = [
     path("", StoryListCreateView.as_view(), name="story-list-create"),
@@ -15,5 +19,7 @@ urlpatterns = [
     path("<uuid:story_id>/", StoryDetailView.as_view(), name="story-detail"),
     path("<uuid:story_id>/view/", StoryRecordViewView.as_view(), name="story-record-view"),
     path("<uuid:story_id>/viewers/", StoryViewersListView.as_view(), name="story-viewers"),
+    path("<uuid:story_id>/reactions/", StoryReactionsView.as_view(), name="story-reactions"),
+    path("<uuid:story_id>/reactions/summary/", StoryReactionSummaryView.as_view(), name="story-reactions-summary"),
 ]
 

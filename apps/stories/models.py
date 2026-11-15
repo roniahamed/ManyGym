@@ -100,6 +100,7 @@ class Story(OptimizedMediaMixin, models.Model):
     published_at = models.DateTimeField(default=timezone.now, db_index=True)
     expires_at = models.DateTimeField(db_index=True)
     views_count = models.PositiveIntegerField(default=0)
+    reactions_count = models.PositiveIntegerField(default=0)
     is_archived = models.BooleanField(default=False, db_index=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

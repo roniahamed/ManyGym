@@ -183,6 +183,7 @@ class PostCommentSerializer(serializers.ModelSerializer):
             "duration_seconds",
             "replies_count",
             "total_replies_count",
+            "reactions_count",
             "has_more_replies",
             "replies",
             "is_edited",

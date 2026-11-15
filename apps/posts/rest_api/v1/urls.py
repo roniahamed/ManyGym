@@ -10,6 +10,12 @@ from apps.posts.rest_api.v1.views import (
     CommentRepliesView,
     CommentDetailView,
 )
+from apps.reactions.rest_api.v1.views import (
+    CommentReactionsView,
+    CommentReactionSummaryView,
+    PostReactionsView,
+    PostReactionSummaryView,
+)
 
 urlpatterns = [
     path("", GymFeedView.as_view(), name="gym-post-feed"),
@@ -22,6 +28,10 @@ urlpatterns = [
     path("<uuid:post_id>/comments/", PostCommentsView.as_view(), name="post-comments-list-create"),
     path("<uuid:post_id>/comments/<uuid:comment_id>/", CommentDetailView.as_view(), name="post-comment-detail"),
     path("<uuid:post_id>/comments/<uuid:comment_id>/replies/", CommentRepliesView.as_view(), name="post-comment-replies"),
+    path("<uuid:post_id>/reactions/", PostReactionsView.as_view(), name="post-reactions"),
+    path("<uuid:post_id>/reactions/summary/", PostReactionSummaryView.as_view(), name="post-reactions-summary"),
+    path("<uuid:post_id>/comments/<uuid:comment_id>/reactions/", CommentReactionsView.as_view(), name="post-comment-reactions"),
+    path("<uuid:post_id>/comments/<uuid:comment_id>/reactions/summary/", CommentReactionSummaryView.as_view(), name="post-comment-reactions-summary"),
     path(
         "<uuid:post_id>/media/<uuid:media_id>/thumbnail/",
         GymPostMediaThumbnailView.as_view(),

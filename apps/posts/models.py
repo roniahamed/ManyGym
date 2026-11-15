@@ -55,6 +55,7 @@ class GymPost(models.Model):
     )
     reposts_count = models.PositiveIntegerField(default=0)
     comments_count = models.PositiveIntegerField(default=0)
+    reactions_count = models.PositiveIntegerField(default=0)
     published_at = models.DateTimeField(default=timezone.now, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -237,6 +238,10 @@ class PostComment(OptimizedMediaMixin, models.Model):
     total_replies_count = models.PositiveIntegerField(
         default=0,
         help_text="Total nested descendant replies count across all depths under this comment.",
+    )
+    reactions_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Total reactions count on this comment.",
     )
     is_edited = models.BooleanField(default=False)
     edited_at = models.DateTimeField(null=True, blank=True)

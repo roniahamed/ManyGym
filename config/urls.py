@@ -37,6 +37,8 @@ urlpatterns = [
     path("api/v1/comments/", include("apps.posts.rest_api.v1.comment_urls")),
     # Stories Feature (Public Users & Gyms)
     path("api/v1/stories/", include("apps.stories.rest_api.v1.urls")),
+    # Social Reactions (Posts, Stories, Comments)
+    path("api/v1/reactions/", include("apps.reactions.rest_api.v1.urls")),
     # Phase 8: Gym Studio Reports, Analytics & Executive Dashboard
     path("api/v1/dashboard/", include("apps.reports.rest_api.v1.dashboard_urls")),
     path("api/v1/reports/", include("apps.reports.rest_api.v1.reports_urls")),
