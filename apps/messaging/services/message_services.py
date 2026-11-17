@@ -1,7 +1,10 @@
+import logging
 from typing import Optional, Dict, Any, List
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 from apps.users.models import User
 from apps.gyms.models import Gym
@@ -120,6 +123,56 @@ def send_encrypted_message(
             broadcast_realtime_event(f"chat_user_{user_id}", "chat_incoming", payload)
         elif gym_id:
             broadcast_realtime_event(f"chat_gym_{gym_id}", "chat_incoming", payload)
+
+    # Dispatch real-time FCM push notification (WITHOUT persisting generic in-app notification)
+    try:
+        from apps.notifications.services import send_message_push_notification
+        sender_title = payload.get("sender_gym_name") or "New Message"
+        if sender_type == MessageSenderTypeEnum.USER and sender_user:
+            sender_title = f"{sender_user.first_name} {sender_user.last_name}".strip() or sender_user.email
+
+        for user_id, gym_id in other_targets:
+            if user_id:
+                target_user = User.objects.filter(id=user_id).first()
+                if target_user:
+                    send_message_push_notification(
+                        recipient_user=target_user,
+                        title=sender_title,
+                        body="Sent you an encrypted message.",
+                        data={
+                            "conversation_id": str(conversation.id),
+                            "message_id": str(message.id),
+                            "sender_type": message.sender_type,
+                            "sent_at": message.sent_at.isoformat(),
+                        },
+                    )
+            elif gym_id:
+                from apps.access_control.models import GymStaffAssignment, StaffStatus
+                staff_user_ids = list(
+                    GymStaffAssignment.objects.filter(gym_id=gym_id, status=StaffStatus.ACTIVE).values_list("user_id", flat=True)
+                )
+                from apps.gyms.models import Gym
+                gym_obj = Gym.objects.filter(id=gym_id).first()
+                if gym_obj and getattr(gym_obj, "owner_user_id", None):
+                    staff_user_ids.append(gym_obj.owner_user_id)
+
+                for s_uid in set(staff_user_ids):
+                    staff_user = User.objects.filter(id=s_uid).first()
+                    if staff_user and staff_user.id != (sender_user.id if sender_user else None):
+                        send_message_push_notification(
+                            recipient_user=staff_user,
+                            title=sender_title,
+                            body="New incoming customer message.",
+                            data={
+                                "conversation_id": str(conversation.id),
+                                "message_id": str(message.id),
+                                "gym_id": str(gym_id),
+                                "sender_type": message.sender_type,
+                                "sent_at": message.sent_at.isoformat(),
+                            },
+                        )
+    except Exception as exc:
+        logger.warning(f"Failed to dispatch FCM message push notification: {exc}")
 
     return message
 

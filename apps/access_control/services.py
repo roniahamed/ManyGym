@@ -289,6 +289,31 @@ def invite_staff_member(gym: Gym, user_email: str, role_id: str) -> GymStaffAssi
         except Exception:
             pass
 
+    try:
+        from apps.notifications.services import send_notification
+        from common.enums import NotificationTypeEnum
+
+        send_notification(
+            recipient=user,
+            actor=getattr(gym, "owner_user", None) or getattr(gym, "creator", None),
+            actor_gym=gym,
+            gym=gym,
+            notification_type=NotificationTypeEnum.GYM_INVITE,
+            title="Gym Staff Invitation",
+            body=f"You have been invited to join {gym.name} as {role.name}.",
+            target_type="gym",
+            target_id=str(gym.id),
+            action_url=f"/gyms/{gym.id}",
+            data={
+                "gym_id": str(gym.id),
+                "role_id": str(role.id),
+                "role_name": role.name,
+                "assignment_id": str(assignment.id),
+            },
+        )
+    except Exception:
+        pass
+
     return assignment
 
 

@@ -456,6 +456,35 @@ Implement asynchronous background workers, email dispatches, and periodic Celery
 
 ---
 
+## Phase 10: Real-time End-to-End Encrypted Messaging (Chat & WebSockets)
+
+### Goal
+Implement end-to-end encrypted real-time messaging between User-to-User, User-to-Gym, and Gym-to-Gym using Curve25519/NaCl cryptography and Django Channels.
+
+---
+
+## Phase 11: Universal Notification System & Real-Time FCM Push Pipeline
+
+### Goal
+Implement a centralized, universal notification system delivering persistent in-app notifications (reactions, comments, joining requests, staff invites, system alerts) and high-throughput real-time mobile push notifications via Firebase Cloud Messaging (FCM).
+
+### 11.1 Core Components
+- **In-App Persistent Notifications (`Notification`)**:
+  - Reaction notifications (post, comment, story).
+  - Comment & nested reply notifications.
+  - Member joining request alerts, approvals, and rejections.
+  - Gym staff invitations.
+  - Live unread counters, mark as read, and bulk mark as read.
+  - Self-notification suppression.
+- **FCM Real-time Push Delivery (`DeviceToken` & `FCMClient`)**:
+  - Device token registration, multi-device management, and auto-deactivation of stale/invalid tokens.
+  - Asynchronous background delivery via Celery workers (`send_push_notification_task`).
+  - **Message Push Notification Exclusivity**: E2EE messages trigger real-time FCM push alerts WITHOUT polluting the generic in-app notification database table.
+- **Real-Time WebSocket Integration**:
+  - Real-time `incoming_notification` events broadcasted across personal user channels (`chat_user_{id}`) and gym channels (`chat_gym_{id}`).
+
+---
+
 ## Complete Phase Dependency & Execution Order
 
 ```text
@@ -478,7 +507,12 @@ Phase 7: Community Feed & Media Processing Pipeline
 Phase 8: Studio Reports, Analytics & Dashboard
   │
 Phase 9: Automated Background Workers & Scheduled Crons
+  │
+Phase 10: Real-time End-to-End Encrypted Messaging
+  │
+Phase 11: Universal Notification System & FCM Push Pipeline
 ```
+
 
 ---
 

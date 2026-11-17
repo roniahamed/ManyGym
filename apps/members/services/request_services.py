@@ -169,6 +169,32 @@ def create_member_request(
     except Exception:
         pass
 
+    try:
+        from apps.notifications.services import send_notification
+        from common.enums import NotificationTypeEnum
+
+        gym_recipient = getattr(gym, "owner_user", None) or getattr(gym, "creator", None)
+        if gym_recipient:
+            user_display = f"{user.first_name} {user.last_name}".strip() or user.email
+            send_notification(
+                recipient=gym_recipient,
+                actor=user,
+                gym=gym,
+                notification_type=NotificationTypeEnum.MEMBER_REQUEST,
+                title="New Member Joining Request",
+                body=f"{user_display} requested to join {gym.name}.",
+                target_type="member_request",
+                target_id=str(member_request.id),
+                action_url=f"/gyms/{gym.id}/requests",
+                data={
+                    "request_id": str(member_request.id),
+                    "gym_id": str(gym.id),
+                    "applicant_email": user.email,
+                },
+            )
+    except Exception:
+        pass
+
     return {
         "message": "Member joining request sent successfully.",
         "gym_id": str(gym.id),
@@ -443,6 +469,31 @@ def accept_member_request(
     except Exception:
         pass
 
+    try:
+        from apps.notifications.services import send_notification
+        from common.enums import NotificationTypeEnum
+
+        if applicant and applicant.id != reviewer.id:
+            send_notification(
+                recipient=applicant,
+                actor=reviewer,
+                actor_gym=gym,
+                gym=gym,
+                notification_type=NotificationTypeEnum.MEMBER_REQUEST_ACCEPTED,
+                title="Member Request Approved",
+                body=f"Your request to join {gym.name} has been approved!",
+                target_type="member_request",
+                target_id=str(member_request.id),
+                action_url=f"/gyms/{gym.id}",
+                data={
+                    "request_id": str(member_request.id),
+                    "gym_id": str(gym.id),
+                    "member_id": str(member.id),
+                },
+            )
+    except Exception:
+        pass
+
     return member
 
 
@@ -504,6 +555,33 @@ def reject_member_request(
             target_type="member_request",
             target_id=str(member_request.id),
         )
+    except Exception:
+        pass
+
+    try:
+        from apps.notifications.services import send_notification
+        from common.enums import NotificationTypeEnum
+
+        applicant = member_request.user
+        if applicant and applicant.id != reviewer.id:
+            reason_text = f" Reason: {rejection_reason}" if rejection_reason else ""
+            send_notification(
+                recipient=applicant,
+                actor=reviewer,
+                actor_gym=gym,
+                gym=gym,
+                notification_type=NotificationTypeEnum.MEMBER_REQUEST_REJECTED,
+                title="Member Request Update",
+                body=f"Your request to join {gym.name} was not accepted.{reason_text}",
+                target_type="member_request",
+                target_id=str(member_request.id),
+                action_url=f"/gyms/{gym.id}",
+                data={
+                    "request_id": str(member_request.id),
+                    "gym_id": str(gym.id),
+                    "rejection_reason": rejection_reason or "",
+                },
+            )
     except Exception:
         pass
 

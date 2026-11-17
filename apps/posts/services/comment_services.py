@@ -601,7 +601,77 @@ def create_comment(
         except Exception as exc:
             logger.warning(f"Could not enqueue optimization task for comment {comment.id}: {exc}")
 
+    _dispatch_comment_notification(
+        actor_user=actor_user,
+        gym=gym,
+        owner_type=owner_type,
+        comment=comment,
+        source_post=source_post,
+        source_comment=source_comment,
+    )
+
     return comment
+
+
+def _dispatch_comment_notification(
+    actor_user: User,
+    gym: Optional[Gym],
+    owner_type: str,
+    comment: PostComment,
+    source_post: GymPost,
+    source_comment: Optional[PostComment],
+) -> None:
+    """Helper to safely dispatch comment or comment reply notification."""
+    try:
+        from apps.notifications.services import send_notification
+        from common.enums import NotificationTypeEnum
+
+        recipient = None
+        if source_comment is not None:
+            recipient = source_comment.user
+            notif_type = NotificationTypeEnum.COMMENT_REPLY
+            action_label = "replied to your comment"
+        else:
+            if source_post.owner_type == PostOwnerTypeEnum.GYM and source_post.gym:
+                recipient = getattr(source_post.gym, "owner_user", None) or source_post.author_user
+            else:
+                recipient = source_post.author_user
+            notif_type = NotificationTypeEnum.COMMENT
+            action_label = "commented on your post"
+
+        if not recipient or recipient.id == actor_user.id:
+            return
+
+        actor_display = actor_user.email
+        profile = getattr(actor_user, "profile", None)
+        if profile and (profile.first_name or profile.last_name):
+            actor_display = f"{profile.first_name} {profile.last_name}".strip()
+        if gym and owner_type == PostOwnerTypeEnum.GYM:
+            actor_display = gym.name
+
+        preview = (comment.comment_text or "an attachment")[:80]
+        title = f"{actor_display} {action_label}"
+        body = f"{actor_display}: {preview}"
+
+        send_notification(
+            recipient=recipient,
+            actor=actor_user,
+            actor_gym=gym if owner_type == PostOwnerTypeEnum.GYM else None,
+            notification_type=notif_type,
+            title=title,
+            body=body,
+            target_type="comment" if source_comment is not None else "post",
+            target_id=str(comment.id),
+            action_url=f"/posts/{source_post.id}",
+            data={
+                "post_id": str(source_post.id),
+                "comment_id": str(comment.id),
+                "parent_comment_id": str(source_comment.id) if source_comment else None,
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to dispatch comment notification: {exc}")
+
 
 
 @transaction.atomic

@@ -186,7 +186,77 @@ def toggle_or_set_reaction(
     )
     new_reaction.save()
     _update_target_reactions_count(target_obj, delta=+1)
+
+    _dispatch_reaction_notification(
+        actor_user=actor_user,
+        gym=gym,
+        owner_type=owner_type,
+        reaction_item=reaction_item,
+        target_type=target_type,
+        target_obj=target_obj,
+    )
+
     return new_reaction, "created", target_obj
+
+
+def _dispatch_reaction_notification(
+    actor_user: User,
+    gym: Optional[Gym],
+    owner_type: str,
+    reaction_item: ReactionItem,
+    target_type: str,
+    target_obj: Any,
+) -> None:
+    """Helper to safely dispatch reaction notification to target owner."""
+    try:
+        from apps.notifications.services import send_notification
+        from common.enums import NotificationTypeEnum
+
+        recipient = None
+        if target_type == "post":
+            if target_obj.owner_type == PostOwnerTypeEnum.GYM and target_obj.gym:
+                recipient = getattr(target_obj.gym, "owner_user", None) or target_obj.author_user
+            else:
+                recipient = target_obj.author_user
+        elif target_type == "comment":
+            recipient = target_obj.user
+        elif target_type == "story":
+            recipient = target_obj.user or (getattr(target_obj.gym, "owner_user", None) if target_obj.gym else None)
+
+        if not recipient or recipient.id == actor_user.id:
+            return
+
+        actor_display = actor_user.email
+        profile = getattr(actor_user, "profile", None)
+        if profile and (profile.first_name or profile.last_name):
+            actor_display = f"{profile.first_name} {profile.last_name}".strip()
+        if gym and owner_type == PostOwnerTypeEnum.GYM:
+            actor_display = gym.name
+
+        target_label = target_type
+        title = f"{actor_display} reacted to your {target_label}"
+        body = f"{actor_display} reacted {reaction_item.emoji} to your {target_label}."
+
+        send_notification(
+            recipient=recipient,
+            actor=actor_user,
+            actor_gym=gym if owner_type == PostOwnerTypeEnum.GYM else None,
+            notification_type=NotificationTypeEnum.REACTION,
+            title=title,
+            body=body,
+            target_type=target_type,
+            target_id=str(target_obj.id),
+            action_url=f"/posts/{target_obj.id}" if target_type == "post" else "",
+            data={
+                "reaction_code": reaction_item.code,
+                "reaction_emoji": reaction_item.emoji,
+                "target_type": target_type,
+                "target_id": str(target_obj.id),
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to dispatch reaction notification: {exc}")
+
 
 
 @transaction.atomic

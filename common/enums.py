@@ -487,3 +487,24 @@ class EnquiryStatusEnum(models.TextChoices):
     VISIT = "VISIT", "Visit"
     BOOKED = "BOOKED", "Booked"
 
+
+class NotificationTypeEnum(models.TextChoices):
+    """Universal notification event types."""
+    REACTION = "reaction", "Reaction"
+    COMMENT = "comment", "Comment"
+    COMMENT_REPLY = "comment_reply", "Comment Reply"
+    MEMBER_REQUEST = "member_request", "Member Joining Request"
+    MEMBER_REQUEST_ACCEPTED = "member_request_accepted", "Member Request Accepted"
+    MEMBER_REQUEST_REJECTED = "member_request_rejected", "Member Request Rejected"
+    GYM_INVITE = "gym_invite", "Gym Invitation"
+    FOLLOW = "follow", "Follow"
+    SYSTEM = "system", "System Notification"
+
+
+class DevicePlatformEnum(models.TextChoices):
+    """Operating platform for notification push devices."""
+    ANDROID = "android", "Android"
+    IOS = "ios", "iOS"
+    WEB = "web", "Web"
+
+

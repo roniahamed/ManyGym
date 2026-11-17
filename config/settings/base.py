@@ -59,6 +59,7 @@ LOCAL_APPS = [
     "apps.messaging",
     "apps.enquiries",
     "apps.reactions",
+    "apps.notifications",
 ]
 
 
@@ -268,4 +269,10 @@ SIMPLE_JWT = {
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
 }
+
+# Firebase Cloud Messaging (FCM) & Push Notifications Configuration
+FCM_SERVER_KEY = env("FCM_SERVER_KEY", default="")
+FIREBASE_CREDENTIALS_PATH = env("FIREBASE_CREDENTIALS_PATH", default="")
+FIREBASE_PROJECT_ID = env("FIREBASE_PROJECT_ID", default="")
+
 

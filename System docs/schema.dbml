@@ -180,6 +180,25 @@ Enum post_privacy_enum {
   members_only
 }
 
+Enum notification_type_enum {
+  reaction
+  comment
+  comment_reply
+  member_request
+  member_request_accepted
+  member_request_rejected
+  gym_invite
+  follow
+  system
+}
+
+Enum device_platform_enum {
+  android
+  ios
+  web
+}
+
+
 Enum media_type_enum {
   picture
   video
@@ -643,8 +662,53 @@ Table gym_post_media {
   created_at timestamp [not null, default: `now()`]
 }
 
+Table notification_device_tokens {
+  id uuid [pk]
+  user_id uuid [not null, ref: > users.id]
+  token varchar(500) [unique, not null]
+  device_id varchar(120) [default: '']
+  device_name varchar(150) [default: '']
+  platform device_platform_enum [default: 'android']
+  is_active boolean [default: true]
+  last_seen_at timestamptz
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  indexes {
+    (user_id, is_active)
+    (device_id, user_id)
+  }
+}
+
+Table notifications {
+  id uuid [pk]
+  recipient_id uuid [not null, ref: > users.id]
+  gym_id uuid [null, ref: > gyms.id]
+  actor_id uuid [null, ref: > users.id]
+  actor_gym_id uuid [null, ref: > gyms.id]
+  notification_type notification_type_enum [not null]
+  title varchar(255) [not null]
+  body text [not null]
+  data jsonb [default: '{}']
+  target_type varchar(50) [default: '']
+  target_id varchar(100) [default: '']
+  action_url varchar(500) [default: '']
+  is_read boolean [default: false]
+  read_at timestamptz [null]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  indexes {
+    (recipient_id, is_read, created_at)
+    (recipient_id, created_at)
+    (gym_id, is_read, created_at)
+    (notification_type, created_at)
+  }
+}
+
 // =====================================================================
 // TABLE GROUPS
+
 // =====================================================================
 
 TableGroup Auth_and_Tenancy {
@@ -699,3 +763,9 @@ TableGroup Posts_and_Feed {
   gym_posts
   gym_post_media
 }
+
+TableGroup Notifications {
+  notification_device_tokens
+  notifications
+}
+
