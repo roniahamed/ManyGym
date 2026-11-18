@@ -1,0 +1,686 @@
+# Notification & Device Token API Frontend Integration Documentation
+
+## 1. General Configuration
+
+* **Base URL:** `/api/v1/notifications/`
+* **Authentication:** JWT Bearer Token (`Authorization: Bearer <access_token>`)
+* **Content-Type:** `application/json`
+* **Standard Headers:**
+  * `Authorization: Bearer <access_token>` (Required for all endpoints)
+  * `Content-Type: application/json` (Required for endpoints with request body)
+  * `X-Gym-Context: <gym_uuid>` (Optional; switches notification context to gym workspace)
+
+---
+
+## 2. Global Error Envelope & HTTP Status Codes
+
+### 2.1 Standard Error Format
+
+All error responses return the following JSON structure:
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Invalid input provided.",
+  "details": {
+    "token": [
+      "This field may not be blank."
+    ]
+  }
+}
+```
+
+### 2.2 Error Fields Specification
+
+| Field | Type | Nullable | Description |
+| :--- | :--- | :--- | :--- |
+| `code` | string | No | Machine-readable error code (`VALIDATION_ERROR`, `UNAUTHORIZED_CONTEXT`, `PERMISSION_DENIED`, `RESOURCE_NOT_FOUND`, `METHOD_NOT_ALLOWED`) |
+| `message` | string | No | Human-readable summary of the error |
+| `details` | object \| array \| null | Yes | Field-level validation errors or additional context; `null` if none |
+
+### 2.3 HTTP Status Codes
+
+| Status Code | Error Code | Scenario |
+| :--- | :--- | :--- |
+| `200 OK` | — | Successful retrieval, update, or action confirmation |
+| `201 Created` | — | Resource created (e.g., device token registration) |
+| `204 No Content` | — | Resource deleted successfully (empty body) |
+| `400 Bad Request` | `VALIDATION_ERROR` | Malformed JSON, missing required fields, invalid UUIDs, invalid enum choices, or array limits exceeded |
+| `401 Unauthorized` | `UNAUTHORIZED_CONTEXT` | Missing, invalid, or expired JWT Bearer token |
+| `403 Forbidden` | `PERMISSION_DENIED` | Attempting to access or mutate a notification belonging to another user |
+| `404 Not Found` | `RESOURCE_NOT_FOUND` | Notification or device token does not exist |
+| `405 Method Not Allowed` | `METHOD_NOT_ALLOWED` | Unsupported HTTP method on the route |
+
+---
+
+## 3. Enumerations & Constants
+
+### 3.1 `notification_type`
+
+| Enum Value | Description |
+| :--- | :--- |
+| `"reaction"` | User reacted to a post, comment, or story |
+| `"comment"` | User commented on a post |
+| `"comment_reply"` | User replied to an existing comment |
+| `"member_request"` | User applied to join a gym |
+| `"member_request_accepted"` | Gym approved a member joining application |
+| `"member_request_rejected"` | Gym rejected a member joining application |
+| `"gym_invite"` | Gym invited a user as staff or trainer |
+| `"follow"` | User followed another profile |
+| `"system"` | System alert, announcement, or billing notification |
+
+### 3.2 `target_type`
+
+| Type String | Associated Entity | `target_id` Format |
+| :--- | :--- | :--- |
+| `"post"` | Post | UUID |
+| `"comment"` | Comment / Reply | UUID |
+| `"story"` | Story | UUID |
+| `"member_request"` | Member Join Application | UUID |
+| `"gym"` | Gym Workspace | UUID |
+| `"user"` | User Profile | UUID |
+| `"system"` | Generic System Target | String identifier / UUID |
+
+### 3.3 `platform` (Device Tokens)
+
+| Enum Value | Platform |
+| :--- | :--- |
+| `"android"` | Android OS (FCM) |
+| `"ios"` | Apple iOS (APNs via FCM) |
+| `"web"` | Web Push (FCM Web SDK) |
+
+---
+
+## 4. API Endpoints
+
+### 4.1 List Notifications
+
+Retrieves a paginated list of in-app notifications sorted by creation date (newest first).
+
+* **Method:** `GET`
+* **URL:** `/api/v1/notifications/`
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `X-Gym-Context: <gym_uuid>` (Optional)
+
+#### Query Parameters
+
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `is_read` | boolean | No | `null` | Filter by read status (`true` for read, `false` for unread) |
+| `notification_type` | string | No | `null` | Filter by type (e.g. `reaction`, `comment`, `member_request`) |
+| `type` | string | No | `null` | Alias for `notification_type` |
+| `target_type` | string | No | `""` | Filter by target resource entity type (`post`, `comment`, etc.) |
+| `target_id` | string | No | `""` | Filter by target resource UUID |
+| `page` | integer | No | `1` | Page number |
+| `page_size` | integer | No | `20` | Items per page (min: `1`, max: `100`) |
+
+#### Request Payload
+*None (GET request)*
+
+#### Response Fields Specification
+
+| Field | Type | Nullable | Description |
+| :--- | :--- | :--- | :--- |
+| `count` | integer | No | Total count of notifications matching filter |
+| `total_pages` | integer | No | Total number of pages |
+| `current_page` | integer | No | Current active page |
+| `next` | string (URI) | Yes | URL for next page (`null` if last page) |
+| `previous` | string (URI) | Yes | URL for previous page (`null` if first page) |
+| `results` | array of objects | No | List of notification items |
+| `results[].id` | string (UUID) | No | Notification unique ID |
+| `results[].notification_type` | string | No | Notification type enum value |
+| `results[].title` | string | No | Notification headline |
+| `results[].body` | string | No | Notification message content |
+| `results[].data` | object | No | Custom payload dictionary with navigation metadata |
+| `results[].target_type` | string | No | Entity category of target item |
+| `results[].target_id` | string | No | ID of target entity |
+| `results[].action_url` | string | No | Direct deep link or route path |
+| `results[].is_read` | boolean | No | Read status flag |
+| `results[].read_at` | string (ISO 8601) | Yes | Timestamp when marked as read (`null` if unread) |
+| `results[].created_at` | string (ISO 8601) | No | Timestamp when notification was created |
+| `results[].actor` | object | Yes | User who triggered the notification (`null` for system alerts) |
+| `results[].actor.id` | string (UUID) | No | Actor user ID |
+| `results[].actor.email` | string | No | Actor email |
+| `results[].actor.full_name` | string | No | Actor formatted display name |
+| `results[].actor.profile_photo` | string (URI) | No | Profile photo URL (empty string if none) |
+| `results[].actor_gym` | object | Yes | Gym entity acting as the trigger (`null` if personal) |
+| `results[].actor_gym.id` | string (UUID) | No | Gym ID |
+| `results[].actor_gym.name` | string | No | Gym name |
+| `results[].actor_gym.logo_url` | string (URI) | No | Gym logo URL (empty string if none) |
+| `results[].gym` | object | Yes | Gym workspace context (`null` if personal) |
+| `results[].gym.id` | string (UUID) | No | Gym ID |
+| `results[].gym.name` | string | No | Gym name |
+| `results[].gym.logo_url` | string (URI) | No | Gym logo URL (empty string if none) |
+
+#### Response JSON (`200 OK`)
+
+```json
+{
+  "count": 1,
+  "total_pages": 1,
+  "current_page": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": "e3b0c442-98fc-1c14-9af3-4c7b28200000",
+      "notification_type": "comment",
+      "title": "New Comment",
+      "body": "Jane Doe commented on your post: 'Great workout session!'",
+      "data": {
+        "notification_type": "comment",
+        "target_type": "post",
+        "target_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "action_url": "/posts/7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "actor_id": "b1b2b3b4-1111-2222-3333-444455556666",
+        "comment_id": "a9a8a7a6-5555-4444-3333-222211110000"
+      },
+      "target_type": "post",
+      "target_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "action_url": "/posts/7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "is_read": false,
+      "read_at": null,
+      "created_at": "2026-11-18T13:00:00.000000Z",
+      "actor": {
+        "id": "b1b2b3b4-1111-2222-3333-444455556666",
+        "email": "janedoe@example.com",
+        "full_name": "Jane Doe",
+        "profile_photo": "https://cdn.manygym.com/media/profiles/janedoe.jpg"
+      },
+      "actor_gym": null,
+      "gym": null
+    }
+  ]
+}
+```
+
+---
+
+### 4.2 Get Unread Notification Count
+
+Retrieves unread badge count for UI badge icons.
+
+* **Method:** `GET`
+* **URL:** `/api/v1/notifications/unread-count/`
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `X-Gym-Context: <gym_uuid>` (Optional)
+
+#### Query Parameters
+*None*
+
+#### Request Payload
+*None (GET request)*
+
+#### Response Fields Specification
+
+| Field | Type | Nullable | Description |
+| :--- | :--- | :--- | :--- |
+| `unread_count` | integer | No | Total count of unread notifications |
+
+#### Response JSON (`200 OK`)
+
+```json
+{
+  "unread_count": 5
+}
+```
+
+---
+
+### 4.3 Mark All Notifications as Read
+
+Marks all unread notifications for the active user/gym as read.
+
+* **Method:** `POST`
+* **URL:** `/api/v1/notifications/mark-all-read/`
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `Content-Type: application/json`
+  * `X-Gym-Context: <gym_uuid>` (Optional)
+
+#### Request Payload
+
+```json
+{}
+```
+
+#### Response Fields Specification
+
+| Field | Type | Nullable | Description |
+| :--- | :--- | :--- | :--- |
+| `marked_read_count` | integer | No | Total number of notifications updated to read |
+
+#### Response JSON (`200 OK`)
+
+```json
+{
+  "marked_read_count": 5
+}
+```
+
+---
+
+### 4.4 Batch Mark Notifications as Read
+
+Marks a specific list of notification IDs as read in a single request.
+
+* **Method:** `POST`
+* **URL:** `/api/v1/notifications/batch-read/`
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `Content-Type: application/json`
+  * `X-Gym-Context: <gym_uuid>` (Optional)
+
+#### Request Payload Specification
+
+| Field | Type | Required | Constraints | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `notification_ids` | array of strings (UUID) | Yes | Min items: 1, Max items: 100 | Array of notification UUIDs to mark as read |
+
+#### Request Payload JSON
+
+```json
+{
+  "notification_ids": [
+    "e3b0c442-98fc-1c14-9af3-4c7b28200000",
+    "f4c1d553-09ad-2d25-0be4-5d8c39311111"
+  ]
+}
+```
+
+#### Response Fields Specification
+
+| Field | Type | Nullable | Description |
+| :--- | :--- | :--- | :--- |
+| `marked_read_count` | integer | No | Total count of notifications successfully marked as read |
+
+#### Response JSON (`200 OK`)
+
+```json
+{
+  "marked_read_count": 2
+}
+```
+
+---
+
+### 4.5 Clear Read Notifications
+
+Permanently removes all read notifications (`is_read = true`) from the database.
+
+* **Method:** `DELETE`
+* **URL:** `/api/v1/notifications/clear-read/`
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `X-Gym-Context: <gym_uuid>` (Optional)
+
+#### Request Payload
+*None (DELETE request)*
+
+#### Response Fields Specification
+
+| Field | Type | Nullable | Description |
+| :--- | :--- | :--- | :--- |
+| `deleted_count` | integer | No | Number of purged read notifications |
+
+#### Response JSON (`200 OK`)
+
+```json
+{
+  "deleted_count": 12
+}
+```
+
+---
+
+### 4.6 Get Single Notification Detail
+
+Retrieves detailed record of a single notification by UUID.
+
+* **Method:** `GET`
+* **URL:** `/api/v1/notifications/{notification_id}/`
+* **Path Parameters:**
+  * `notification_id` (UUID, required): Unique identifier of the notification
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `X-Gym-Context: <gym_uuid>` (Optional)
+
+#### Request Payload
+*None (GET request)*
+
+#### Response Fields Specification
+*Identical to single item in `NotificationDetail` (see Section 4.1).*
+
+#### Response JSON (`200 OK`)
+
+```json
+{
+  "id": "e3b0c442-98fc-1c14-9af3-4c7b28200000",
+  "notification_type": "member_request",
+  "title": "New Membership Application",
+  "body": "John Smith applied to join Performance Gym.",
+  "data": {
+    "notification_type": "member_request",
+    "target_type": "member_request",
+    "target_id": "11223344-5566-7788-9900-aabbccddeeff",
+    "gym_id": "99887766-5544-3322-1100-ffeeddccbbaa",
+    "actor_id": "b1b2b3b4-1111-2222-3333-444455556666",
+    "action_url": "/gyms/99887766-5544-3322-1100-ffeeddccbbaa/requests"
+  },
+  "target_type": "member_request",
+  "target_id": "11223344-5566-7788-9900-aabbccddeeff",
+  "action_url": "/gyms/99887766-5544-3322-1100-ffeeddccbbaa/requests",
+  "is_read": false,
+  "read_at": null,
+  "created_at": "2026-11-18T13:10:00.000000Z",
+  "actor": {
+    "id": "b1b2b3b4-1111-2222-3333-444455556666",
+    "email": "johnsmith@example.com",
+    "full_name": "John Smith",
+    "profile_photo": "https://cdn.manygym.com/media/profiles/john.jpg"
+  },
+  "actor_gym": null,
+  "gym": {
+    "id": "99887766-5544-3322-1100-ffeeddccbbaa",
+    "name": "Performance Gym",
+    "logo_url": "https://cdn.manygym.com/media/gyms/logo.jpg"
+  }
+}
+```
+
+---
+
+### 4.7 Mark Single Notification as Read
+
+Updates a single notification status to read.
+
+* **Method:** `PATCH` or `POST`
+* **URL:** `/api/v1/notifications/{notification_id}/read/` *(Alias: `/api/v1/notifications/{notification_id}/mark-read/`)*
+* **Path Parameters:**
+  * `notification_id` (UUID, required): Unique identifier of the notification
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `Content-Type: application/json`
+  * `X-Gym-Context: <gym_uuid>` (Optional)
+
+#### Request Payload
+
+```json
+{}
+```
+
+#### Response Fields Specification
+*Returns updated `NotificationDetail` object with `is_read: true` and populated `read_at` timestamp.*
+
+#### Response JSON (`200 OK`)
+
+```json
+{
+  "id": "e3b0c442-98fc-1c14-9af3-4c7b28200000",
+  "notification_type": "member_request",
+  "title": "New Membership Application",
+  "body": "John Smith applied to join Performance Gym.",
+  "data": {
+    "notification_type": "member_request",
+    "target_type": "member_request",
+    "target_id": "11223344-5566-7788-9900-aabbccddeeff",
+    "gym_id": "99887766-5544-3322-1100-ffeeddccbbaa",
+    "actor_id": "b1b2b3b4-1111-2222-3333-444455556666",
+    "action_url": "/gyms/99887766-5544-3322-1100-ffeeddccbbaa/requests"
+  },
+  "target_type": "member_request",
+  "target_id": "11223344-5566-7788-9900-aabbccddeeff",
+  "action_url": "/gyms/99887766-5544-3322-1100-ffeeddccbbaa/requests",
+  "is_read": true,
+  "read_at": "2026-11-18T13:15:30.123456Z",
+  "created_at": "2026-11-18T13:10:00.000000Z",
+  "actor": {
+    "id": "b1b2b3b4-1111-2222-3333-444455556666",
+    "email": "johnsmith@example.com",
+    "full_name": "John Smith",
+    "profile_photo": "https://cdn.manygym.com/media/profiles/john.jpg"
+  },
+  "actor_gym": null,
+  "gym": {
+    "id": "99887766-5544-3322-1100-ffeeddccbbaa",
+    "name": "Performance Gym",
+    "logo_url": "https://cdn.manygym.com/media/gyms/logo.jpg"
+  }
+}
+```
+
+---
+
+### 4.8 Delete Single Notification
+
+Permanently deletes a single notification.
+
+* **Method:** `DELETE`
+* **URL:** `/api/v1/notifications/{notification_id}/`
+* **Path Parameters:**
+  * `notification_id` (UUID, required): Unique identifier of the notification
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `X-Gym-Context: <gym_uuid>` (Optional)
+
+#### Request Payload
+*None (DELETE request)*
+
+#### Response
+* **Status Code:** `204 No Content`
+* **Payload:** *Empty body*
+
+---
+
+### 4.9 List Registered Devices
+
+Lists all FCM push device tokens registered to the authenticated user.
+
+* **Method:** `GET`
+* **URL:** `/api/v1/notifications/devices/`
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+
+#### Query Parameters
+*None*
+
+#### Request Payload
+*None (GET request)*
+
+#### Response Fields Specification
+
+| Field | Type | Nullable | Description |
+| :--- | :--- | :--- | :--- |
+| `[].id` | string (UUID) | No | Device token record ID |
+| `[].device_id` | string | No | Client hardware or device UUID |
+| `[].device_name` | string | No | User-facing device name (e.g. `iPhone 15 Pro`) |
+| `[].platform` | string | No | Operating platform (`android`, `ios`, `web`) |
+| `[].is_active` | boolean | No | Active push delivery status |
+| `[].last_seen_at` | string (ISO 8601) | No | Timestamp of most recent activity |
+| `[].created_at` | string (ISO 8601) | No | Initial registration timestamp |
+
+#### Response JSON (`200 OK`)
+
+```json
+[
+  {
+    "id": "c1a1b2c3-1234-5678-9abc-def012345678",
+    "device_id": "hardware-uuid-9988-7766",
+    "device_name": "iPhone 15 Pro",
+    "platform": "ios",
+    "is_active": true,
+    "last_seen_at": "2026-11-18T13:20:00.000000Z",
+    "created_at": "2026-11-15T09:00:00.000000Z"
+  }
+]
+```
+
+---
+
+### 4.10 Register or Update FCM Device Token
+
+Registers a device token or updates existing token upon app launch or token refresh.
+
+* **Method:** `POST`
+* **URL:** `/api/v1/notifications/devices/`
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `Content-Type: application/json`
+
+#### Request Payload Specification
+
+| Field | Type | Required | Constraints | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `token` | string | Yes | Max 500 characters, non-empty | FCM registration token from Firebase SDK |
+| `device_id` | string | No | Max 120 characters, default: `""` | Hardware identifier / Vendor UUID |
+| `device_name` | string | No | Max 150 characters, default: `""` | Model name (e.g. `Pixel 8 Pro`) |
+| `platform` | string | No | Choices: `android`, `ios`, `web`. Default: `android` | Client OS platform |
+
+#### Request Payload JSON
+
+```json
+{
+  "token": "fcm_token_sample_string_1234567890abcdef...",
+  "device_id": "hardware-uuid-9988-7766",
+  "device_name": "Pixel 8 Pro",
+  "platform": "android"
+}
+```
+
+#### Response Fields Specification
+*Returns registered `DeviceTokenDetail` object.*
+
+#### Response JSON (`201 Created`)
+
+```json
+{
+  "id": "d2b2c3d4-4321-8765-cba9-fed876543210",
+  "device_id": "hardware-uuid-9988-7766",
+  "device_name": "Pixel 8 Pro",
+  "platform": "android",
+  "is_active": true,
+  "last_seen_at": "2026-11-18T13:25:00.000000Z",
+  "created_at": "2026-11-18T13:25:00.000000Z"
+}
+```
+
+---
+
+### 4.11 Unregister / Deactivate Device Token
+
+Deactivates an active device token when the user signs out.
+
+* **Method:** `POST` or `DELETE`
+* **URL:** `/api/v1/notifications/devices/unregister/`
+* **Headers:**
+  * `Authorization: Bearer <access_token>`
+  * `Content-Type: application/json`
+
+#### Request Payload Specification
+
+| Field | Type | Required | Constraints | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `token` | string | Yes | Max 500 characters, non-empty | FCM registration token to deactivate |
+
+#### Request Payload JSON
+
+```json
+{
+  "token": "fcm_token_sample_string_1234567890abcdef..."
+}
+```
+
+#### Response Fields Specification
+
+| Field | Type | Nullable | Description |
+| :--- | :--- | :--- | :--- |
+| `unregistered` | boolean | No | Deactivation confirmation flag (`true`) |
+| `message` | string | No | Confirmation message string |
+
+#### Response JSON (`200 OK`)
+
+```json
+{
+  "unregistered": true,
+  "message": "Device token unregistered successfully."
+}
+```
+
+---
+
+## 5. FCM Push Notification Payload (Mobile / Web Clients)
+
+When push notifications are received by client apps via Firebase Cloud Messaging, FCM delivers the following standard payload:
+
+### 5.1 Standard In-App Notification Push Payload
+
+```json
+{
+  "notification": {
+    "title": "New Comment",
+    "body": "Jane Doe commented on your post: 'Great workout session!'"
+  },
+  "data": {
+    "notification_type": "comment",
+    "target_type": "post",
+    "target_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "action_url": "/posts/7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "actor_id": "b1b2b3b4-1111-2222-3333-444455556666",
+    "comment_id": "a9a8a7a6-5555-4444-3333-222211110000"
+  }
+}
+```
+
+### 5.2 Real-time Encrypted Message Push Payload
+
+*Note: Chat messages trigger FCM mobile alerts directly and do not create rows in the `Notification` table.*
+
+```json
+{
+  "notification": {
+    "title": "Jane Doe",
+    "body": "Sent you an encrypted message"
+  },
+  "data": {
+    "type": "chat_message",
+    "conversation_id": "4b6c8d0e-1122-3344-5566-778899aabbcc",
+    "message_id": "8f0e2d4c-9988-7766-5544-33221100ffaa",
+    "sender_id": "b1b2b3b4-1111-2222-3333-444455556666"
+  }
+}
+```
+
+---
+
+## 6. WebSocket Realtime Events (Django Channels)
+
+Clients connected to the user WebSocket channel receive real-time events over the following room:
+
+* **Channel Room:** `chat_user_{user_id}` or `chat_gym_{gym_id}`
+* **Event Type:** `notification.alert`
+
+### WebSocket Event Payload JSON
+
+```json
+{
+  "type": "notification.alert",
+  "id": "e3b0c442-98fc-1c14-9af3-4c7b28200000",
+  "notification_type": "comment",
+  "title": "New Comment",
+  "body": "Jane Doe commented on your post: 'Great workout session!'",
+  "target_type": "post",
+  "target_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "action_url": "/posts/7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "data": {
+    "notification_type": "comment",
+    "target_type": "post",
+    "target_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "action_url": "/posts/7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "actor_id": "b1b2b3b4-1111-2222-3333-444455556666"
+  },
+  "is_read": false,
+  "created_at": "2026-11-18T13:00:00.000000Z"
+}
+```

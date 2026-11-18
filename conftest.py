@@ -27,3 +27,13 @@ def configure_local_test_media(tmp_path_factory):
 def configure_in_memory_email(settings):
     """Ensure emails are sent in-memory during tests to prevent external network timeouts."""
     settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+
+
+@pytest.fixture(autouse=True, scope="session")
+def configure_fast_password_hasher(django_test_environment):
+    """Use fast MD5 password hasher for test suite to drastically reduce CPU overhead."""
+    from django.conf import settings
+    settings.PASSWORD_HASHERS = [
+        "django.contrib.auth.hashers.MD5PasswordHasher",
+    ]
+
