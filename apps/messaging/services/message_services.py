@@ -142,6 +142,7 @@ def send_encrypted_message(
                         data={
                             "conversation_id": str(conversation.id),
                             "message_id": str(message.id),
+                            "sender_id": str(sender_user.id) if sender_user else "",
                             "sender_type": message.sender_type,
                             "sent_at": message.sent_at.isoformat(),
                         },
@@ -166,6 +167,7 @@ def send_encrypted_message(
                             data={
                                 "conversation_id": str(conversation.id),
                                 "message_id": str(message.id),
+                                "sender_id": str(sender_user.id) if sender_user else "",
                                 "gym_id": str(gym_id),
                                 "sender_type": message.sender_type,
                                 "sent_at": message.sent_at.isoformat(),

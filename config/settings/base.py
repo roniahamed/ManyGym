@@ -175,9 +175,15 @@ MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "media")))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # CORS Configuration
+from corsheaders.defaults import default_headers
+
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=["https://v0.manygym.com", "http://v0.manygym.com"])
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-gym-context",
+]
+
 
 # Django REST Framework Configuration
 REST_FRAMEWORK = {

@@ -205,3 +205,14 @@ class BatchMarkReadResponseSerializer(serializers.Serializer):
 class ClearReadResponseSerializer(serializers.Serializer):
     """Response payload for purging all read notifications."""
     deleted_count = serializers.IntegerField(help_text="Total count of purged read notifications.")
+
+
+class NotificationPaginatedResponseSerializer(serializers.Serializer):
+    """Paginated envelope response for in-app notifications matching API runtime schema."""
+    count = serializers.IntegerField(help_text="Total count of notifications matching filter.", default=0)
+    total_pages = serializers.IntegerField(help_text="Total number of pages.", default=1)
+    current_page = serializers.IntegerField(help_text="Current active page.", default=1)
+    next = serializers.CharField(allow_null=True, required=False, default=None, help_text="URL for next page.")
+    previous = serializers.CharField(allow_null=True, required=False, default=None, help_text="URL for previous page.")
+    results = NotificationDetailSerializer(many=True, help_text="List of notification items.")
+

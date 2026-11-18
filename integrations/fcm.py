@@ -145,12 +145,21 @@ class FCMClient:
                 )
             )
 
+            webpush_config = messaging.WebpushConfig(
+                notification=messaging.WebpushNotification(
+                    title=title,
+                    body=body,
+                ),
+                data=sanitized_data,
+            )
+
             message = messaging.MulticastMessage(
                 tokens=tokens,
                 notification=messaging.Notification(title=title, body=body),
                 data=sanitized_data,
                 android=android_config,
                 apns=apns_config,
+                webpush=webpush_config,
             )
 
             response = messaging.send_each_for_multicast(message)

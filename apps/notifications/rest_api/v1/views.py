@@ -19,6 +19,7 @@ from apps.notifications.rest_api.v1.serializers import (
     MarkAllReadResponseSerializer,
     NotificationDetailSerializer,
     NotificationFilterSerializer,
+    NotificationPaginatedResponseSerializer,
     UnreadCountResponseSerializer,
 )
 from apps.notifications.selectors import (
@@ -110,7 +111,7 @@ class NotificationListView(APIView):
             ),
         ],
         responses={
-            200: NotificationDetailSerializer(many=True),
+            200: NotificationPaginatedResponseSerializer,
             400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation Error"),
             401: OpenApiResponse(response=ErrorDetailSerializer, description="Unauthenticated"),
         },
