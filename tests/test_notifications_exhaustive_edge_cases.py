@@ -763,9 +763,9 @@ class TestAdvancedProductionEdgeCases:
         charlie = qa_env["charlie"]
 
         # Deactivate Bob
-        bob_setting = bob.get_settings()
-        bob_setting.is_deactivated = True
-        bob_setting.save()
+        bob.is_active = False
+        bob.status = "deactivated"
+        bob.save(update_fields=["is_active", "status"])
 
         notif = send_notification(
             recipient=bob,

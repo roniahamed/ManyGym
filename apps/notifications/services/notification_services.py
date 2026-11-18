@@ -9,7 +9,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-from django.db import models, transaction
+from django.db import models
 from django.utils import timezone
 
 from apps.gyms.models import Gym, GymBlockedUser
@@ -29,13 +29,25 @@ logger = logging.getLogger(__name__)
 # within this window are debounced to prevent notification flooding.
 DEBOUNCE_WINDOW_SECONDS = 5
 
+# Notification types that represent user-to-user social interactions
+SOCIAL_NOTIFICATION_TYPES = (
+    NotificationTypeEnum.REACTION,
+    NotificationTypeEnum.COMMENT,
+    NotificationTypeEnum.FOLLOW,
+    NotificationTypeEnum.MEMBER_REQUEST,
+)
+
 
 def _is_user_available_for_notifications(user: Optional[User]) -> bool:
-    """Checks whether a user account is active, not soft-deleted, and not deactivated."""
-    if not user or not getattr(user, "is_active", False):
+    """
+    Checks whether a user account is active, not soft-deleted, and not deactivated.
+    Evaluates in-memory user columns directly to avoid extraneous database queries.
+    """
+    if not user:
         return False
-    setting = getattr(user, "settings", None) or getattr(user, "get_settings", lambda: None)()
-    if setting and (getattr(setting, "is_deleted", False) or getattr(setting, "is_deactivated", False)):
+    if not getattr(user, "is_active", True):
+        return False
+    if getattr(user, "status", None) in ("deleted", "deactivated"):
         return False
     return True
 
@@ -47,11 +59,9 @@ def _dispatch_push_task_safely(
     data: Dict[str, Any],
 ) -> None:
     """Helper to enqueue the Celery push notification task without crashing callers."""
-    # Ensure title and body do not exceed mobile display bounds
     safe_title = str(title).strip()[:200]
     safe_body = str(body).strip()[:400]
 
-    # Sanitize data: FCM requires string values and enforces a 4KB total message ceiling
     safe_data: Dict[str, str] = {}
     for k, v in data.items():
         if v is not None:
@@ -89,7 +99,6 @@ def _dispatch_realtime_broadcast_safely(
             )
 
 
-@transaction.atomic
 def send_notification(
     recipient: User,
     notification_type: str,
@@ -113,7 +122,7 @@ def send_notification(
     - Self-notification suppression.
     - Inactive / deactivated / soft-deleted account suppression.
     - Social privacy blocklist filtering (bidirectional user blocking & gym user blocking).
-    - Rapid duplicate spam debouncing.
+    - Rapid duplicate spam debouncing for social actions.
     """
     # 1. Recipient availability check
     if not _is_user_available_for_notifications(recipient):
@@ -130,13 +139,12 @@ def send_notification(
         logger.debug("Suppressed notification: actor %s is inactive, deleted, or deactivated.", actor.id)
         return None
 
-    # 4. Social Privacy Blocklist Checks
-    if actor is not None:
-        # Check if recipient blocked actor OR actor blocked recipient
-        is_blocked = (
-            UserBlockedUser.objects.filter(blocker=recipient, blocked_user=actor).exists()
-            or UserBlockedUser.objects.filter(blocker=actor, blocked_user=recipient).exists()
-        )
+    # 4. Social Privacy Blocklist Checks (applies to user social actions and join requests)
+    if actor is not None and notification_type in SOCIAL_NOTIFICATION_TYPES:
+        is_blocked = UserBlockedUser.objects.filter(
+            models.Q(blocker=recipient, blocked_user=actor) |
+            models.Q(blocker=actor, blocked_user=recipient)
+        ).exists()
         if is_blocked:
             logger.debug(
                 "Suppressed notification due to blocklist between recipient %s and actor %s",
@@ -145,20 +153,24 @@ def send_notification(
             )
             return None
 
-    # Check gym blocklist if gym workspace is present
-    target_gym = gym or actor_gym
-    if target_gym is not None and actor is not None:
-        if GymBlockedUser.objects.filter(gym=target_gym, user=actor).exists():
-            logger.debug("Suppressed notification: actor %s is blocked by gym %s", actor.id, target_gym.id)
-            return None
+        # Check gym blocklist if gym workspace is present
+        target_gym = gym or actor_gym
+        if target_gym is not None and getattr(target_gym, "owner_user_id", None) != actor.id:
+            if GymBlockedUser.objects.filter(gym=target_gym, user=actor).exists():
+                logger.debug("Suppressed notification: actor %s is blocked by gym %s", actor.id, target_gym.id)
+                return None
 
     # 5. Validate notification type enum
     if notification_type not in NotificationTypeEnum.values:
         raise DomainValidationError(f"Invalid notification_type '{notification_type}'.")
 
-    # 6. Anti-Spam Debouncing: Avoid creating duplicate notifications for rapid successive actions
+    # 6. Anti-Spam Debouncing: Only for high-frequency social actions (reactions and comments)
     target_id_str = str(target_id) if target_id else ""
-    if target_type and target_id_str:
+    if (
+        target_type
+        and target_id_str
+        and notification_type in (NotificationTypeEnum.REACTION, NotificationTypeEnum.COMMENT)
+    ):
         recent_threshold = timezone.now() - datetime.timedelta(seconds=DEBOUNCE_WINDOW_SECONDS)
         existing_recent = Notification.objects.filter(
             recipient=recipient,
@@ -192,7 +204,7 @@ def send_notification(
     if actor_gym:
         payload_data["actor_gym_id"] = str(actor_gym.id)
 
-    # 8. Persist in-app notification record
+    # 8. Persist in-app notification record (single atomic INSERT, no nested savepoint)
     notification = Notification.objects.create(
         recipient=recipient,
         actor=actor,
@@ -278,7 +290,6 @@ def send_message_push_notification(
         logger.warning("Could not enqueue message push task: %s", exc)
 
 
-@transaction.atomic
 def mark_notification_as_read(
     notification_id: Any,
     user: User,
@@ -308,7 +319,6 @@ def mark_notification_as_read(
     return notification
 
 
-@transaction.atomic
 def mark_notifications_batch_as_read(
     notification_ids: List[Any],
     user: User,
@@ -341,7 +351,6 @@ def mark_notifications_batch_as_read(
     return qs.update(is_read=True, read_at=now, updated_at=now)
 
 
-@transaction.atomic
 def mark_all_notifications_as_read(user: User, gym: Optional[Gym] = None) -> int:
     """
     Atomically marks all unread notifications for a user (and optional gym) as read.
@@ -355,7 +364,6 @@ def mark_all_notifications_as_read(user: User, gym: Optional[Gym] = None) -> int
     return qs.update(is_read=True, read_at=now, updated_at=now)
 
 
-@transaction.atomic
 def clear_read_notifications(user: User, gym: Optional[Gym] = None) -> int:
     """
     Permanently purges all read notifications for a user (or active gym workspace).
@@ -369,7 +377,6 @@ def clear_read_notifications(user: User, gym: Optional[Gym] = None) -> int:
     return deleted_count
 
 
-@transaction.atomic
 def delete_notification(
     notification_id: Any,
     user: User,
