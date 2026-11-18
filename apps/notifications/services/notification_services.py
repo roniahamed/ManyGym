@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import Any, Dict, Optional
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from apps.gyms.models import Gym
@@ -145,14 +145,24 @@ def send_message_push_notification(
 
 
 @transaction.atomic
-def mark_notification_as_read(notification_id: Any, user: User) -> Notification:
+def mark_notification_as_read(
+    notification_id: Any,
+    user: User,
+    gym: Optional[Gym] = None,
+) -> Notification:
     """Marks a single notification as read."""
     try:
         n_uuid = uuid.UUID(str(notification_id))
     except (ValueError, TypeError, AttributeError):
         raise ResourceNotFoundError("Notification not found.")
 
-    notification = Notification.objects.filter(id=n_uuid, recipient=user).first()
+    qs = Notification.objects.filter(id=n_uuid)
+    if gym is not None:
+        qs = qs.filter(models.Q(recipient=user) | models.Q(gym=gym))
+    else:
+        qs = qs.filter(recipient=user)
+
+    notification = qs.first()
     if not notification:
         raise ResourceNotFoundError("Notification not found.")
 
@@ -178,14 +188,24 @@ def mark_all_notifications_as_read(user: User, gym: Optional[Gym] = None) -> int
 
 
 @transaction.atomic
-def delete_notification(notification_id: Any, user: User) -> bool:
-    """Permanently deletes a notification owned by the authenticated user."""
+def delete_notification(
+    notification_id: Any,
+    user: User,
+    gym: Optional[Gym] = None,
+) -> bool:
+    """Permanently deletes a notification owned by the authenticated user or gym."""
     try:
         n_uuid = uuid.UUID(str(notification_id))
     except (ValueError, TypeError, AttributeError):
         raise ResourceNotFoundError("Notification not found.")
 
-    notification = Notification.objects.filter(id=n_uuid, recipient=user).first()
+    qs = Notification.objects.filter(id=n_uuid)
+    if gym is not None:
+        qs = qs.filter(models.Q(recipient=user) | models.Q(gym=gym))
+    else:
+        qs = qs.filter(recipient=user)
+
+    notification = qs.first()
     if not notification:
         raise ResourceNotFoundError("Notification not found.")
 

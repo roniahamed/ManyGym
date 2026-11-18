@@ -1,5 +1,6 @@
 import uuid
-from typing import Optional
+from typing import Any, Optional
+from django.db import models
 from django.db.models import QuerySet
 from apps.gyms.models import Gym
 from apps.notifications.models import Notification
@@ -46,15 +47,27 @@ def get_unread_notification_count(user: User, gym: Optional[Gym] = None) -> int:
     return qs.count()
 
 
-def get_notification_by_id(notification_id: uuid.UUID, user: User) -> Optional[Notification]:
-    """Retrieves a single notification owned by the user."""
-    return (
-        Notification.objects.select_related(
-            "actor",
-            "actor__profile",
-            "actor_gym",
-            "gym",
-        )
-        .filter(id=notification_id, recipient=user)
-        .first()
-    )
+def get_notification_by_id(
+    notification_id: Any,
+    user: User,
+    gym: Optional[Gym] = None,
+) -> Optional[Notification]:
+    """Retrieves a single notification owned by the user or their active gym context."""
+    try:
+        n_uuid = uuid.UUID(str(notification_id))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+    qs = Notification.objects.select_related(
+        "actor",
+        "actor__profile",
+        "actor_gym",
+        "gym",
+    ).filter(id=n_uuid)
+
+    if gym is not None:
+        qs = qs.filter(models.Q(recipient=user) | models.Q(gym=gym))
+    else:
+        qs = qs.filter(recipient=user)
+
+    return qs.first()

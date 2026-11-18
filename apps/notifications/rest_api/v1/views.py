@@ -30,6 +30,8 @@ from apps.notifications.services import (
     register_device_token,
     unregister_device_token,
 )
+from common.enums import NotificationTypeEnum
+from common.exceptions import DomainValidationError, ResourceNotFoundError
 from common.pagination import StandardResultsSetPagination
 from common.serializers import ErrorDetailSerializer
 
@@ -99,8 +101,15 @@ class NotificationListView(APIView):
                 is_read = True
             elif is_read_raw.lower() in ("false", "0"):
                 is_read = False
+            else:
+                raise DomainValidationError("Invalid value for 'is_read'. Expected 'true' or 'false'.")
 
         notification_type = request.query_params.get("notification_type") or request.query_params.get("type")
+        if notification_type and notification_type not in NotificationTypeEnum.values:
+            raise DomainValidationError(
+                f"Invalid 'notification_type' '{notification_type}'. "
+                f"Allowed choices: {', '.join(NotificationTypeEnum.values)}."
+            )
 
         queryset = list_notifications(
             user=request.user,
@@ -172,12 +181,10 @@ class NotificationDetailView(APIView):
         },
     )
     def get(self, request, notification_id):
-        notification = get_notification_by_id(notification_id=notification_id, user=request.user)
+        active_gym = _resolve_request_gym(request)
+        notification = get_notification_by_id(notification_id=notification_id, user=request.user, gym=active_gym)
         if not notification:
-            return Response(
-                {"detail": "Notification not found.", "code": "not_found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise ResourceNotFoundError("Notification not found.")
         self.check_object_permissions(request, notification)
         serializer = NotificationDetailSerializer(notification)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -191,14 +198,12 @@ class NotificationDetailView(APIView):
         },
     )
     def delete(self, request, notification_id):
-        notification = get_notification_by_id(notification_id=notification_id, user=request.user)
+        active_gym = _resolve_request_gym(request)
+        notification = get_notification_by_id(notification_id=notification_id, user=request.user, gym=active_gym)
         if not notification:
-            return Response(
-                {"detail": "Notification not found.", "code": "not_found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise ResourceNotFoundError("Notification not found.")
         self.check_object_permissions(request, notification)
-        delete_notification(notification_id=notification_id, user=request.user)
+        delete_notification(notification_id=notification_id, user=request.user, gym=active_gym)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -217,7 +222,8 @@ class NotificationMarkReadView(APIView):
         },
     )
     def patch(self, request, notification_id):
-        notification = mark_notification_as_read(notification_id=notification_id, user=request.user)
+        active_gym = _resolve_request_gym(request)
+        notification = mark_notification_as_read(notification_id=notification_id, user=request.user, gym=active_gym)
         serializer = NotificationDetailSerializer(notification)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -280,6 +286,7 @@ class DeviceTokenUnregisterView(APIView):
         responses={
             200: OpenApiResponse(description="Token deactivated successfully"),
             400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation Error"),
+            404: OpenApiResponse(response=ErrorDetailSerializer, description="Device Token Not Found"),
         },
     )
     def post(self, request):
@@ -289,10 +296,24 @@ class DeviceTokenUnregisterView(APIView):
             user=request.user,
             token=serializer.validated_data["token"],
         )
+        if not unregistered:
+            raise ResourceNotFoundError("Device token not found.")
         return Response(
-            {"unregistered": unregistered, "message": "Device token unregistered successfully."},
+            {"unregistered": True, "message": "Device token unregistered successfully."},
             status=status.HTTP_200_OK,
         )
 
     def delete(self, request):
-        return self.post(request)
+        data = request.data if request.data else {"token": request.query_params.get("token")}
+        serializer = DeviceTokenUnregisterSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        unregistered = unregister_device_token(
+            user=request.user,
+            token=serializer.validated_data["token"],
+        )
+        if not unregistered:
+            raise ResourceNotFoundError("Device token not found.")
+        return Response(
+            {"unregistered": True, "message": "Device token unregistered successfully."},
+            status=status.HTTP_200_OK,
+        )
