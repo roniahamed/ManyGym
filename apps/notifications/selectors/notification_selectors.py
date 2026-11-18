@@ -19,10 +19,13 @@ def list_notifications(
     gym: Optional[Gym] = None,
     is_read: Optional[bool] = None,
     notification_type: Optional[str] = None,
+    target_type: Optional[str] = None,
+    target_id: Optional[str] = None,
 ) -> QuerySet[Notification]:
     """
     Returns an optimized QuerySet of notifications for a user or active gym context.
     Pre-fetches actor, actor profiles, and related gyms to eliminate N+1 queries.
+    Supports filtering by read status, event type, and target entity coordinates.
     """
     qs = (
         Notification.objects.select_related(
@@ -42,6 +45,12 @@ def list_notifications(
 
     if notification_type:
         qs = qs.filter(notification_type=notification_type)
+
+    if target_type:
+        qs = qs.filter(target_type=target_type.strip())
+
+    if target_id:
+        qs = qs.filter(target_id=str(target_id).strip())
 
     return qs.order_by("-created_at")
 

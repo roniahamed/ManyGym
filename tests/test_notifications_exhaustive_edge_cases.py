@@ -691,3 +691,232 @@ class TestStateTransitionsAndLifecycle:
         assert tokens[1] not in active_tokens
         # Last registered token must be active
         assert tokens[11] in active_tokens
+
+
+class TestAdvancedProductionEdgeCases:
+    """
+    Tests advanced production edge cases:
+    - User bidirectional blocklists & Gym blocklists
+    - Account deactivation & soft deletion
+    - Anti-spam debouncing / duplicate suppression
+    - Hardware device_id token conflict pruning
+    - Batch mark read API & Clear read API
+    - Target type and target ID coordinates query filtering
+    """
+
+    def test_user_blocklist_suppresses_notifications_bidirectionally(self, qa_env):
+        from apps.users.models import UserBlockedUser
+
+        alice = qa_env["alice"]
+        charlie = qa_env["charlie"]
+
+        # Case 1: Alice blocks Charlie -> Charlie's actions must not notify Alice
+        UserBlockedUser.objects.create(blocker=alice, blocked_user=charlie)
+
+        notif1 = send_notification(
+            recipient=alice,
+            actor=charlie,
+            notification_type=NotificationTypeEnum.REACTION,
+            title="Charlie reacted to your post",
+            body="Charlie liked your workout",
+            send_push=False,
+        )
+        assert notif1 is None
+        assert Notification.objects.filter(recipient=alice, actor=charlie).count() == 0
+
+        # Case 2: Charlie blocks Alice -> Alice's actions must not notify Charlie
+        notif2 = send_notification(
+            recipient=charlie,
+            actor=alice,
+            notification_type=NotificationTypeEnum.COMMENT,
+            title="Alice commented",
+            body="Nice photo",
+            send_push=False,
+        )
+        assert notif2 is None
+        assert Notification.objects.filter(recipient=charlie, actor=alice).count() == 0
+
+    def test_gym_blocklist_suppresses_notifications(self, qa_env):
+        from apps.gyms.models import GymBlockedUser
+
+        gym = qa_env["gym"]
+        alice = qa_env["alice"]  # Gym owner
+        charlie = qa_env["charlie"]
+
+        # Gym blocks Charlie
+        GymBlockedUser.objects.create(gym=gym, user=charlie)
+
+        notif = send_notification(
+            recipient=alice,
+            gym=gym,
+            actor=charlie,
+            notification_type=NotificationTypeEnum.MEMBER_REQUEST,
+            title="Join request from Charlie",
+            body="Charlie wants to join",
+            send_push=False,
+        )
+        assert notif is None
+        assert Notification.objects.filter(recipient=alice, actor=charlie).count() == 0
+
+    def test_deactivated_or_deleted_recipient_suppressed(self, qa_env):
+        bob = qa_env["bob"]
+        charlie = qa_env["charlie"]
+
+        # Deactivate Bob
+        bob_setting = bob.get_settings()
+        bob_setting.is_deactivated = True
+        bob_setting.save()
+
+        notif = send_notification(
+            recipient=bob,
+            actor=charlie,
+            notification_type=NotificationTypeEnum.SYSTEM,
+            title="Alert for Bob",
+            body="System alert",
+            send_push=False,
+        )
+        assert notif is None
+        assert Notification.objects.filter(recipient=bob).count() == 0
+
+    def test_anti_spam_debouncing_window(self, qa_env):
+        alice = qa_env["alice"]
+        bob = qa_env["bob"]
+        target_uuid = str(uuid.uuid4())
+
+        # Rapidly send 2 notifications for identical target within 1 second
+        notif1 = send_notification(
+            recipient=alice,
+            actor=bob,
+            notification_type=NotificationTypeEnum.REACTION,
+            title="Reaction 1",
+            body="Bob liked your post",
+            target_type="post",
+            target_id=target_uuid,
+            send_push=False,
+        )
+        assert notif1 is not None
+
+        notif2 = send_notification(
+            recipient=alice,
+            actor=bob,
+            notification_type=NotificationTypeEnum.REACTION,
+            title="Reaction 2",
+            body="Bob liked your post again",
+            target_type="post",
+            target_id=target_uuid,
+            send_push=False,
+        )
+
+        # Should debounce and return the existing notification rather than creating a duplicate
+        assert notif2.id == notif1.id
+        assert Notification.objects.filter(recipient=alice, target_id=target_uuid).count() == 1
+
+    def test_hardware_device_id_token_reassignment_deactivates_old_token(self, qa_env):
+        alice = qa_env["alice"]
+        hw_id = "iphone_15_pro_unique_hw_001"
+
+        # 1. Initial device install
+        d1 = register_device_token(alice, token="fcm_token_initial_123", device_id=hw_id, platform="ios")
+        assert d1.is_active is True
+
+        # 2. App reinstallation on same phone generates new FCM token
+        d2 = register_device_token(alice, token="fcm_token_reinstalled_456", device_id=hw_id, platform="ios")
+        assert d2.is_active is True
+
+        # 3. Old token on this device ID must be deactivated
+        d1.refresh_from_db()
+        assert d1.is_active is False
+
+        # Active tokens for alice only contains the new token
+        active_tokens = get_active_device_tokens_for_user(alice)
+        assert "fcm_token_reinstalled_456" in active_tokens
+        assert "fcm_token_initial_123" not in active_tokens
+
+    def test_batch_mark_read_api(self, qa_env):
+        alice = qa_env["alice"]
+        bob = qa_env["bob"]
+        alice_client = _make_auth_client(alice)
+
+        # Create 3 unread notifications for Alice
+        n1 = send_notification(alice, NotificationTypeEnum.SYSTEM, "N1", "B1", send_push=False)
+        n2 = send_notification(alice, NotificationTypeEnum.SYSTEM, "N2", "B2", send_push=False)
+        n3 = send_notification(alice, NotificationTypeEnum.SYSTEM, "N3", "B3", send_push=False)
+        # Create 1 for Bob
+        n_bob = send_notification(bob, NotificationTypeEnum.SYSTEM, "N_Bob", "B_Bob", send_push=False)
+
+        # 1. Batch mark read with empty array -> 400
+        res_empty = alice_client.post("/api/v1/notifications/batch-read/", {"notification_ids": []}, format="json")
+        assert res_empty.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 2. Batch mark read with invalid UUIDs -> 400
+        res_invalid = alice_client.post("/api/v1/notifications/batch-read/", {"notification_ids": ["not-a-uuid"]}, format="json")
+        assert res_invalid.status_code == status.HTTP_400_BAD_REQUEST
+
+        # 3. Alice marks n1, n2, and attempts to include n_bob
+        res_batch = alice_client.post(
+            "/api/v1/notifications/batch-read/",
+            {"notification_ids": [str(n1.id), str(n2.id), str(n_bob.id)]},
+            format="json",
+        )
+        assert res_batch.status_code == status.HTTP_200_OK
+        # Only Alice's 2 notifications are marked read; Bob's is NOT affected
+        assert res_batch.data["marked_read_count"] == 2
+
+        n1.refresh_from_db()
+        n2.refresh_from_db()
+        n3.refresh_from_db()
+        n_bob.refresh_from_db()
+
+        assert n1.is_read is True
+        assert n2.is_read is True
+        assert n3.is_read is False  # Omitted from batch
+        assert n_bob.is_read is False  # Bob's notification preserved
+
+    def test_clear_read_api(self, qa_env):
+        alice = qa_env["alice"]
+        alice_client = _make_auth_client(alice)
+
+        # Create 2 read and 1 unread notification
+        n1 = send_notification(alice, NotificationTypeEnum.SYSTEM, "N1", "B1", send_push=False)
+        n2 = send_notification(alice, NotificationTypeEnum.SYSTEM, "N2", "B2", send_push=False)
+        n3 = send_notification(alice, NotificationTypeEnum.SYSTEM, "N3", "B3", send_push=False)
+
+        mark_notification_as_read(n1.id, alice)
+        mark_notification_as_read(n2.id, alice)
+
+        # Clear read notifications
+        res_clear = alice_client.delete("/api/v1/notifications/clear-read/")
+        assert res_clear.status_code == status.HTTP_200_OK
+        assert res_clear.data["deleted_count"] == 2
+
+        # Only unread notification n3 remains
+        remaining = list_notifications(alice)
+        assert remaining.count() == 1
+        assert remaining.first().id == n3.id
+
+    def test_target_type_and_target_id_query_filter(self, qa_env):
+        alice = qa_env["alice"]
+        alice_client = _make_auth_client(alice)
+
+        post_id = str(uuid.uuid4())
+        comment_id = str(uuid.uuid4())
+
+        send_notification(alice, NotificationTypeEnum.REACTION, "Post Reaction", "Post liked", target_type="post", target_id=post_id, send_push=False)
+        send_notification(alice, NotificationTypeEnum.COMMENT, "Comment Added", "Comment on post", target_type="post", target_id=post_id, send_push=False)
+        send_notification(alice, NotificationTypeEnum.COMMENT, "Reply Added", "Reply on comment", target_type="comment", target_id=comment_id, send_push=False)
+
+        # 1. Filter by target_type="post"
+        res_type = alice_client.get("/api/v1/notifications/?target_type=post")
+        assert res_type.status_code == status.HTTP_200_OK
+        assert len(res_type.data["results"]) == 2
+
+        # 2. Filter by target_type="post" and target_id=post_id
+        res_coord = alice_client.get(f"/api/v1/notifications/?target_type=post&target_id={post_id}")
+        assert res_coord.status_code == status.HTTP_200_OK
+        assert len(res_coord.data["results"]) == 2
+
+        # 3. Filter by target_type="comment"
+        res_comm = alice_client.get("/api/v1/notifications/?target_type=comment")
+        assert res_comm.status_code == status.HTTP_200_OK
+        assert len(res_comm.data["results"]) == 1
+        assert res_comm.data["results"][0]["target_id"] == comment_id

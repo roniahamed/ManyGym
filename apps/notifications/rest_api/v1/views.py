@@ -10,6 +10,9 @@ from rest_framework.views import APIView
 from apps.gyms.models import Gym
 from apps.notifications.permissions import IsNotificationRecipient
 from apps.notifications.rest_api.v1.serializers import (
+    BatchMarkReadResponseSerializer,
+    BatchMarkReadSerializer,
+    ClearReadResponseSerializer,
     DeviceTokenDetailSerializer,
     DeviceTokenRegisterSerializer,
     DeviceTokenUnregisterSerializer,
@@ -25,9 +28,11 @@ from apps.notifications.selectors import (
     list_notifications,
 )
 from apps.notifications.services import (
+    clear_read_notifications,
     delete_notification,
     mark_all_notifications_as_read,
     mark_notification_as_read,
+    mark_notifications_batch_as_read,
     register_device_token,
     unregister_device_token,
 )
@@ -51,7 +56,7 @@ def _resolve_request_gym(request) -> Optional[Gym]:
 class NotificationListView(APIView):
     """
     Retrieves a paginated list of in-app notifications for the authenticated user.
-    Supports filtering by read/unread status and notification event type.
+    Supports filtering by read/unread status, notification event type, and target entity coordinates.
     """
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
@@ -74,6 +79,20 @@ class NotificationListView(APIView):
                 location=OpenApiParameter.QUERY,
                 required=False,
                 description="Filter by notification type (e.g. 'reaction', 'comment', 'member_request').",
+            ),
+            OpenApiParameter(
+                name="target_type",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Filter by target resource entity type (e.g. 'post', 'comment', 'member_request').",
+            ),
+            OpenApiParameter(
+                name="target_id",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Filter by target resource UUID or identifier.",
             ),
             OpenApiParameter(
                 name="page",
@@ -110,6 +129,8 @@ class NotificationListView(APIView):
             gym=active_gym,
             is_read=filters.get("is_read"),
             notification_type=filters.get("notification_type"),
+            target_type=filters.get("target_type"),
+            target_id=filters.get("target_id"),
         )
 
         # 3. Paginate and return response
@@ -161,6 +182,58 @@ class NotificationMarkAllReadView(APIView):
         count = mark_all_notifications_as_read(user=request.user, gym=active_gym)
         serializer = MarkAllReadResponseSerializer({"marked_read_count": count})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class NotificationBatchMarkReadView(APIView):
+    """
+    Atomically marks a specified list of notification IDs as read.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Notifications"],
+        summary="Batch Mark Notifications as Read",
+        description="Marks a specific batch of notification UUIDs as read for the user.",
+        request=BatchMarkReadSerializer,
+        responses={
+            200: BatchMarkReadResponseSerializer,
+            400: OpenApiResponse(response=ErrorDetailSerializer, description="Validation Error"),
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Unauthenticated"),
+        },
+    )
+    def post(self, request):
+        serializer = BatchMarkReadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        active_gym = _resolve_request_gym(request)
+        count = mark_notifications_batch_as_read(
+            notification_ids=serializer.validated_data["notification_ids"],
+            user=request.user,
+            gym=active_gym,
+        )
+        response_serializer = BatchMarkReadResponseSerializer({"marked_read_count": count})
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class NotificationClearReadView(APIView):
+    """
+    Permanently deletes all read notifications for the authenticated user or gym.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Notifications"],
+        summary="Clear Read Notifications",
+        description="Permanently deletes all notifications with is_read=True for the user.",
+        responses={
+            200: ClearReadResponseSerializer,
+            401: OpenApiResponse(response=ErrorDetailSerializer, description="Unauthenticated"),
+        },
+    )
+    def delete(self, request):
+        active_gym = _resolve_request_gym(request)
+        count = clear_read_notifications(user=request.user, gym=active_gym)
+        response_serializer = ClearReadResponseSerializer({"deleted_count": count})
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 class NotificationDetailView(APIView):

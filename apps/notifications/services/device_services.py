@@ -29,7 +29,8 @@ def register_device_token(
 ) -> DeviceToken:
     """
     Registers or updates an FCM device token for an authenticated user.
-    Reactivates existing tokens and enforces the max concurrent active device threshold.
+    Reactivates existing tokens, deactivates stale tokens on the same physical hardware ID,
+    and enforces the maximum concurrent active device threshold.
     """
     cleaned_token = str(token).strip() if token else ""
     if not cleaned_token:
@@ -38,14 +39,27 @@ def register_device_token(
     if platform not in DevicePlatformEnum.values:
         platform = DevicePlatformEnum.ANDROID
 
+    cleaned_device_id = device_id.strip() if device_id else ""
+    cleaned_device_name = device_name.strip() if device_name else ""
+
+    # Hardware conflict resolution: If an app was reinstalled on the same physical device,
+    # FCM generates a new token. Deactivate any prior tokens for this same (user, device_id)
+    # to prevent sending duplicate notifications to the same phone.
+    if cleaned_device_id:
+        DeviceToken.objects.filter(
+            user=user,
+            device_id=cleaned_device_id,
+            is_active=True,
+        ).exclude(token=cleaned_token).update(is_active=False)
+
     # Check if token exists across any user (e.g. app reinstalled or user switched accounts on same device)
     device_token = DeviceToken.objects.filter(token=cleaned_token).first()
 
     if device_token:
         device_token.user = user
         device_token.is_active = True
-        device_token.device_id = device_id.strip() if device_id else device_token.device_id
-        device_token.device_name = device_name.strip() if device_name else device_token.device_name
+        device_token.device_id = cleaned_device_id or device_token.device_id
+        device_token.device_name = cleaned_device_name or device_token.device_name
         device_token.platform = platform
         device_token.last_seen_at = timezone.now()
         device_token.save()
@@ -53,8 +67,8 @@ def register_device_token(
         device_token = DeviceToken.objects.create(
             user=user,
             token=cleaned_token,
-            device_id=device_id.strip() if device_id else "",
-            device_name=device_name.strip() if device_name else "",
+            device_id=cleaned_device_id,
+            device_name=cleaned_device_name,
             platform=platform,
             is_active=True,
         )

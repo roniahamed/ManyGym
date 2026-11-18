@@ -10,7 +10,7 @@ from common.serializers import StrictCharField
 class NotificationFilterSerializer(serializers.Serializer):
     """
     Validates query parameters for listing in-app notifications.
-    Ensures type safety for boolean filters and enum choices.
+    Ensures type safety for boolean filters, enum choices, and target entity coordinates.
     """
     is_read = serializers.BooleanField(
         required=False,
@@ -33,6 +33,20 @@ class NotificationFilterSerializer(serializers.Serializer):
         allow_blank=True,
         allow_null=True,
         help_text="Alias for notification_type.",
+    )
+    target_type = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Filter by target resource entity type (e.g. 'post', 'comment', 'member_request').",
+    )
+    target_id = serializers.CharField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Filter by target resource UUID or identifier.",
     )
 
     def validate(self, attrs):
@@ -171,3 +185,23 @@ class UnreadCountResponseSerializer(serializers.Serializer):
 class MarkAllReadResponseSerializer(serializers.Serializer):
     """Response payload confirming mark all read action."""
     marked_read_count = serializers.IntegerField(help_text="Number of notifications marked as read.")
+
+
+class BatchMarkReadSerializer(serializers.Serializer):
+    """Payload for marking multiple specific notifications as read."""
+    notification_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        allow_empty=False,
+        max_length=100,
+        help_text="List of notification UUIDs to mark as read (max 100).",
+    )
+
+
+class BatchMarkReadResponseSerializer(serializers.Serializer):
+    """Response payload confirming batch mark read action."""
+    marked_read_count = serializers.IntegerField(help_text="Number of specified notifications marked as read.")
+
+
+class ClearReadResponseSerializer(serializers.Serializer):
+    """Response payload for purging all read notifications."""
+    deleted_count = serializers.IntegerField(help_text="Total count of purged read notifications.")
