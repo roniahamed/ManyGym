@@ -60,3 +60,5 @@ htmlcov/
 AGENTS.md
 GEMINI.md
 .agents/
+
+firebase-credentials.json
