@@ -1,6 +1,12 @@
+"""
+Write-side business logic and services for In-App Notifications.
+Handles transactional notification persistence, real-time WebSocket broadcasting,
+and background Celery FCM push dispatches.
+"""
+
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from django.db import models, transaction
 from django.utils import timezone
@@ -17,6 +23,45 @@ from common.enums import NotificationTypeEnum
 from common.exceptions import DomainValidationError, ResourceNotFoundError
 
 logger = logging.getLogger(__name__)
+
+
+def _dispatch_push_task_safely(
+    recipient_id: str,
+    title: str,
+    body: str,
+    data: Dict[str, Any],
+) -> None:
+    """Helper to enqueue the Celery push notification task without crashing callers."""
+    try:
+        send_push_notification_task.delay(
+            recipient_id=recipient_id,
+            title=title,
+            body=body,
+            data=data,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not enqueue async push notification task for recipient %s: %s",
+            recipient_id,
+            exc,
+        )
+
+
+def _dispatch_realtime_broadcast_safely(
+    channels: List[str],
+    event_type: str,
+    payload: Dict[str, Any],
+) -> None:
+    """Dispatches Channels WebSocket event to all specified room groups."""
+    for channel in channels:
+        try:
+            broadcast_realtime_event(channel, event_type, payload)
+        except Exception as exc:
+            logger.warning(
+                "Could not broadcast realtime notification event on channel %s: %s",
+                channel,
+                exc,
+            )
 
 
 @transaction.atomic
@@ -39,16 +84,19 @@ def send_notification(
     Persists notification to database, triggers realtime WebSocket broadcast,
     and enqueues background push notification delivery via FCM.
 
-    Enforces that users do not receive notifications triggered by their own actions.
+    Enforces self-notification suppression so users never receive alerts
+    triggered by their own actions.
     """
-    # Self-notification suppression
+    # 1. Self-notification suppression: do not notify user of their own actions
     if actor is not None and recipient.id == actor.id and actor_gym is None:
-        logger.debug(f"Suppressed self-notification for user {recipient.id}")
+        logger.debug("Suppressed self-notification for user %s", recipient.id)
         return None
 
+    # 2. Validate notification type
     if notification_type not in NotificationTypeEnum.values:
         raise DomainValidationError(f"Invalid notification_type '{notification_type}'.")
 
+    # 3. Build rich payload data dictionary
     payload_data = dict(data or {})
     payload_data.update({
         "notification_type": notification_type,
@@ -63,6 +111,7 @@ def send_notification(
     if actor_gym:
         payload_data["actor_gym_id"] = str(actor_gym.id)
 
+    # 4. Persist in-app notification record
     notification = Notification.objects.create(
         recipient=recipient,
         actor=actor,
@@ -78,7 +127,7 @@ def send_notification(
         is_read=False,
     )
 
-    # Broadcast real-time event to personal user channel
+    # 5. Prepare realtime payload
     realtime_payload = {
         "id": str(notification.id),
         "notification_type": notification.notification_type,
@@ -91,30 +140,27 @@ def send_notification(
         "is_read": False,
         "created_at": notification.created_at.isoformat(),
     }
-    broadcast_realtime_event(
-        f"chat_user_{recipient.id}",
-        "incoming_notification",
-        realtime_payload,
-    )
-    if gym:
-        broadcast_realtime_event(
-            f"chat_gym_{gym.id}",
-            "incoming_notification",
-            realtime_payload,
-        )
 
-    # Enqueue push delivery via Celery task
+    # 6. Channels to notify
+    channels_to_notify = [f"chat_user_{recipient.id}"]
+    if gym:
+        channels_to_notify.append(f"chat_gym_{gym.id}")
+
+    # Immediately broadcast WebSocket message
+    _dispatch_realtime_broadcast_safely(
+        channels=channels_to_notify,
+        event_type="incoming_notification",
+        payload=realtime_payload,
+    )
+
+    # 7. Asynchronously dispatch mobile FCM push notification via Celery
     if send_push:
-        try:
-            send_push_notification_task.delay(
-                recipient_id=str(recipient.id),
-                title=title,
-                body=body,
-                data=payload_data,
-            )
-        except Exception as exc:
-            # Fallback for eager test runs or worker disconnection
-            logger.warning(f"Could not enqueue async push task: {exc}. Running synchronously if needed.")
+        _dispatch_push_task_safely(
+            recipient_id=str(recipient.id),
+            title=title,
+            body=body,
+            data=payload_data,
+        )
 
     return notification
 
@@ -141,7 +187,7 @@ def send_message_push_notification(
             data=message_data,
         )
     except Exception as exc:
-        logger.warning(f"Could not enqueue message push task: {exc}")
+        logger.warning("Could not enqueue message push task: %s", exc)
 
 
 @transaction.atomic
@@ -154,7 +200,7 @@ def mark_notification_as_read(
     try:
         n_uuid = uuid.UUID(str(notification_id))
     except (ValueError, TypeError, AttributeError):
-        raise ResourceNotFoundError("Notification not found.")
+        raise ResourceNotFoundError("Notification not found or access denied.")
 
     qs = Notification.objects.filter(id=n_uuid)
     if gym is not None:
@@ -164,7 +210,7 @@ def mark_notification_as_read(
 
     notification = qs.first()
     if not notification:
-        raise ResourceNotFoundError("Notification not found.")
+        raise ResourceNotFoundError("Notification not found or access denied.")
 
     if not notification.is_read:
         notification.is_read = True
@@ -184,7 +230,8 @@ def mark_all_notifications_as_read(user: User, gym: Optional[Gym] = None) -> int
     if gym is not None:
         qs = qs.filter(gym=gym)
 
-    return qs.update(is_read=True, read_at=timezone.now(), updated_at=timezone.now())
+    now = timezone.now()
+    return qs.update(is_read=True, read_at=now, updated_at=now)
 
 
 @transaction.atomic
@@ -197,7 +244,7 @@ def delete_notification(
     try:
         n_uuid = uuid.UUID(str(notification_id))
     except (ValueError, TypeError, AttributeError):
-        raise ResourceNotFoundError("Notification not found.")
+        raise ResourceNotFoundError("Notification not found or access denied.")
 
     qs = Notification.objects.filter(id=n_uuid)
     if gym is not None:
@@ -207,7 +254,7 @@ def delete_notification(
 
     notification = qs.first()
     if not notification:
-        raise ResourceNotFoundError("Notification not found.")
+        raise ResourceNotFoundError("Notification not found or access denied.")
 
     notification.delete()
     return True

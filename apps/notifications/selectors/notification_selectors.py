@@ -1,7 +1,14 @@
+"""
+Read-side queries and selectors for In-App Notifications.
+Provides optimized, N+1-safe queries for user notifications and badge counts.
+"""
+
 import uuid
 from typing import Any, Optional
+
 from django.db import models
 from django.db.models import QuerySet
+
 from apps.gyms.models import Gym
 from apps.notifications.models import Notification
 from apps.users.models import User
@@ -40,7 +47,10 @@ def list_notifications(
 
 
 def get_unread_notification_count(user: User, gym: Optional[Gym] = None) -> int:
-    """Returns total count of unread notifications for the user."""
+    """
+    Returns total count of unread notifications for the user.
+    Leverages compound database index on (recipient, is_read, -created_at).
+    """
     qs = Notification.objects.filter(recipient=user, is_read=False)
     if gym is not None:
         qs = qs.filter(gym=gym)
@@ -52,7 +62,10 @@ def get_notification_by_id(
     user: User,
     gym: Optional[Gym] = None,
 ) -> Optional[Notification]:
-    """Retrieves a single notification owned by the user or their active gym context."""
+    """
+    Retrieves a single notification by UUID, scoped strictly to the recipient user
+    or their active gym workspace. Returns None if invalid or not found.
+    """
     try:
         n_uuid = uuid.UUID(str(notification_id))
     except (ValueError, TypeError, AttributeError):

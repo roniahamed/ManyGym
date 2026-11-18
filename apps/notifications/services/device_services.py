@@ -1,5 +1,10 @@
+"""
+Write-side business logic and services for client FCM Device Tokens.
+Handles token registration, upserts, deactivation upon logout, and pruning of stale devices.
+"""
+
 import logging
-from typing import List, Optional
+from typing import List
 from django.db import transaction
 from django.utils import timezone
 
@@ -10,6 +15,7 @@ from common.exceptions import DomainValidationError
 
 logger = logging.getLogger(__name__)
 
+# Configurable threshold to prevent infinite accumulation of dead/inactive device tokens
 MAX_ACTIVE_DEVICES_PER_USER = 10
 
 
@@ -32,7 +38,7 @@ def register_device_token(
     if platform not in DevicePlatformEnum.values:
         platform = DevicePlatformEnum.ANDROID
 
-    # Check if token exists across any user (e.g., app reinstalled or user switched accounts on same device)
+    # Check if token exists across any user (e.g. app reinstalled or user switched accounts on same device)
     device_token = DeviceToken.objects.filter(token=cleaned_token).first()
 
     if device_token:

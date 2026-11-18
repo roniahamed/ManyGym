@@ -1,4 +1,10 @@
+"""
+Services package for Notifications domain.
+Exposes write services for notifications and device tokens with clean interfaces.
+"""
+
 from .device_services import (
+    MAX_ACTIVE_DEVICES_PER_USER,
     deactivate_invalid_tokens,
     register_device_token,
     unregister_device_token,
@@ -12,6 +18,7 @@ from .notification_services import (
 )
 
 __all__ = [
+    "MAX_ACTIVE_DEVICES_PER_USER",
     "deactivate_invalid_tokens",
     "register_device_token",
     "unregister_device_token",

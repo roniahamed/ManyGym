@@ -1,3 +1,8 @@
+"""
+Selectors package for Notifications domain.
+Exposes notification and device selector functions with clean interfaces.
+"""
+
 from .device_selectors import (
     get_active_device_tokens_for_user,
     get_user_device_tokens,
