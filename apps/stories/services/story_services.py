@@ -14,7 +14,7 @@ from django.utils import timezone
 from apps.gyms.models import Gym
 from apps.posts.models import GymPost
 from apps.posts.services.post_services import validate_source_post_access
-from apps.stories.models import Story, StoryView
+from apps.stories.models import Story, StoryView, StoryReply
 from apps.stories.permissions import (
     check_story_creation_permission,
     has_gym_story_manage_permission,
@@ -518,3 +518,200 @@ def record_story_view(story: Story, viewer_user: User) -> tuple[Optional[StoryVi
         story.views_count += 1
 
     return view_obj, created
+
+
+@transaction.atomic
+def create_story_reply(
+    story: Story,
+    user: User,
+    message: str,
+    owner_type: str = StoryOwnerTypeEnum.USER,
+    gym: Optional[Gym] = None,
+    media_url: Optional[str] = None,
+) -> StoryReply:
+    """
+    Creates a reply / comment message on an active, non-expired moment/story.
+    Validates permissions, sanitizes message content, increments story replies counter,
+    links direct message conversation if applicable, and sends in-app notifications.
+    """
+    if not user or not getattr(user, "is_authenticated", False):
+        raise PermissionDeniedError("Authentication is required to reply to a moment.")
+
+    if story.is_expired:
+        raise DomainValidationError("Cannot reply to an expired moment.")
+
+    if getattr(story, "is_archived", False):
+        raise DomainValidationError("Cannot reply to an archived moment.")
+
+    cleaned_msg = (message or "").strip()
+    if not cleaned_msg:
+        raise DomainValidationError("Reply message cannot be empty.")
+    if len(cleaned_msg) > 1000:
+        raise DomainValidationError("Reply message cannot exceed 1000 characters.")
+
+    # Validate viewer access to story
+    from apps.stories.selectors.story_selectors import get_story_detail
+    get_story_detail(story.id, requesting_user=user, for_management=False)
+
+    # Resolve linked conversation and dispatch chat message if messaging module is active
+    conversation_id = None
+    try:
+        import base64
+        import json
+        from apps.messaging.models import (
+            ConversationParticipant,
+            EncryptedMessage,
+            MessageDeliveryStatusEnum,
+            MessageSenderTypeEnum,
+        )
+        from apps.messaging.services.conversation_services import (
+            get_or_create_user_to_user_conversation,
+            get_or_create_user_to_gym_conversation,
+        )
+        from apps.messaging.services.device_key_services import broadcast_realtime_event
+
+        conv = None
+        if story.owner_type == StoryOwnerTypeEnum.USER and story.user_id != user.id:
+            conv = get_or_create_user_to_user_conversation(user, story.user)
+            conversation_id = conv.id
+        elif story.owner_type == StoryOwnerTypeEnum.GYM and story.gym_id:
+            conv = get_or_create_user_to_gym_conversation(user, story.gym)
+            conversation_id = conv.id
+
+        if conv:
+            msg_payload = {
+                "type": "moment_reply",
+                "story_id": str(story.id),
+                "moment_id": str(story.id),
+                "media_url": story.media_url,
+                "thumbnail_url": story.thumbnail_url or story.media_url,
+                "caption": story.caption or "",
+                "message": cleaned_msg,
+            }
+            encoded_body = base64.b64encode(json.dumps(msg_payload).encode("utf-8")).decode("utf-8")
+
+            sender_type_val = MessageSenderTypeEnum.GYM if owner_type == StoryOwnerTypeEnum.GYM else MessageSenderTypeEnum.USER
+            msg = EncryptedMessage.objects.create(
+                conversation=conv,
+                sender_type=sender_type_val,
+                sender_user=user,
+                sender_gym=gym if owner_type == StoryOwnerTypeEnum.GYM else None,
+                ciphertext=encoded_body,
+                nonce="moment_reply",
+                delivery_status=MessageDeliveryStatusEnum.SENT,
+                sent_at=timezone.now(),
+            )
+
+            preview_text = f"Replied to moment: {cleaned_msg[:40]}"
+            conv.last_message_at = msg.sent_at
+            conv.last_message_preview = preview_text
+            conv.save(update_fields=["last_message_at", "last_message_preview", "updated_at"])
+
+            other_qs = ConversationParticipant.objects.filter(conversation=conv)
+            if sender_type_val == MessageSenderTypeEnum.USER:
+                other_qs = other_qs.exclude(user=user)
+            elif sender_type_val == MessageSenderTypeEnum.GYM:
+                other_qs = other_qs.exclude(gym=gym)
+
+            other_targets = list(other_qs.values_list("user_id", "gym_id"))
+            other_qs.update(unread_count=F("unread_count") + 1, updated_at=timezone.now())
+
+            try:
+                ws_payload = {
+                    "id": str(msg.id),
+                    "conversation_id": str(conv.id),
+                    "sender_type": msg.sender_type,
+                    "sender_user_id": str(user.id),
+                    "sender_gym_id": str(gym.id) if gym else None,
+                    "ciphertext": msg.ciphertext,
+                    "nonce": msg.nonce,
+                    "sent_at": msg.sent_at.isoformat(),
+                    "story_id": str(story.id),
+                    "message": cleaned_msg,
+                }
+                broadcast_realtime_event(f"chat_conversation_{conv.id}", "chat_message", ws_payload)
+                for u_id, g_id in other_targets:
+                    if u_id:
+                        broadcast_realtime_event(f"chat_user_{u_id}", "chat_incoming", ws_payload)
+                    elif g_id:
+                        broadcast_realtime_event(f"chat_gym_{g_id}", "chat_incoming", ws_payload)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    clean_media = (media_url or "").strip()
+
+    reply = StoryReply.objects.create(
+        story=story,
+        user=user,
+        owner_type=owner_type,
+        gym=gym if owner_type == StoryOwnerTypeEnum.GYM else None,
+        message=cleaned_msg,
+        media_url=clean_media,
+        conversation_id=conversation_id,
+    )
+
+    Story.objects.filter(id=story.id).update(replies_count=F("replies_count") + 1)
+    story.replies_count += 1
+
+    # In-App & FCM Push Notification
+    try:
+        from apps.notifications.services.notification_services import send_notification
+        from common.enums import NotificationTypeEnum
+
+        recipient = story.user
+        actor_name = f"{user.first_name} {user.last_name}".strip() or user.email
+        send_notification(
+            recipient=recipient,
+            notification_type=NotificationTypeEnum.COMMENT,
+            title=f"{actor_name} replied to your moment",
+            body=cleaned_msg[:150],
+            actor=user,
+            actor_gym=gym if owner_type == StoryOwnerTypeEnum.GYM else None,
+            gym=story.gym if story.owner_type == StoryOwnerTypeEnum.GYM else None,
+            target_type="moment",
+            target_id=str(story.id),
+            action_url=f"/api/v1/moments/{story.id}/",
+            data={
+                "story_id": str(story.id),
+                "moment_id": str(story.id),
+                "reply_id": str(reply.id),
+                "conversation_id": str(conversation_id) if conversation_id else None,
+            },
+            send_push=True,
+        )
+    except Exception:
+        pass
+
+    return reply
+
+
+@transaction.atomic
+def delete_story_reply(reply: StoryReply, actor_user: User) -> None:
+    """
+    Deletes a story reply.
+    Allowed by the reply author, or the story owner / managing gym staff.
+    Atomically decrements the story's replies_count.
+    """
+    if not actor_user or not getattr(actor_user, "is_authenticated", False):
+        raise PermissionDeniedError("Authentication is required to delete a reply.")
+
+    is_author = reply.user_id == actor_user.id
+    is_story_owner = reply.story.user_id == actor_user.id
+    is_gym_manager = False
+    if reply.story.owner_type == StoryOwnerTypeEnum.GYM and reply.story.gym_id:
+        is_gym_manager = has_gym_story_manage_permission(actor_user, reply.story.gym)
+
+    if not (is_author or is_story_owner or is_gym_manager or actor_user.is_superuser):
+        raise PermissionDeniedError("You do not have permission to delete this reply.")
+
+    story_id = reply.story_id
+    reply.delete()
+    Story.objects.filter(id=story_id, replies_count__gt=0).update(replies_count=F("replies_count") - 1)
+
+
+# Semantic Aliases
+create_moment_reply = create_story_reply
+delete_moment_reply = delete_story_reply
+

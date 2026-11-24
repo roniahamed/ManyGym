@@ -215,6 +215,7 @@ class RepostTargetEnum(models.TextChoices):
     """Destination target when reposting/sharing a post."""
     PROFILE = "profile", "Profile Feed"
     STORY = "story", "Story"
+    MOMENT = "moment", "Moment"
 
 
 class PostPrivacyEnum(models.TextChoices):

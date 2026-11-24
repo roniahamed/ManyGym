@@ -169,12 +169,12 @@ class GymFeedView(APIView):
         source_post_id = data.get("source_post_id")
         target = normalize_repost_target(data.get("target"))
 
-        if source_post_id and target == RepostTargetEnum.STORY:
+        if source_post_id and target in (RepostTargetEnum.STORY, RepostTargetEnum.MOMENT):
             media_file = extract_single_media_file(request.FILES)
             result = repost_post(
                 actor_user=request.user,
                 source_post_id=source_post_id,
-                target=RepostTargetEnum.STORY,
+                target=target,
                 owner_type=owner_type,
                 gym=gym,
                 privacy=data.get("privacy"),
@@ -190,7 +190,7 @@ class GymFeedView(APIView):
             )
             loaded_story = get_story_detail(result["story"].id, requesting_user=request.user, for_management=True)
             payload = StorySerializer(loaded_story, context={"request": request}).data
-            payload["target"] = RepostTargetEnum.STORY
+            payload["target"] = result["target"]
             return Response(payload, status=status.HTTP_201_CREATED)
 
         media_files = (
@@ -339,10 +339,10 @@ class PostRepostView(APIView):
             duration_seconds=data.get("duration_seconds"),
         )
 
-        if result["target"] == RepostTargetEnum.STORY:
+        if result["target"] in (RepostTargetEnum.STORY, RepostTargetEnum.MOMENT):
             loaded_story = get_story_detail(result["story"].id, requesting_user=request.user, for_management=True)
             payload = StorySerializer(loaded_story, context={"request": request}).data
-            payload["target"] = RepostTargetEnum.STORY
+            payload["target"] = result["target"]
             return Response(payload, status=status.HTTP_201_CREATED)
 
         loaded_post = get_post_detail_by_id(result["post"].id, requesting_user=request.user, for_management=True)

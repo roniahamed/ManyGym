@@ -71,6 +71,11 @@ class ReactionInputSerializer(serializers.Serializer):
         allow_null=True,
         help_text="Target story UUID if reacting to a story.",
     )
+    moment_id = StrictUUIDField(
+        required=False,
+        allow_null=True,
+        help_text="Target moment UUID (alias for story_id).",
+    )
     comment_id = StrictUUIDField(
         required=False,
         allow_null=True,
@@ -84,6 +89,8 @@ class ReactionInputSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Either 'reaction_item_id' or 'reaction_code' must be provided."
             )
+        if attrs.get("moment_id") and not attrs.get("story_id"):
+            attrs["story_id"] = attrs["moment_id"]
         owner_type = attrs.get("owner_type", PostOwnerTypeEnum.USER)
         gym_id = attrs.get("gym_id")
         if owner_type == PostOwnerTypeEnum.GYM and not gym_id:

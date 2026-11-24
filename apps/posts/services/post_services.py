@@ -70,23 +70,26 @@ def normalize_post_privacy(privacy: Optional[str], owner_type: str) -> str:
 def normalize_repost_target(target: Optional[str]) -> str:
     """
     Validates and normalizes repost destination target:
-    - 'profile' (or 'profile_feed') -> 'profile'
-    - 'story' -> 'story'
+    - 'profile' (or 'profile_feed', 'feed') -> 'profile'
+    - 'story' / 'stories' -> 'story'
+    - 'moment' / 'moments' -> 'moment'
     """
     if target is None or (isinstance(target, str) and not target.strip()):
         return RepostTargetEnum.PROFILE
 
     if not isinstance(target, str):
-        raise DomainValidationError("target must be a valid string ('profile' or 'story').")
+        raise DomainValidationError("target must be a valid string ('profile', 'moment', or 'story').")
 
     cleaned = target.strip().lower().replace(" ", "_")
     if cleaned in (RepostTargetEnum.PROFILE, "profile_feed", "feed"):
         return RepostTargetEnum.PROFILE
-    if cleaned == RepostTargetEnum.STORY:
+    if cleaned in (RepostTargetEnum.MOMENT, "moments"):
+        return RepostTargetEnum.MOMENT
+    if cleaned in (RepostTargetEnum.STORY, "stories"):
         return RepostTargetEnum.STORY
 
     raise DomainValidationError(
-        f"Invalid repost target '{target}'. Allowed choices: ['profile', 'story']."
+        f"Invalid repost target '{target}'. Allowed choices: ['profile', 'moment', 'story']."
     )
 
 
@@ -404,9 +407,10 @@ def repost_post(
         background_color=background_color,
     )
     return {
-        "target": RepostTargetEnum.STORY,
+        "target": resolved_target,
         "post": None,
         "story": created_story,
+        "moment": created_story,
     }
 
 

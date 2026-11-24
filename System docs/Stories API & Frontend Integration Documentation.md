@@ -1,8 +1,16 @@
-# Stories API & Frontend Integration Documentation
+# Stories (Moments) API & Frontend Integration Documentation
+
+> [!NOTE]
+> **Terminology & Endpoint Update**: "Stories" has been updated to **"Moments"**.
+> - Primary endpoints are now available at `/api/v1/moments/` (with legacy `/api/v1/stories/` fully preserved).
+> - Repost target accepts `target="moment"` or `target="story"`.
+> - **No need for a "My Moments" button**: The Moments Tray (`GET /api/v1/moments/tray/`) pins the authenticated user's own active moment at index `0` with `is_self: true`, so the user's active moment is directly accessible from the tray ring.
+> - **Moment Reply & Comment Message**: Fully enabled via `POST /api/v1/moments/{moment_id}/reply/` (aliases: `/comments/`, `/message/`), listing via `GET /api/v1/moments/{moment_id}/replies/`, and deleting via `DELETE /api/v1/moments/{moment_id}/replies/{reply_id}/`.
+> - For full integration details, see [Moments API & Frontend Integration Documentation.md](file:///Users/roni/Desktop/ManyGym/System%20docs/Moments%20API%20&%20Frontend%20Integration%20Documentation.md).
 
 ## 1. General Configuration
 
-- **Base URL:** `/api/v1/stories/`
+- **Base URL:** `/api/v1/moments/` (or legacy `/api/v1/stories/`)
 - **Authentication:** Bearer JWT Token (`Authorization: Bearer <access_token>`)
 - **Accepted Request Formats:** `multipart/form-data`, `application/x-www-form-urlencoded`, `application/json`
 - **Response Format:** `application/json`

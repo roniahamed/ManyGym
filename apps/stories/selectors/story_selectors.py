@@ -11,7 +11,7 @@ from apps.posts.selectors import (
     get_excluded_age_policy_codes,
     get_user_age,
 )
-from apps.stories.models import Story, StoryView
+from apps.stories.models import Story, StoryView, StoryReply
 from apps.stories.permissions import (
     check_story_manage_permission,
     has_gym_story_manage_permission,
@@ -344,6 +344,11 @@ def list_story_tray(
             owner_id = story.gym_id
             owner_name = story.gym.name
             owner_avatar = story.gym.profile_picture_url
+            is_self = bool(
+                requesting_user
+                and getattr(requesting_user, "is_authenticated", False)
+                and has_gym_story_manage_permission(requesting_user, story.gym)
+            )
         else:
             key = (StoryOwnerTypeEnum.USER, story.user_id)
             owner_id = story.user_id
@@ -351,6 +356,11 @@ def list_story_tray(
             owner_name = full_name or story.user.email
             profile = getattr(story.user, "profile", None)
             owner_avatar = profile.avatar_url if profile else None
+            is_self = bool(
+                requesting_user
+                and getattr(requesting_user, "is_authenticated", False)
+                and requesting_user.id == story.user_id
+            )
 
         if key not in buckets:
             buckets[key] = {
@@ -361,6 +371,7 @@ def list_story_tray(
                 "latest_story_at": story.published_at,
                 "has_unviewed": False,
                 "stories_count": 0,
+                "is_self": is_self,
                 "stories": [],
             }
 
@@ -377,7 +388,8 @@ def list_story_tray(
     for bucket in result:
         bucket["stories"].sort(key=lambda s: s.published_at)
 
-    result.sort(key=lambda b: (b["has_unviewed"], b["latest_story_at"]), reverse=True)
+    # User's own moments first (is_self=True), then unviewed, then by latest_story_at
+    result.sort(key=lambda b: (b.get("is_self", False), b["has_unviewed"], b["latest_story_at"]), reverse=True)
     return result
 
 
@@ -506,3 +518,60 @@ def list_story_viewers(story_id, requesting_user: User) -> QuerySet[StoryView]:
         .select_related("viewer_user", "viewer_user__profile")
         .order_by("-viewed_at")
     )
+
+
+def list_story_replies(story_id, requesting_user: User) -> QuerySet[StoryReply]:
+    """
+    Retrieves replies / comments for a moment/story.
+    - Story owner or managing gym staff: can view all replies for the moment.
+    - Other users: can view their own replies to this moment.
+    """
+    story = get_story_detail(story_id=story_id, requesting_user=requesting_user, for_management=False)
+    is_owner = False
+    if requesting_user and getattr(requesting_user, "is_authenticated", False):
+        if story.owner_type == StoryOwnerTypeEnum.USER and story.user_id == requesting_user.id:
+            is_owner = True
+        elif story.owner_type == StoryOwnerTypeEnum.GYM and story.gym_id:
+            is_owner = has_gym_story_manage_permission(requesting_user, story.gym)
+        elif requesting_user.is_superuser:
+            is_owner = True
+
+    qs = StoryReply.objects.filter(story=story).select_related("user", "user__profile", "gym")
+    if not is_owner:
+        if not requesting_user or not getattr(requesting_user, "is_authenticated", False):
+            return StoryReply.objects.none()
+        qs = qs.filter(user=requesting_user)
+
+    return qs.order_by("-created_at")
+
+
+def get_story_reply_detail(reply_id, requesting_user: User) -> StoryReply:
+    """
+    Retrieves a single StoryReply with permission checks.
+    """
+    try:
+        reply_uuid = uuid.UUID(str(reply_id))
+    except (ValueError, TypeError, AttributeError):
+        raise DomainValidationError("Invalid reply ID.")
+
+    reply = StoryReply.objects.filter(id=reply_uuid).select_related("story", "user", "gym").first()
+    if not reply:
+        raise ResourceNotFoundError("Reply not found.")
+
+    is_author = requesting_user and (reply.user_id == requesting_user.id)
+    is_story_owner = requesting_user and (reply.story.user_id == requesting_user.id)
+    is_gym_manager = False
+    if requesting_user and reply.story.owner_type == StoryOwnerTypeEnum.GYM and reply.story.gym_id:
+        is_gym_manager = has_gym_story_manage_permission(requesting_user, reply.story.gym)
+
+    if not (is_author or is_story_owner or is_gym_manager or (requesting_user and requesting_user.is_superuser)):
+        raise PermissionDeniedError("You do not have permission to access this reply.")
+
+    return reply
+
+
+# Semantic Aliases
+list_moment_viewers = list_story_viewers
+list_moment_replies = list_story_replies
+get_moment_reply_detail = get_story_reply_detail
+

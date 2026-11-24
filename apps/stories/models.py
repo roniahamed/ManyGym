@@ -101,6 +101,7 @@ class Story(OptimizedMediaMixin, models.Model):
     expires_at = models.DateTimeField(db_index=True)
     views_count = models.PositiveIntegerField(default=0)
     reactions_count = models.PositiveIntegerField(default=0)
+    replies_count = models.PositiveIntegerField(default=0)
     is_archived = models.BooleanField(default=False, db_index=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -108,8 +109,8 @@ class Story(OptimizedMediaMixin, models.Model):
 
     class Meta:
         db_table = "stories"
-        verbose_name = "Story"
-        verbose_name_plural = "Stories"
+        verbose_name = "Moment"
+        verbose_name_plural = "Moments"
         ordering = ["-published_at"]
         indexes = [
             models.Index(fields=["owner_type", "privacy", "expires_at", "-published_at"], name="idx_story_owner_priv_exp"),
@@ -143,6 +144,11 @@ class Story(OptimizedMediaMixin, models.Model):
     def is_expired(self) -> bool:
         """Returns True if the story has passed its configured expiration timestamp."""
         return timezone.now() >= self.expires_at
+
+    @property
+    def comments_count(self) -> int:
+        """Alias for replies_count to support both comment and reply naming."""
+        return self.replies_count
 
     def __str__(self):
         owner_label = self.gym.name if self.owner_type == StoryOwnerTypeEnum.GYM and self.gym_id else self.user.email
@@ -180,4 +186,77 @@ class StoryView(models.Model):
 
     def __str__(self):
         return f"{self.viewer_user.email} viewed Story {self.story_id}"
+
+
+class StoryReply(models.Model):
+    """
+    Represents a user or gym reply/comment message sent in response to an active moment/story.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    story = models.ForeignKey(
+        Story,
+        on_delete=models.CASCADE,
+        related_name="replies",
+        help_text="Target moment/story being replied to.",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="story_replies",
+        help_text="User authoring the reply/message.",
+    )
+    owner_type = models.CharField(
+        max_length=10,
+        choices=StoryOwnerTypeEnum.choices,
+        default=StoryOwnerTypeEnum.USER,
+        db_index=True,
+        help_text="Whether replier is acting as a personal user or gym.",
+    )
+    gym = models.ForeignKey(
+        "gyms.Gym",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="story_replies",
+        help_text="Gym entity when owner_type='gym'; null for personal user replies.",
+    )
+    message = models.TextField(
+        max_length=1000,
+        help_text="Reply text or message content.",
+    )
+    media_url = models.CharField(
+        max_length=1000,
+        blank=True,
+        default="",
+        help_text="Optional attached photo or media URL.",
+    )
+    conversation_id = models.UUIDField(
+        null=True,
+        blank=True,
+        help_text="Optional linked 1-on-1 direct messaging conversation ID.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "story_replies"
+        verbose_name = "Moment Reply"
+        verbose_name_plural = "Moment Replies"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["story", "-created_at"], name="idx_sreply_story_crt"),
+            models.Index(fields=["user", "-created_at"], name="idx_sreply_user_crt"),
+        ]
+
+    def __str__(self):
+        author = self.gym.name if self.owner_type == StoryOwnerTypeEnum.GYM and self.gym_id else self.user.email
+        snippet = (self.message or "")[:30]
+        return f"MomentReply({author} on Moment {self.story_id}: {snippet})"
+
+
+# Semantic Aliases
+Moment = Story
+MomentView = StoryView
+MomentReply = StoryReply
+
 

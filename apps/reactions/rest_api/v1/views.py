@@ -426,11 +426,11 @@ class UnifiedReactionsView(APIView):
     )
     def get(self, request, *args, **kwargs):
         post_id = request.query_params.get("post_id")
-        story_id = request.query_params.get("story_id")
+        story_id = request.query_params.get("story_id") or request.query_params.get("moment_id")
         comment_id = request.query_params.get("comment_id")
 
         if not post_id and not story_id and not comment_id:
-            raise DomainValidationError("Please provide at least one target filter: 'post_id', 'story_id', or 'comment_id'.")
+            raise DomainValidationError("Please provide at least one target filter: 'post_id', 'story_id' (or 'moment_id'), or 'comment_id'.")
 
         qs = list_reactions_for_target(
             post_id=post_id,
@@ -475,11 +475,11 @@ class UnifiedReactionsView(APIView):
         data = serializer.validated_data
 
         post_id = data.get("post_id")
-        story_id = data.get("story_id")
+        story_id = data.get("story_id") or data.get("moment_id")
         comment_id = data.get("comment_id")
 
         if not post_id and not story_id and not comment_id:
-            raise DomainValidationError("A target must be provided: 'post_id', 'story_id', or 'comment_id'.")
+            raise DomainValidationError("A target must be provided: 'post_id', 'story_id' (or 'moment_id'), or 'comment_id'.")
 
         owner_type, gym = _resolve_reaction_actor_context(
             request,

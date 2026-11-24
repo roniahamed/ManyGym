@@ -22,6 +22,8 @@ urlpatterns = [
     path("posts/<uuid:post_id>/summary/", PostReactionSummaryView.as_view(), name="reaction-post-summary"),
     path("stories/<uuid:story_id>/", StoryReactionsView.as_view(), name="reaction-story"),
     path("stories/<uuid:story_id>/summary/", StoryReactionSummaryView.as_view(), name="reaction-story-summary"),
+    path("moments/<uuid:story_id>/", StoryReactionsView.as_view(), name="reaction-moment"),
+    path("moments/<uuid:story_id>/summary/", StoryReactionSummaryView.as_view(), name="reaction-moment-summary"),
     path("comments/<uuid:comment_id>/", CommentReactionsView.as_view(), name="reaction-comment"),
     path("comments/<uuid:comment_id>/summary/", CommentReactionSummaryView.as_view(), name="reaction-comment-summary"),
 ]

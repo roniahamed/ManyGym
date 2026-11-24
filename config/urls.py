@@ -35,7 +35,8 @@ urlpatterns = [
     # Phase 7: Community Feed, Social Posts & Asynchronous Media Pipeline
     path("api/v1/posts/", include("apps.posts.rest_api.v1.urls")),
     path("api/v1/comments/", include("apps.posts.rest_api.v1.comment_urls")),
-    # Stories Feature (Public Users & Gyms)
+    # Moments / Stories Feature (Public Users & Gyms)
+    path("api/v1/moments/", include("apps.stories.rest_api.v1.urls")),
     path("api/v1/stories/", include("apps.stories.rest_api.v1.urls")),
     # Social Reactions (Posts, Stories, Comments)
     path("api/v1/reactions/", include("apps.reactions.rest_api.v1.urls")),

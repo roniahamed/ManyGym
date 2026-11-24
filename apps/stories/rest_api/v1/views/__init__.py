@@ -5,6 +5,16 @@ from apps.stories.rest_api.v1.views.story_views import (
     StoryDetailView,
     StoryRecordViewView,
     StoryViewersListView,
+    StoryReplyListCreateView,
+    StoryReplyDetailView,
+    MomentListCreateView,
+    MomentTrayView,
+    MyMomentsView,
+    MomentDetailView,
+    MomentRecordViewView,
+    MomentViewersListView,
+    MomentReplyListCreateView,
+    MomentReplyDetailView,
 )
 
 __all__ = [
@@ -14,5 +24,15 @@ __all__ = [
     "StoryDetailView",
     "StoryRecordViewView",
     "StoryViewersListView",
+    "StoryReplyListCreateView",
+    "StoryReplyDetailView",
+    "MomentListCreateView",
+    "MomentTrayView",
+    "MyMomentsView",
+    "MomentDetailView",
+    "MomentRecordViewView",
+    "MomentViewersListView",
+    "MomentReplyListCreateView",
+    "MomentReplyDetailView",
 ]
 

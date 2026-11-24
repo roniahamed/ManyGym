@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.posts.models import GymPost
-from apps.stories.models import Story, StoryView
+from apps.stories.models import Story, StoryView, StoryReply
 from common.enums import (
     StoryOwnerTypeEnum,
     StoryPrivacyEnum,
@@ -221,6 +221,8 @@ class StorySerializer(serializers.ModelSerializer):
     lifetime_label = serializers.CharField(source="get_lifetime_hours_display", read_only=True)
     is_expired = serializers.BooleanField(read_only=True)
     has_viewed = serializers.SerializerMethodField()
+    replies_count = serializers.IntegerField(read_only=True)
+    comments_count = serializers.IntegerField(source="replies_count", read_only=True)
 
     class Meta:
         model = Story
@@ -256,6 +258,8 @@ class StorySerializer(serializers.ModelSerializer):
             "is_archived",
             "views_count",
             "reactions_count",
+            "replies_count",
+            "comments_count",
             "has_viewed",
             "created_at",
             "updated_at",
@@ -294,6 +298,7 @@ class StoryTrayBucketSerializer(serializers.Serializer):
     latest_story_at = serializers.DateTimeField()
     has_unviewed = serializers.BooleanField()
     stories_count = serializers.IntegerField()
+    is_self = serializers.BooleanField(default=False)
     stories = StorySerializer(many=True)
 
 
@@ -323,4 +328,92 @@ class StoryViewSerializer(serializers.ModelSerializer):
         if obj.viewer_user and hasattr(obj.viewer_user, "profile") and obj.viewer_user.profile:
             return _resolve_url(self.context.get("request"), obj.viewer_user.profile.avatar_url)
         return None
+
+
+class StoryReplyCreateSerializer(serializers.Serializer):
+    message = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=1000,
+        help_text="Reply text or message content (max 1000 characters). Accepts 'comment' or 'text' as aliases.",
+    )
+    comment = serializers.CharField(required=False, allow_blank=True, max_length=1000, write_only=True)
+    comment_text = serializers.CharField(required=False, allow_blank=True, max_length=1000, write_only=True)
+    text = serializers.CharField(required=False, allow_blank=True, max_length=1000, write_only=True)
+    media_url = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=1000,
+        help_text="Optional attached photo or media URL.",
+    )
+
+    def validate(self, attrs):
+        msg = (
+            attrs.get("message")
+            or attrs.get("comment")
+            or attrs.get("comment_text")
+            or attrs.get("text")
+            or ""
+        ).strip()
+        if not msg:
+            raise serializers.ValidationError({"message": ["Reply message cannot be empty."]})
+        attrs["message"] = msg
+        return attrs
+
+
+class StoryReplySerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    user_avatar_url = serializers.SerializerMethodField()
+    gym_name = serializers.SerializerMethodField()
+    gym_avatar_url = serializers.SerializerMethodField()
+    media_url = AbsoluteMediaURLField(allow_null=True)
+
+    class Meta:
+        model = StoryReply
+        fields = [
+            "id",
+            "story_id",
+            "user_id",
+            "user_name",
+            "user_avatar_url",
+            "owner_type",
+            "gym_id",
+            "gym_name",
+            "gym_avatar_url",
+            "message",
+            "media_url",
+            "conversation_id",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_user_name(self, obj) -> str:
+        u = obj.user
+        if u:
+            full_name = f"{u.first_name} {u.last_name}".strip()
+            return full_name or u.email
+        return "Unknown"
+
+    def get_user_avatar_url(self, obj) -> str | None:
+        if obj.user and hasattr(obj.user, "profile") and obj.user.profile:
+            return _resolve_url(self.context.get("request"), obj.user.profile.avatar_url)
+        return None
+
+    def get_gym_name(self, obj) -> str | None:
+        return obj.gym.name if obj.gym else None
+
+    def get_gym_avatar_url(self, obj) -> str | None:
+        if obj.gym:
+            return _resolve_url(self.context.get("request"), obj.gym.profile_picture_url)
+        return None
+
+
+# Semantic Aliases
+MomentSerializer = StorySerializer
+MomentTrayBucketSerializer = StoryTrayBucketSerializer
+MomentReplySerializer = StoryReplySerializer
+MomentReplyCreateSerializer = StoryReplyCreateSerializer
+
 

@@ -14,6 +14,8 @@ from apps.stories.rest_api.v1.serializers import (
     StoryTrayBucketSerializer,
     StoryUpdateSerializer,
     StoryViewSerializer,
+    StoryReplyCreateSerializer,
+    StoryReplySerializer,
 )
 from apps.stories.selectors import (
     get_story_detail,
@@ -21,15 +23,20 @@ from apps.stories.selectors import (
     list_my_stories,
     list_story_tray,
     list_story_viewers,
+    list_story_replies,
+    get_story_reply_detail,
 )
 from apps.stories.services import (
     create_story,
+    create_story_reply,
     delete_story,
+    delete_story_reply,
     extract_single_media_file,
     record_story_view,
     update_story,
 )
 from common.enums import StoryOwnerTypeEnum
+from common.exceptions import DomainValidationError
 from common.pagination import StandardResultsSetPagination
 from common.serializers import ErrorDetailSerializer, MessageResponseSerializer
 
@@ -47,7 +54,7 @@ class StoryListCreateView(APIView):
         return [AllowAny()]
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="List Active Stories",
         description=(
             "Retrieves non-expired stories visible to the requesting user. "
@@ -84,7 +91,7 @@ class StoryListCreateView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="Upload Story",
         description=(
             "Uploads a single-media story (1 image or 1 video) as either a Public User or a Gym. "
@@ -143,7 +150,7 @@ class StoryTrayView(APIView):
     permission_classes = [AllowAny]
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="Get Story Tray (Grouped by Owner)",
         description="Returns active stories grouped by Public User or Gym, prioritizing owners with unviewed stories.",
         parameters=[
@@ -176,7 +183,7 @@ class MyStoriesView(APIView):
     pagination_class = StandardResultsSetPagination
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="List My Stories (Personal or Gym)",
         description="Lists stories owned by the current personal user or active gym context from the Bearer token (including private and optional expired archive).",
         parameters=[
@@ -228,7 +235,7 @@ class StoryDetailView(APIView):
         return [AllowAny()]
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="Get Story Detail",
         description="Retrieves a single story. Pass ?mark_viewed=true (when authenticated) to record a view.",
         parameters=[
@@ -251,7 +258,7 @@ class StoryDetailView(APIView):
         return Response(StorySerializer(story, context={"request": request}).data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="Update Story",
         description="Updates story caption, background_color, privacy, lifetime, or archive status. Owner/Gym manager only.",
         request=StoryUpdateSerializer,
@@ -283,7 +290,7 @@ class StoryDetailView(APIView):
         return Response(StorySerializer(updated, context={"request": request}).data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="Delete Story",
         description="Permanently deletes a story and cleans up story-owned media files. Owner/Gym manager only.",
         responses={
@@ -306,7 +313,7 @@ class StoryRecordViewView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="Record Story View",
         description="Marks the story as viewed by the authenticated user and updates unique views_count.",
         responses={
@@ -337,7 +344,7 @@ class StoryViewersListView(APIView):
     pagination_class = StandardResultsSetPagination
 
     @extend_schema(
-        tags=["Stories"],
+        tags=["Moments"],
         summary="List Story Viewers",
         description="Retrieves users who viewed this story. Restricted to the story owner or authorized gym staff.",
         responses={
@@ -357,4 +364,116 @@ class StoryViewersListView(APIView):
 
         serializer = StoryViewSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class StoryReplyListCreateView(APIView):
+    """
+    List replies/comments or post a reply/comment message on an active moment/story.
+    """
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    pagination_class = StandardResultsSetPagination
+
+    def get_permissions(self):
+        return [IsAuthenticated()]
+
+    @extend_schema(
+        tags=["Moments"],
+        summary="List Moment Replies",
+        description="Retrieves replies sent to this moment. Moment owners see all replies; other users see their own replies.",
+        responses={
+            200: StoryReplySerializer(many=True),
+            401: ErrorDetailSerializer,
+            403: ErrorDetailSerializer,
+            404: ErrorDetailSerializer,
+        },
+    )
+    def get(self, request, story_id: uuid.UUID):
+        qs = list_story_replies(story_id=story_id, requesting_user=request.user)
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request)
+        if page is not None:
+            serializer = StoryReplySerializer(page, many=True, context={"request": request})
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = StoryReplySerializer(qs, many=True, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Moments"],
+        summary="Reply to Moment (Comment / Message)",
+        description=(
+            "Sends a reply or comment message to an active, non-expired moment. "
+            "Creates a reply record, increments moment replies count, links direct conversation, "
+            "and dispatches a notification to the moment author."
+        ),
+        request=StoryReplyCreateSerializer,
+        responses={
+            201: StoryReplySerializer,
+            400: ErrorDetailSerializer,
+            401: ErrorDetailSerializer,
+            403: ErrorDetailSerializer,
+            404: ErrorDetailSerializer,
+        },
+    )
+    def post(self, request, story_id: uuid.UUID):
+        story = get_story_detail(story_id=story_id, requesting_user=request.user, for_management=False)
+        serializer = StoryReplyCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        owner_type, gym = resolve_story_owner_context(
+            request,
+            require_active_gym=False,
+        )
+
+        reply = create_story_reply(
+            story=story,
+            user=request.user,
+            message=data["message"],
+            owner_type=owner_type,
+            gym=gym,
+            media_url=data.get("media_url"),
+        )
+        return Response(
+            StoryReplySerializer(reply, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class StoryReplyDetailView(APIView):
+    """
+    Retrieve or delete a single reply on a moment.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Moments"],
+        summary="Delete Moment Reply",
+        description="Permanently deletes a moment reply. Allowed by the reply author, moment owner, or managing gym staff.",
+        responses={
+            200: MessageResponseSerializer,
+            401: ErrorDetailSerializer,
+            403: ErrorDetailSerializer,
+            404: ErrorDetailSerializer,
+        },
+    )
+    def delete(self, request, story_id: uuid.UUID, reply_id: uuid.UUID):
+        reply = get_story_reply_detail(reply_id=reply_id, requesting_user=request.user)
+        if str(reply.story_id) != str(story_id):
+            raise DomainValidationError("Reply does not belong to the specified moment.")
+
+        delete_story_reply(reply, actor_user=request.user)
+        return Response({"message": "Reply deleted successfully."}, status=status.HTTP_200_OK)
+
+
+# Semantic Aliases
+MomentListCreateView = StoryListCreateView
+MomentTrayView = StoryTrayView
+MyMomentsView = MyStoriesView
+MomentDetailView = StoryDetailView
+MomentRecordViewView = StoryRecordViewView
+MomentViewersListView = StoryViewersListView
+MomentReplyListCreateView = StoryReplyListCreateView
+MomentReplyDetailView = StoryReplyDetailView
+
 

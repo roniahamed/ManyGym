@@ -728,3 +728,268 @@ class TestStoryPrivacyExpiryViewsAndPerformance:
         # Social context (6) + count + main query + auth user lookup <= 12 queries (constant O(1), no N+1)
         assert len(ctx) <= 12
 
+
+class TestMomentsAndReplies:
+    """
+    Tests Moment rename aliases, Tray 'is_self' ordering (no need for 'My Moments' button),
+    and comprehensive reply/comment/message lifecycle on moments.
+    """
+
+    def test_moment_endpoints_and_repost_target(self, story_users):
+        alice = story_users["alice"]
+        alice_client = _auth_client(alice)
+
+        # 1. Create moment via /api/v1/moments/
+        res = alice_client.post(
+            "/api/v1/moments/",
+            data={
+                "file": _make_image("cardio.jpg"),
+                "caption": "Cardio morning!",
+                "privacy": "public",
+            },
+            format="multipart",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+        moment_id = res.json()["id"]
+        assert res.json()["replies_count"] == 0
+        assert res.json()["comments_count"] == 0
+
+        # 2. Retrieve detail via /api/v1/moments/{id}/
+        detail_res = alice_client.get(f"/api/v1/moments/{moment_id}/")
+        assert detail_res.status_code == status.HTTP_200_OK
+        assert detail_res.json()["id"] == moment_id
+
+        # 3. Repost post with target='moment'
+        post = create_post(
+            author_user=alice,
+            content_text="Post to share on moment",
+            privacy=PostPrivacyEnum.PUBLIC,
+            media_files=[_make_image("shared.png")],
+        )
+        repost_res = alice_client.post(
+            f"/api/v1/posts/{post.id}/repost/",
+            data={"target": "moment", "caption": "Shared post moment!"},
+            format="json",
+        )
+        assert repost_res.status_code == status.HTTP_201_CREATED
+        assert repost_res.json()["target"] == "moment"
+        assert repost_res.json()["source_post"]["id"] == str(post.id)
+
+    def test_tray_is_self_ordering_eliminates_need_for_my_moments_button(self, story_users):
+        alice = story_users["alice"]
+        bob = story_users["bob"]
+        alice_client = _auth_client(alice)
+        bob_client = _auth_client(bob)
+
+        # Alice uploads a moment
+        Story.objects.create(
+            owner_type=StoryOwnerTypeEnum.USER,
+            user=alice,
+            media_url="https://cdn.manygym.com/alice_moment.jpg",
+            media_type=MediaTypeEnum.PICTURE,
+            privacy=StoryPrivacyEnum.PUBLIC,
+        )
+        # Bob uploads a moment
+        Story.objects.create(
+            owner_type=StoryOwnerTypeEnum.USER,
+            user=bob,
+            media_url="https://cdn.manygym.com/bob_moment.jpg",
+            media_type=MediaTypeEnum.PICTURE,
+            privacy=StoryPrivacyEnum.PUBLIC,
+        )
+
+        # When Alice fetches tray, her own bucket is placed first at index 0 with is_self=True
+        alice_tray = alice_client.get("/api/v1/moments/tray/").json()
+        assert len(alice_tray) >= 2
+        assert alice_tray[0]["owner_id"] == str(alice.id)
+        assert alice_tray[0]["is_self"] is True
+
+        other_buckets = alice_tray[1:]
+        assert all(b["is_self"] is False for b in other_buckets)
+
+        # When Bob fetches tray, Bob's bucket is at index 0 with is_self=True
+        bob_tray = bob_client.get("/api/v1/moments/tray/").json()
+        assert bob_tray[0]["owner_id"] == str(bob.id)
+        assert bob_tray[0]["is_self"] is True
+
+    def test_reply_and_comment_message_lifecycle(self, story_users):
+        alice = story_users["alice"]
+        bob = story_users["bob"]
+        carol = story_users["carol"]
+        alice_client = _auth_client(alice)
+        bob_client = _auth_client(bob)
+        carol_client = _auth_client(carol)
+
+        # Bob follows Alice so direct messaging can be initiated
+        UserFollow.objects.create(follower=bob, followed_user=alice)
+
+        moment = Story.objects.create(
+            owner_type=StoryOwnerTypeEnum.USER,
+            user=alice,
+            media_url="https://cdn.manygym.com/alice_bench.jpg",
+            media_type=MediaTypeEnum.PICTURE,
+            privacy=StoryPrivacyEnum.PUBLIC,
+        )
+
+        with patch("apps.notifications.tasks.send_push_notification_task.delay"):
+            # 1. Bob sends reply via /reply/ endpoint
+            reply_res1 = bob_client.post(
+                f"/api/v1/moments/{moment.id}/reply/",
+                data={"message": "Great form on the bench press!"},
+                format="json",
+            )
+        assert reply_res1.status_code == status.HTTP_201_CREATED
+        r1_data = reply_res1.json()
+        assert r1_data["message"] == "Great form on the bench press!"
+        assert r1_data["user_id"] == str(bob.id)
+        assert r1_data["story_id"] == str(moment.id)
+        assert r1_data["conversation_id"] is not None
+
+        moment.refresh_from_db()
+        assert moment.replies_count == 1
+        assert moment.comments_count == 1
+
+        # 2. Bob sends comment via /comments/ alias endpoint
+        reply_res2 = bob_client.post(
+            f"/api/v1/moments/{moment.id}/comments/",
+            data={"comment": "What is your target weight?"},
+            format="json",
+        )
+        assert reply_res2.status_code == status.HTTP_201_CREATED
+        assert reply_res2.json()["message"] == "What is your target weight?"
+
+        moment.refresh_from_db()
+        assert moment.replies_count == 2
+
+        # 3. Bob sends message via /message/ alias endpoint
+        reply_res3 = bob_client.post(
+            f"/api/v1/moments/{moment.id}/message/",
+            data={"text": "Let's train tomorrow at 6 PM!"},
+            format="json",
+        )
+        assert reply_res3.status_code == status.HTTP_201_CREATED
+        assert reply_res3.json()["message"] == "Let's train tomorrow at 6 PM!"
+
+        moment.refresh_from_db()
+        assert moment.replies_count == 3
+
+        # 4. Check notification generated for Alice
+        from apps.notifications.models import Notification
+        alice_notifs = Notification.objects.filter(recipient=alice, target_type="moment")
+        assert alice_notifs.exists()
+        latest_notif = alice_notifs.first()
+        assert "replied to your moment" in latest_notif.title
+
+        # Check that replies appear in the 1-on-1 messaging chat thread (like WhatsApp / Messenger)
+        conv_id = r1_data["conversation_id"]
+        alice_msg_res = alice_client.get(f"/api/v1/messaging/conversations/{conv_id}/messages/")
+        assert alice_msg_res.status_code == status.HTTP_200_OK
+        assert len(alice_msg_res.json()) >= 1
+        assert any(m["nonce"] == "moment_reply" for m in alice_msg_res.json())
+
+        # Check conversation list preview in chat inbox
+        alice_convs_res = alice_client.get("/api/v1/messaging/conversations/")
+        assert alice_convs_res.status_code == status.HTTP_200_OK
+        target_conv = next(c for c in alice_convs_res.json() if c["id"] == conv_id)
+        assert "Replied to moment" in target_conv["last_message_preview"]
+
+        # 5. List replies: Alice (owner) sees all 3 replies
+        alice_replies_res = alice_client.get(f"/api/v1/moments/{moment.id}/replies/")
+        assert alice_replies_res.status_code == status.HTTP_200_OK
+        assert alice_replies_res.json()["count"] == 3
+
+        # Carol (has not replied) sees 0 replies
+        carol_replies_res = carol_client.get(f"/api/v1/moments/{moment.id}/replies/")
+        assert carol_replies_res.status_code == status.HTTP_200_OK
+        assert carol_replies_res.json()["count"] == 0
+
+        # Bob sees his 3 replies
+        bob_replies_res = bob_client.get(f"/api/v1/moments/{moment.id}/replies/")
+        assert bob_replies_res.status_code == status.HTTP_200_OK
+        assert bob_replies_res.json()["count"] == 3
+
+        # 6. Carol cannot delete Bob's reply (403)
+        r1_id = r1_data["id"]
+        carol_del = carol_client.delete(f"/api/v1/moments/{moment.id}/replies/{r1_id}/")
+        assert carol_del.status_code == status.HTTP_403_FORBIDDEN
+
+        # 7. Bob can delete his own reply
+        bob_del = bob_client.delete(f"/api/v1/moments/{moment.id}/replies/{r1_id}/")
+        assert bob_del.status_code == status.HTTP_200_OK
+        moment.refresh_from_db()
+        assert moment.replies_count == 2
+
+        # 8. Alice (moment owner) can delete any reply on her moment
+        r2_id = reply_res2.json()["id"]
+        alice_del = alice_client.delete(f"/api/v1/moments/{moment.id}/replies/{r2_id}/")
+        assert alice_del.status_code == status.HTTP_200_OK
+        moment.refresh_from_db()
+        assert moment.replies_count == 1
+
+    def test_reply_validation_errors(self, story_users):
+        alice = story_users["alice"]
+        bob = story_users["bob"]
+        bob_client = _auth_client(bob)
+
+        # Expired moment
+        expired_moment = Story.objects.create(
+            owner_type=StoryOwnerTypeEnum.USER,
+            user=alice,
+            media_url="https://cdn.manygym.com/alice_expired.jpg",
+            media_type=MediaTypeEnum.PICTURE,
+            privacy=StoryPrivacyEnum.PUBLIC,
+            published_at=timezone.now() - timedelta(hours=30),
+            expires_at=timezone.now() - timedelta(hours=10),
+        )
+
+        res_expired = bob_client.post(
+            f"/api/v1/moments/{expired_moment.id}/reply/",
+            data={"message": "Late reply"},
+            format="json",
+        )
+        assert res_expired.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND)
+
+        # Active moment with empty message
+        active_moment = Story.objects.create(
+            owner_type=StoryOwnerTypeEnum.USER,
+            user=alice,
+            media_url="https://cdn.manygym.com/alice_active.jpg",
+            media_type=MediaTypeEnum.PICTURE,
+            privacy=StoryPrivacyEnum.PUBLIC,
+        )
+        res_empty = bob_client.post(
+            f"/api/v1/moments/{active_moment.id}/reply/",
+            data={"message": "    "},
+            format="json",
+        )
+        assert res_empty.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_moment_reactions_endpoints(self, story_users):
+        alice = story_users["alice"]
+        bob = story_users["bob"]
+        bob_client = _auth_client(bob)
+
+        moment = Story.objects.create(
+            owner_type=StoryOwnerTypeEnum.USER,
+            user=alice,
+            media_url="https://cdn.manygym.com/alice_bench.jpg",
+            media_type=MediaTypeEnum.PICTURE,
+            privacy=StoryPrivacyEnum.PUBLIC,
+        )
+
+        # 1. Target shortcut /api/v1/reactions/moments/{id}/
+        react_res = bob_client.post(
+            f"/api/v1/reactions/moments/{moment.id}/",
+            data={"reaction_code": "fire"},
+            format="json",
+        )
+        assert react_res.status_code in (status.HTTP_200_OK, status.HTTP_201_CREATED)
+        moment.refresh_from_db()
+        assert moment.reactions_count == 1
+
+        # Summary endpoint
+        summary_res = bob_client.get(f"/api/v1/reactions/moments/{moment.id}/summary/")
+        assert summary_res.status_code == status.HTTP_200_OK
+        assert summary_res.json()["total_reactions"] == 1
+
+
