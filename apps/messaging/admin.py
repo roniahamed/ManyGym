@@ -2,10 +2,12 @@ from django.contrib import admin
 from apps.messaging.models import (
     UserDeviceKey,
     GymDeviceKey,
+    UserE2EEBackup,
     Conversation,
     ConversationParticipant,
     EncryptedMessage,
     MessageDeliveryReceipt,
+    MessageSearchToken,
 )
 
 
@@ -47,3 +49,16 @@ class EncryptedMessageAdmin(admin.ModelAdmin):
 class MessageDeliveryReceiptAdmin(admin.ModelAdmin):
     list_display = ("message", "user", "gym", "status", "timestamp")
     list_filter = ("status",)
+
+
+@admin.register(UserE2EEBackup)
+class UserE2EEBackupAdmin(admin.ModelAdmin):
+    list_display = ("user", "secret_type", "key_version", "failed_attempts", "is_active", "last_restored_at")
+    search_fields = ("user__email", "backup_key_fingerprint")
+    list_filter = ("secret_type", "is_active")
+
+
+@admin.register(MessageSearchToken)
+class MessageSearchTokenAdmin(admin.ModelAdmin):
+    list_display = ("message", "conversation", "owner_user", "owner_gym", "created_at")
+    search_fields = ("token_hash", "conversation__id")

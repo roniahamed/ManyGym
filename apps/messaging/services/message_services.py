@@ -12,6 +12,7 @@ from apps.messaging.models import (
     Conversation,
     ConversationParticipant,
     EncryptedMessage,
+    MessageSearchToken,
     MessageDeliveryStatusEnum,
     MessageSenderTypeEnum,
     ConversationTypeEnum,
@@ -25,7 +26,28 @@ from apps.messaging.services.device_key_services import broadcast_realtime_event
 from common.exceptions import (
     DomainValidationError,
     PermissionDeniedError,
+    ResourceNotFoundError,
 )
+
+
+def _normalize_token_list(raw_tokens: Optional[List[str]], max_tokens: int = 200) -> List[str]:
+    """Validates and deduplicates blinded HMAC search token strings."""
+    if not raw_tokens:
+        return []
+    cleaned: List[str] = []
+    seen = set()
+    for tok in raw_tokens:
+        if not isinstance(tok, str):
+            raise DomainValidationError("Each search token must be a string.")
+        val = tok.strip()
+        if not val or len(val) > 128:
+            raise DomainValidationError("Each search token must be between 1 and 128 characters.")
+        if val not in seen:
+            seen.add(val)
+            cleaned.append(val)
+        if len(cleaned) >= max_tokens:
+            break
+    return cleaned
 
 
 @transaction.atomic
@@ -40,6 +62,8 @@ def send_encrypted_message(
     sender_device_id: str = "",
     encrypted_keys: Optional[Dict[str, Any]] = None,
     sender_gym: Optional[Gym] = None,
+    search_tokens: Optional[List[str]] = None,
+    shared_search_tokens: Optional[List[str]] = None,
 ) -> EncryptedMessage:
     """
     Creates and records an E2EE encrypted message and dispatches real-time broadcast events.
@@ -76,6 +100,31 @@ def send_encrypted_message(
         delivery_status=MessageDeliveryStatusEnum.SENT,
         sent_at=timezone.now(),
     )
+
+    # Persist optional blinded HMAC search tokens for zero-knowledge chat history search
+    owner_tokens = _normalize_token_list(search_tokens)
+    shared_tokens = _normalize_token_list(shared_search_tokens)
+    if owner_tokens or shared_tokens:
+        token_objs = [
+            MessageSearchToken(
+                message=message,
+                conversation=conversation,
+                owner_user=None if sender_type == MessageSenderTypeEnum.GYM else sender_user,
+                owner_gym=sender_gym if sender_type == MessageSenderTypeEnum.GYM else None,
+                token_hash=tok,
+            )
+            for tok in owner_tokens
+        ] + [
+            MessageSearchToken(
+                message=message,
+                conversation=conversation,
+                owner_user=None,
+                owner_gym=None,
+                token_hash=tok,
+            )
+            for tok in shared_tokens
+        ]
+        MessageSearchToken.objects.bulk_create(token_objs, ignore_conflicts=True)
 
     # Update conversation metadata
     conversation.last_message_at = message.sent_at
@@ -235,3 +284,54 @@ def mark_conversation_as_read(
     )
 
     return updated_count
+
+
+@transaction.atomic
+def index_message_search_tokens(
+    user: User,
+    items: List[Dict[str, Any]],
+    gym: Optional[Gym] = None,
+) -> int:
+    """
+    Batch-indexes blinded HMAC search tokens for messages decrypted on the user's client device.
+    Validates conversation access for every referenced message in minimal queries.
+    """
+    if not items:
+        return 0
+
+    msg_ids = [item["message_id"] for item in items]
+    messages = list(
+        EncryptedMessage.objects.filter(id__in=msg_ids)
+        .select_related("conversation", "conversation__gym_a", "conversation__gym_b")
+    )
+    msg_map = {str(m.id): m for m in messages}
+
+    if len(msg_map) != len(set(str(mid) for mid in msg_ids)):
+        raise ResourceNotFoundError("One or more referenced messages were not found.")
+
+    # Verify access once per unique conversation
+    checked_convs = set()
+    for msg in messages:
+        if msg.conversation_id not in checked_convs:
+            assert_can_access_conversation(user, msg.conversation, gym_context=gym)
+            checked_convs.add(msg.conversation_id)
+
+    token_objs: List[MessageSearchToken] = []
+    for item in items:
+        msg = msg_map[str(item["message_id"])]
+        tokens = _normalize_token_list(item.get("tokens", []))
+        for tok in tokens:
+            token_objs.append(
+                MessageSearchToken(
+                    message=msg,
+                    conversation=msg.conversation,
+                    owner_user=None if gym else user,
+                    owner_gym=gym,
+                    token_hash=tok,
+                )
+            )
+
+    if token_objs:
+        MessageSearchToken.objects.bulk_create(token_objs, ignore_conflicts=True)
+
+    return len(token_objs)

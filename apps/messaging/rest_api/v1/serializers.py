@@ -11,6 +11,7 @@ from apps.messaging.models import (
     Conversation,
     ConversationParticipant,
     EncryptedMessage,
+    UserE2EEBackup,
 )
 from common.enums import (
     ConversationTypeEnum,
@@ -231,6 +232,20 @@ class SendMessageSerializer(serializers.Serializer):
         default=MessageSenderTypeEnum.USER,
     )
     sender_gym_id = StrictUUIDField(required=False, allow_null=True)
+    search_tokens = serializers.ListField(
+        child=StrictCharField(max_length=128, allow_blank=False),
+        required=False,
+        default=list,
+        max_length=200,
+        help_text="Optional blinded HMAC-SHA256 keyword tokens for the sender's E2EE chat search.",
+    )
+    shared_search_tokens = serializers.ListField(
+        child=StrictCharField(max_length=128, allow_blank=False),
+        required=False,
+        default=list,
+        max_length=200,
+        help_text="Optional blinded HMAC-SHA256 keyword tokens derived from a shared conversation search key.",
+    )
 
 
 class EncryptedMessageSerializer(serializers.ModelSerializer):
@@ -269,3 +284,189 @@ class EncryptedMessageSerializer(serializers.ModelSerializer):
 class MarkReadSerializer(serializers.Serializer):
     gym_id = StrictUUIDField(required=False, allow_null=True)
     up_to_message_id = StrictUUIDField(required=False, allow_null=True)
+
+
+class PeopleSearchResultSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField()
+    profile_id = serializers.UUIDField(allow_null=True)
+    email = serializers.EmailField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    full_name = serializers.CharField()
+    avatar_url = serializers.CharField(allow_null=True)
+    is_private = serializers.BooleanField()
+    is_following = serializers.BooleanField()
+    is_follower = serializers.BooleanField()
+    relationship = serializers.ChoiceField(choices=["mutual", "following", "follower"])
+    can_message = serializers.BooleanField()
+    conversation_id = serializers.UUIDField(allow_null=True)
+    has_e2ee_keys = serializers.BooleanField()
+
+
+class StrictBooleanField(serializers.BooleanField):
+    """Rejects non-boolean types if strict bool is required."""
+    def to_internal_value(self, data):
+        if not isinstance(data, bool):
+            raise serializers.ValidationError("Expected a boolean value.")
+        return super().to_internal_value(data)
+
+
+class StrictIntegerField(serializers.IntegerField):
+    """Rejects booleans, strings, lists, and dicts where an integer is expected."""
+    def to_internal_value(self, data):
+        if isinstance(data, bool) or not isinstance(data, int):
+            raise serializers.ValidationError("Expected an integer value.")
+        return super().to_internal_value(data)
+
+
+class UserE2EEBackupSetSerializer(serializers.Serializer):
+    recovery_code = StrictCharField(
+        max_length=5,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="5-digit numeric Messenger-style recovery code (e.g. '12345').",
+    )
+    backup_public_key = StrictCharField(required=False, allow_blank=True, default="")
+    encrypted_key_bundle = StrictCharField(required=False, allow_blank=True, default="")
+    nonce = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    salt = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    kdf_algorithm = StrictCharField(max_length=32, required=False, default="pbkdf2_sha256")
+    kdf_iterations = StrictIntegerField(required=False, default=310000, min_value=10000, max_value=5000000)
+    cipher_algorithm = StrictCharField(max_length=32, required=False, default="chacha20_poly1305")
+    secret_type = serializers.ChoiceField(
+        choices=UserE2EEBackup.SECRET_TYPE_CHOICES,
+        required=False,
+        default=UserE2EEBackup.SECRET_TYPE_PIN,
+    )
+    pin_length = StrictIntegerField(required=False, default=5, min_value=5, max_value=5)
+    auth_proof = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    recovery_encrypted_bundle = StrictCharField(required=False, allow_blank=True, default="")
+    recovery_nonce = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    recovery_salt = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    max_attempts = StrictIntegerField(required=False, default=10, min_value=3, max_value=20)
+
+    def validate_recovery_code(self, value):
+        if not value:
+            return ""
+        if not value.isdigit() or len(value) != 5:
+            raise serializers.ValidationError("Recovery code must be a 5-digit number (e.g., '12345').")
+        return value
+
+    def validate(self, attrs):
+        has_code = bool(attrs.get("recovery_code"))
+        has_bundle = all(
+            bool(attrs.get(f))
+            for f in ("backup_public_key", "encrypted_key_bundle", "nonce", "salt")
+        )
+        if not has_code and not has_bundle:
+            raise serializers.ValidationError(
+                "Provide either a 5-digit 'recovery_code' or complete encrypted backup bundle fields "
+                "('backup_public_key', 'encrypted_key_bundle', 'nonce', 'salt')."
+            )
+        return attrs
+
+
+class UserE2EEBackupRestoreSerializer(serializers.Serializer):
+    recovery_code = StrictCharField(
+        max_length=5,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="5-digit numeric Messenger-style recovery code (e.g. '12345').",
+    )
+    auth_proof = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    success = StrictBooleanField(required=False, allow_null=True, default=None)
+    use_recovery = StrictBooleanField(required=False, default=False)
+    # Optional new-device key registration fields to complete restore in 1 request
+    device_id = StrictCharField(max_length=100, required=False, allow_blank=True, default="")
+    device_name = StrictCharField(max_length=150, required=False, allow_blank=True, default="")
+    identity_key = StrictCharField(required=False, allow_blank=True, default="")
+    signed_prekey = StrictCharField(required=False, allow_blank=True, default="")
+    signed_prekey_signature = StrictCharField(required=False, allow_blank=True, default="")
+    one_time_prekeys = serializers.ListField(
+        child=StrictCharField(allow_blank=False),
+        required=False,
+        default=list,
+    )
+
+    def validate_recovery_code(self, value):
+        if not value:
+            return ""
+        if not value.isdigit() or len(value) != 5:
+            raise serializers.ValidationError("Recovery code must be a 5-digit number (e.g., '12345').")
+        return value
+
+
+class UserE2EEBackupChangeCodeSerializer(serializers.Serializer):
+    current_recovery_code = StrictCharField(max_length=5, required=False, allow_blank=True, default="")
+    new_recovery_code = StrictCharField(max_length=5, required=False, allow_blank=True, default="")
+    current_auth_proof = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    new_auth_proof = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    encrypted_key_bundle = StrictCharField(required=False, allow_blank=True, default="")
+    nonce = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    salt = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
+    kdf_algorithm = StrictCharField(max_length=32, required=False, default="pbkdf2_sha256")
+    kdf_iterations = StrictIntegerField(required=False, default=310000, min_value=10000, max_value=5000000)
+    cipher_algorithm = StrictCharField(max_length=32, required=False, default="chacha20_poly1305")
+    secret_type = serializers.ChoiceField(
+        choices=UserE2EEBackup.SECRET_TYPE_CHOICES,
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    backup_public_key = StrictCharField(required=False, allow_blank=True, default="")
+
+    def validate_current_recovery_code(self, value):
+        if not value:
+            return ""
+        if not value.isdigit() or len(value) != 5:
+            raise serializers.ValidationError("current_recovery_code must be a 5-digit number.")
+        return value
+
+    def validate_new_recovery_code(self, value):
+        if not value:
+            return ""
+        if not value.isdigit() or len(value) != 5:
+            raise serializers.ValidationError("new_recovery_code must be a 5-digit number.")
+        return value
+
+    def validate(self, attrs):
+        has_codes = bool(attrs.get("current_recovery_code") and attrs.get("new_recovery_code"))
+        has_bundle = all(bool(attrs.get(f)) for f in ("encrypted_key_bundle", "nonce", "salt"))
+        if not has_codes and not has_bundle:
+            raise serializers.ValidationError(
+                "Provide either 'current_recovery_code' + 'new_recovery_code' or re-encrypted bundle fields."
+            )
+        return attrs
+
+
+class ChatHistorySearchSerializer(serializers.Serializer):
+    tokens = serializers.ListField(
+        child=StrictCharField(max_length=128, allow_blank=False),
+        min_length=1,
+        max_length=20,
+    )
+    match_mode = serializers.ChoiceField(choices=["all", "any"], required=False, default="all")
+    conversation_id = StrictUUIDField(required=False, allow_null=True, default=None)
+    gym_id = StrictUUIDField(required=False, allow_null=True, default=None)
+    limit = StrictIntegerField(required=False, default=20, min_value=1, max_value=50)
+    matches_per_chat = StrictIntegerField(required=False, default=5, min_value=1, max_value=20)
+
+
+class MessageSearchIndexItemSerializer(serializers.Serializer):
+    message_id = StrictUUIDField()
+    tokens = serializers.ListField(
+        child=StrictCharField(max_length=128, allow_blank=False),
+        min_length=1,
+        max_length=200,
+    )
+
+
+class MessageSearchIndexBatchSerializer(serializers.Serializer):
+    gym_id = StrictUUIDField(required=False, allow_null=True, default=None)
+    items = serializers.ListField(
+        child=MessageSearchIndexItemSerializer(),
+        min_length=1,
+        max_length=100,
+    )

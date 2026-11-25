@@ -232,3 +232,34 @@ ws://localhost:8000/ws/chat/?token=<ACCESS_TOKEN>&gym_id=<OPTIONAL_GYM_ID>
 - `incoming_notification`: Dispatched to user or gym personal channel to increment unread counter or trigger push notification.
 - `typing_indicator`: Dispatched when an active chatter is typing.
 - `read_receipt`: Dispatched when messages have been marked as read.
+
+---
+
+## New Messaging & E2EE Enhancements
+
+### 7. Find People to Message (Follows + Followers Only — Modal / Offcanvas)
+- **Endpoint**: `GET /api/v1/messaging/people/search/?q=<query>&limit=<1..50>`
+- **Frontend UI Contract**: No dedicated page is required. Render this search inside an **offcanvas or modal** from the inbox / "New Message" button.
+- **Behavior**:
+  - Searches **only** within the authenticated user's **Follows + Followers** (`UserFollow`), deduplicating mutual connections.
+  - Excludes self, blocked users (both directions), and deleted/deactivated accounts.
+  - Returns `relationship` (`"mutual"`, `"following"`, `"follower"`), `can_message`, existing `conversation_id` (or `null`), and `has_e2ee_keys`.
+
+### 8. Messenger-Style 5-Digit Recovery Code E2EE Backup & New Device History Restore
+Encrypted messages are persistently stored on the server (`EncryptedMessage`) so users can access their full chat history across multiple devices. Users protect their Master/Backup E2EE Keypair and Search Index Key using a **5-digit numeric recovery code** (e.g., `"48291"`), enabling instant recovery and decryption of historical messages on any new device.
+
+- **`GET /api/v1/messaging/keys/backup/status/`**: Check if an active backup exists, `pin_length` (`5`), `secret_type` (`"pin"`), KDF parameters, and brute-force attempt/lockout status.
+- **`POST / PUT /api/v1/messaging/keys/backup/`**:
+  - **5-Digit Recovery Code mode**: Send `{"recovery_code": "48291"}` (strictly 5 digits). The backend generates a Master X25519 keypair + Search Key, encrypts the bundle using PBKDF2-HMAC-SHA256 + HKDF + ChaCha20-Poly1305, and stores only the encrypted bundle + salted verifier hash (never the plaintext code).
+  - **Zero-Knowledge client mode**: Send client-encrypted `backup_public_key`, `encrypted_key_bundle`, `nonce`, `salt`, and `auth_proof`.
+- **`GET /api/v1/messaging/keys/backup/`**: Fetch KDF parameters (withholding `encrypted_key_bundle` when `auth_proof` gating is enabled).
+- **`POST /api/v1/messaging/keys/backup/restore/`**: Verify `recovery_code` (5 digits) or `auth_proof` on a new device (enforces `max_attempts` lockout, default 10 attempts -> 30 min lock), return the encrypted bundle (plus `restored_keys` when `recovery_code` is provided), and optionally register the new device's `UserDeviceKey` in the same request.
+- **`POST /api/v1/messaging/keys/backup/change-code/`**: Rotate the 5-digit recovery code (`{"current_recovery_code": "48291", "new_recovery_code": "73915"}`) while preserving the underlying Master Keypair & Search Key so old message history stays decryptable.
+- **`DELETE /api/v1/messaging/keys/backup/`**: Delete/reset the user's E2EE backup.
+- **`GET /api/v1/messaging/keys/user/{user_id}/`**: Also returns `"backup_key"` (`backup_public_key`, `backup_key_fingerprint`, `key_version`) so senders wrap message keys in `encrypted_keys` for the recipient's backed-up key.
+- **Full History Sync on New Devices**: `GET /api/v1/messaging/conversations/{conversation_id}/messages/` supports optional `before`, `after` (message UUID or ISO-8601 timestamp), and `order=asc|desc` query parameters.
+
+### 9. WhatsApp-Style Zero-Knowledge Chat History Search
+- **Indexing**: Clients attach optional `search_tokens` (and/or `shared_search_tokens`)—blinded HMAC-SHA256 keyword digests—when sending messages (`POST /api/v1/messaging/conversations/{conversation_id}/messages/` or WebSocket `send_message`), or batch-index decrypted received/restored messages via `POST /api/v1/messaging/search/index/`.
+- **Search**: `GET /api/v1/messaging/messages/search/?token=<hmac>&match_mode=all&limit=20&matches_per_chat=5` (or `POST /api/v1/messaging/messages/search/` with `{"tokens": [...], "match_mode": "all"|"any", "conversation_id": "<optional>"}`).
+- **Response**: Returns conversations grouped WhatsApp-style (`total_conversations`, `total_matches`, `results[]` with `conversation`, `match_count`, `latest_match_at`, and `matches[]` encrypted messages for local decryption & highlighting).

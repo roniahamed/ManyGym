@@ -155,6 +155,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         sender_device_id = content.get("sender_device_id", "")
         encrypted_keys = content.get("encrypted_keys", {})
         sender_type = content.get("sender_type", MessageSenderTypeEnum.USER)
+        search_tokens = content.get("search_tokens", [])
+        shared_search_tokens = content.get("shared_search_tokens", [])
 
         if not conv_id or not ciphertext or not nonce:
             await self.send_json({"type": "error", "message": "conversation_id, ciphertext, and nonce are required."})
@@ -170,6 +172,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 sender_device_id=sender_device_id,
                 encrypted_keys=encrypted_keys,
                 sender_type=sender_type,
+                search_tokens=search_tokens,
+                shared_search_tokens=shared_search_tokens,
             )
             await self.send_json({
                 "type": "message_sent_ack",
@@ -248,7 +252,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             return False
 
     @database_sync_to_async
-    def save_message_async(self, conv_id, ciphertext, nonce, ephemeral_public_key, recipient_key_fingerprint, sender_device_id, encrypted_keys, sender_type):
+    def save_message_async(self, conv_id, ciphertext, nonce, ephemeral_public_key, recipient_key_fingerprint, sender_device_id, encrypted_keys, sender_type, search_tokens=None, shared_search_tokens=None):
         conv = get_conversation_by_id(conv_id, self.user, gym=self.active_gym)
         sender_gym = self.active_gym if sender_type == MessageSenderTypeEnum.GYM else None
         return send_encrypted_message(
@@ -262,6 +266,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             sender_device_id=sender_device_id,
             encrypted_keys=encrypted_keys,
             sender_gym=sender_gym,
+            search_tokens=search_tokens,
+            shared_search_tokens=shared_search_tokens,
         )
 
     @database_sync_to_async

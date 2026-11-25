@@ -7,10 +7,12 @@ from rest_framework.views import APIView
 from apps.messaging.rest_api.v1.serializers import (
     ConversationCreateSerializer,
     ConversationListSerializer,
+    PeopleSearchResultSerializer,
 )
 from apps.messaging.selectors import (
     get_conversation_by_id,
     list_conversations_for_entity,
+    search_people_to_message,
 )
 from apps.messaging.services import initiate_conversation
 from apps.messaging.rest_api.v1.views.base_views import resolve_gym_context
@@ -102,3 +104,49 @@ class ConversationDetailView(APIView):
         conv = get_conversation_by_id(str(conversation_id), request.user, gym=gym, prefetch_participants=True)
         serializer = ConversationListSerializer(conv, context={"request": request, "gym": gym})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class FindPeopleToMessageView(APIView):
+    """
+    Searches people to message strictly from the authenticated user's Follows + Followers.
+    Designed to power the inbox 'Find people to message' modal/offcanvas without a dedicated page.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Messaging"],
+        summary="Find People to Message (Follows + Followers Only)",
+        description=(
+            "Searches users strictly within the authenticated user's Follows and Followers lists "
+            "for starting or jumping into a direct conversation from an offcanvas/modal."
+        ),
+        parameters=[
+            OpenApiParameter(name="q", description="Search query matching name or email.", required=False, type=str),
+            OpenApiParameter(name="limit", description="Max results to return (default 20, max 50).", required=False, type=int),
+        ],
+        responses={200: PeopleSearchResultSerializer(many=True)},
+    )
+    def get(self, request):
+        query = request.query_params.get("q")
+        if query is None:
+            query = request.query_params.get("search")
+
+        limit_param = request.query_params.get("limit")
+        limit = 20
+        if limit_param is not None:
+            try:
+                parsed = int(limit_param)
+                if parsed > 0:
+                    limit = min(parsed, 50)
+            except (ValueError, TypeError):
+                limit = 20
+
+        people = search_people_to_message(request.user, query=query, limit=limit)
+        serializer = PeopleSearchResultSerializer(people, many=True)
+        return Response(
+            {
+                "count": len(serializer.data),
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )

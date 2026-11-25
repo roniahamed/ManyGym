@@ -328,3 +328,131 @@ class MessageDeliveryReceipt(TimeStampedModel):
 
     def __str__(self):
         return f"Receipt({self.message_id} -> {self.status})"
+
+
+class UserE2EEBackup(TimeStampedModel):
+    """
+    Messenger-style password/PIN-protected encrypted E2EE key backup.
+    Enables a user to restore their Master E2EE Identity & Search keys on new devices
+    to decrypt historical conversations without exposing plaintext keys or codes to the server.
+    """
+    SECRET_TYPE_PIN = "pin"
+    SECRET_TYPE_PASSPHRASE = "passphrase"
+    SECRET_TYPE_CHOICES = [
+        (SECRET_TYPE_PIN, "PIN / Numeric Code"),
+        (SECRET_TYPE_PASSPHRASE, "Password / Passphrase"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="e2ee_backup",
+    )
+    backup_public_key = models.TextField(
+        help_text="Public X25519 Master/Backup key (Base64) used to wrap history keys for new devices.",
+    )
+    backup_key_fingerprint = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="SHA-256 fingerprint of backup_public_key.",
+    )
+    encrypted_key_bundle = models.TextField(
+        help_text="Base64 AEAD ciphertext of private identity/history/search keys encrypted client-side.",
+    )
+    nonce = models.CharField(max_length=255, help_text="Base64 AEAD nonce / IV.")
+    salt = models.CharField(max_length=255, help_text="Base64 KDF salt.")
+    kdf_algorithm = models.CharField(max_length=32, default="pbkdf2_sha256")
+    kdf_iterations = models.PositiveIntegerField(default=310000)
+    cipher_algorithm = models.CharField(max_length=32, default="chacha20_poly1305")
+    secret_type = models.CharField(
+        max_length=20,
+        choices=SECRET_TYPE_CHOICES,
+        default=SECRET_TYPE_PIN,
+    )
+    pin_length = models.PositiveSmallIntegerField(
+        default=5,
+        help_text="Expected numeric recovery code length (5 digits by default, Messenger-style).",
+    )
+    verifier_hash = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Salted hash of client auth_proof (never raw PIN/password or encryption key) for brute-force gated restore.",
+    )
+    recovery_encrypted_bundle = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional secondary backup encrypted with a one-time recovery code.",
+    )
+    recovery_nonce = models.CharField(max_length=255, blank=True, default="")
+    recovery_salt = models.CharField(max_length=255, blank=True, default="")
+    key_version = models.PositiveIntegerField(default=1)
+    failed_attempts = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=10)
+    locked_until = models.DateTimeField(null=True, blank=True)
+    last_restored_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "messaging_user_e2ee_backups"
+        verbose_name = "User E2EE Key Backup"
+        verbose_name_plural = "User E2EE Key Backups"
+        indexes = [
+            models.Index(fields=["user", "is_active"]),
+        ]
+
+    def __str__(self):
+        return f"UserE2EEBackup({self.user.email} v{self.key_version})"
+
+
+class MessageSearchToken(TimeStampedModel):
+    """
+    Blinded HMAC-SHA256 keyword token index for zero-knowledge WhatsApp-style chat history search.
+    Plaintext keywords never touch the server.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(
+        EncryptedMessage,
+        on_delete=models.CASCADE,
+        related_name="search_tokens",
+    )
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        related_name="search_tokens",
+    )
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="message_search_tokens",
+    )
+    owner_gym = models.ForeignKey(
+        "gyms.Gym",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="message_search_tokens",
+    )
+    token_hash = models.CharField(max_length=128, db_index=True)
+
+    class Meta:
+        db_table = "messaging_message_search_tokens"
+        verbose_name = "Message Search Token"
+        verbose_name_plural = "Message Search Tokens"
+        indexes = [
+            models.Index(fields=["owner_user", "token_hash", "conversation"], name="idx_mst_user_tok_conv"),
+            models.Index(fields=["owner_gym", "token_hash", "conversation"], name="idx_mst_gym_tok_conv"),
+            models.Index(fields=["conversation", "token_hash"], name="idx_mst_conv_tok"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["message", "owner_user", "owner_gym", "token_hash"],
+                name="unique_msg_owner_search_token",
+            ),
+        ]
+
+    def __str__(self):
+        return f"SearchToken({self.message_id} - {self.token_hash[:12]}...)"

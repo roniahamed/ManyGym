@@ -9,12 +9,16 @@ Implements industry-standard asymmetric + symmetric hybrid cryptography:
 """
 
 import os
+import re
+import json
+import hmac
 import base64
 import hashlib
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, List
 
 from cryptography.hazmat.primitives.asymmetric import x25519, ed25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305, AESGCM
 
@@ -161,3 +165,138 @@ def hybrid_decrypt(
     cipher = ChaCha20Poly1305(session_key)
     decrypted_bytes = cipher.decrypt(nonce, ciphertext, None)
     return decrypted_bytes.decode("utf-8")
+
+
+_FIVE_DIGIT_PIN_RE = re.compile(r"^\d{5}$")
+
+
+def validate_recovery_code(code: str) -> str:
+    """Validates that a Messenger-style recovery code is strictly a 5-digit numeric string."""
+    if not isinstance(code, str) or not _FIVE_DIGIT_PIN_RE.match(code):
+        raise DomainValidationError("Recovery code must be a 5-digit number (e.g., '12345').")
+    return code
+
+
+def derive_backup_keys(
+    secret: str,
+    salt: bytes,
+    iterations: int = 310000,
+) -> Tuple[bytes, str]:
+    """
+    Derives a 256-bit Key Encryption Key (KEK) and a domain-separated AuthProof (Base64)
+    from a user's Messenger-style E2EE PIN/password using PBKDF2-HMAC-SHA256 + HKDF-SHA256.
+    """
+    if not secret or not isinstance(secret, str):
+        raise DomainValidationError("Backup secret code/password must be a non-empty string.")
+    if not salt or len(salt) < 16:
+        raise DomainValidationError("Salt must be at least 16 bytes.")
+
+    pbkdf2 = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=iterations,
+    )
+    master_secret = pbkdf2.derive(secret.encode("utf-8"))
+
+    kek = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"ManyGym-E2EE-Backup-KEK-v1",
+    ).derive(master_secret)
+
+    auth_proof_bytes = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"ManyGym-E2EE-Backup-Auth-v1",
+    ).derive(master_secret)
+
+    return kek, b64_encode(auth_proof_bytes)
+
+
+def encrypt_backup_bundle(
+    bundle_data: Dict[str, Any],
+    secret: str,
+    iterations: int = 310000,
+) -> Dict[str, Any]:
+    """
+    Encrypts a JSON-serializable E2EE key bundle (identity private key, search key, etc.)
+    using a Messenger-style PIN/password-derived KEK and ChaCha20-Poly1305.
+    """
+    salt = os.urandom(16)
+    kek, auth_proof = derive_backup_keys(secret=secret, salt=salt, iterations=iterations)
+    nonce = os.urandom(12)
+    plaintext_bytes = json.dumps(bundle_data, sort_keys=True).encode("utf-8")
+    ciphertext = ChaCha20Poly1305(kek).encrypt(nonce, plaintext_bytes, None)
+
+    return {
+        "encrypted_key_bundle": b64_encode(ciphertext),
+        "nonce": b64_encode(nonce),
+        "salt": b64_encode(salt),
+        "kdf_algorithm": "pbkdf2_sha256",
+        "kdf_iterations": iterations,
+        "cipher_algorithm": "chacha20_poly1305",
+        "auth_proof": auth_proof,
+    }
+
+
+def decrypt_backup_bundle(
+    encrypted_bundle_b64: str,
+    nonce_b64: str,
+    salt_b64: str,
+    secret: str,
+    iterations: int = 310000,
+    cipher_algorithm: str = "chacha20_poly1305",
+) -> Dict[str, Any]:
+    """
+    Decrypts an E2EE key backup bundle on a new device using the user's PIN/password.
+    """
+    salt = b64_decode(salt_b64)
+    kek, _ = derive_backup_keys(secret=secret, salt=salt, iterations=iterations)
+    nonce = b64_decode(nonce_b64)
+    ciphertext = b64_decode(encrypted_bundle_b64)
+
+    if cipher_algorithm == "aes_256_gcm":
+        plaintext_bytes = AESGCM(kek).decrypt(nonce, ciphertext, None)
+    else:
+        plaintext_bytes = ChaCha20Poly1305(kek).decrypt(nonce, ciphertext, None)
+
+    return json.loads(plaintext_bytes.decode("utf-8"))
+
+
+_TOKEN_WORD_RE = re.compile(r"[\w]+", re.UNICODE)
+
+
+def normalize_search_keyword(keyword: str) -> str:
+    """Normalizes a search keyword consistently before computing a blinded HMAC search token."""
+    return (keyword or "").strip().lower()
+
+
+def compute_search_token(search_key_bytes: bytes, keyword: str) -> str:
+    """Computes a deterministic blinded HMAC-SHA256 hex digest for a single normalized keyword."""
+    normalized = normalize_search_keyword(keyword)
+    if not normalized:
+        raise DomainValidationError("Search keyword cannot be empty.")
+    return hmac.new(search_key_bytes, normalized.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def compute_search_tokens(search_key_bytes: bytes, text: str, max_tokens: int = 200) -> List[str]:
+    """
+    Tokenizes plaintext on the client and returns unique blinded HMAC-SHA256 tokens
+    for zero-knowledge chat history search.
+    """
+    if not text:
+        return []
+    words = _TOKEN_WORD_RE.findall(text.lower())
+    seen = set()
+    tokens: List[str] = []
+    for word in words:
+        if word in seen:
+            continue
+        seen.add(word)
+        tokens.append(compute_search_token(search_key_bytes, word))
+        if len(tokens) >= max_tokens:
+            break
+    return tokens
