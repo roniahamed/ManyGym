@@ -139,6 +139,7 @@ def search_nearby_gyms(
     category: Optional[str] = None,
     city: Optional[str] = None,
     search: Optional[str] = None,
+    gender_required: Optional[str] = None,
     requesting_user: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -191,6 +192,10 @@ def search_nearby_gyms(
         base_qs = base_qs.filter(
             Q(primary_type=cat) | Q(secondary_type=cat)
         )
+
+    # Gender restriction filter
+    if gender_required and gender_required.strip():
+        base_qs = base_qs.filter(gender_required=gender_required.strip())
 
     # City filter
     if city and city.strip():

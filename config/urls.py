@@ -49,6 +49,8 @@ urlpatterns = [
     path("api/v1/enquiries/", include("apps.enquiries.rest_api.v1.urls")),
     # Universal Notifications System (In-App & FCM Push)
     path("api/v1/notifications/", include("apps.notifications.rest_api.v1.urls")),
+    # Unified Central Search (Gyms, People, Posts, Membership Plans, Amenities)
+    path("api/v1/search/", include("apps.search.rest_api.v1.urls")),
     # Unified Social Follow Endpoint (User & Gym Follow/Unfollow)
     path("api/v1/follows/", UnifiedFollowView.as_view(), name="unified-follow"),
     path("api/v1/follows/<uuid:target_id>/", UnifiedFollowView.as_view(), name="unified-follow-detail"),

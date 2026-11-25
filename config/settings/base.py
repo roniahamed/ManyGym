@@ -60,6 +60,7 @@ LOCAL_APPS = [
     "apps.enquiries",
     "apps.reactions",
     "apps.notifications",
+    "apps.search",
 ]
 
 
